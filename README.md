@@ -37,7 +37,7 @@ we say so and give the CoreHPC-specific version.
 | `docs/05-partitions-and-hardware.md` | Every partition, node type, GPU, time limit and per-user limit |
 | `docs/06-software-modules-conda.md` | Environment modules, the CBI collection, Miniforge/conda on scratch, Jupyter kernels |
 | `docs/07-containers-apptainer.md` | Building `.sif` images (login node, or Docker on a Mac), GPU containers, bind mounts, sharing across the lab |
-| `docs/08-multi-gpu-and-pod.md` | Multi-GPU / multi-node jobs, the POD partition, NCCL + InfiniBand, torchrun |
+| `docs/08-multi-gpu-and-pod.md` | Two-GPU jobs on the `gpu` partition, GPU arrays; POD kept as reference only (not available to us) |
 | `docs/09-sge-to-slurm.md` | Wynton (SGE) to SLURM translation table |
 | `docs/10-policies-support-troubleshooting.md` | Acceptable-use essentials, downtimes, support channels, common errors |
 | `docs/cluster-facts.md` | Live facts captured from the cluster by `scripts/chpc-discover.sh` |
@@ -50,7 +50,7 @@ ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md
 scripts/chpc-stage.sh       rsync files to group scratch through the master session
-templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, gpu, array, mpi, container, pod)
+templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, gpu, multi-gpu, array, mpi, container, local-nvme)
 templates/apptainer/*.def   Example definition files + build helper
 lab/chpc.env                Lab-specific variables (FAC share name, paths)
 lab/README.md               Layout of our shared FAC directory
@@ -66,7 +66,8 @@ lab/bin/*                   Wrapper scripts lab members call from job scripts
   is wiped at quarterly maintenance. Persistent data lives on FAC.
 - FAC (`/mnt/fac/<share>`) is capacity storage: read inputs and write final
   results there, but do not run I/O-heavy jobs against it.
-- Default partition is `cpu`. GPUs need `-p gpu --gres=gpu:1`. The POD needs
-  `--account=ucsf_pod --qos=pod` and prior approval.
+- We have regular access only: partitions `cpu` and the shared `gpu` (1–2 GPUs
+  per node, 8 GPUs / 4 jobs per user). `pod` and `large_gpu` are not enabled
+  for the lab; jobs naming them are rejected.
 - Support: <https://tiny.ucsf.edu/Gethpc> (ticket), CoreHPC user Slack,
   ARS office hours Tuesdays 10:10–11:00.

@@ -7,6 +7,11 @@ holds the last capture.
 
 ## Partitions
 
+**Our access:** `cpu` and `gpu` only. `pod` needs a per-lab request and
+consultation, `large_gpu` is condo-only until fall 2026, and `community`
+is planned for academic users from fall 2026. The rest of the table is for
+reference.
+
 | Partition | Max walltime | Nodes | CPUs/node | RAM/node | CPU | GPUs/node | Notes |
 |-----------|--------------|-------|-----------|----------|-----|-----------|-------|
 | `cpu` (default) | 96 h | gcpu2-[03-16] (14) | 336 | 1.5 TB | 2× AMD EPYC 9634 | none | all CPU work incl. MPI; InfiniBand |

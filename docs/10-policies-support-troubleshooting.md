@@ -56,7 +56,7 @@ FAC beforehand. Emergency outages are announced on Slack/email.
 | Files vanished from scratch | >30 days old or maintenance purge; restore from FAC |
 | Job PENDING with `(Resources)` / `(Priority)` | normal queueing; `sprio -j`; ask for less, or use `community` |
 | `(QOSMaxJobsPerUserLimit)` / `(AssocMaxJobsLimit)` | per-user limits (doc 05) |
-| `Invalid account or account/partition combination` | POD needs `--account=ucsf_pod --qos=pod` and prior approval |
+| `Invalid account or account/partition combination` | you targeted `pod`/`large_gpu`; the lab only has `cpu` and `gpu` |
 | Job killed at exactly the time limit | add `--time`, checkpoint, or use `community` (336 h) |
 | `OUT_OF_MEMORY` in `sacct` | raise `--mem`; check `MaxRSS` |
 | `module: command not found` in a job | script does not start with `#!/bin/bash` or purges the profile; use `bash -l` or `source /etc/profile.d/lmod.sh` |

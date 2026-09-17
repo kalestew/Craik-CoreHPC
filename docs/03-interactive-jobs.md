@@ -34,7 +34,7 @@ module load nvidia-hpc                    # CUDA toolkit / compilers if needed
 
 Pick a GPU model: `--gres=gpu:nvidia_h100_nvl:1` (see doc 05 for names).
 
-POD (needs approval): add `--account=ucsf_pod --qos=pod -p pod --gres=gpu:8`.
+We only have `cpu` and `gpu`; `pod` and `large_gpu` are not enabled for the lab.
 
 ## Keep the session alive across disconnects
 

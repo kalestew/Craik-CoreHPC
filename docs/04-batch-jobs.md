@@ -8,12 +8,12 @@ pieces. Wiki sources: Access Primer, Submission Examples, Advanced Topics.
 ```bash
 #!/bin/bash
 #SBATCH --job-name=myjob
-#SBATCH --partition=cpu              # cpu (default) | gpu | pod | large_gpu | community | community_short
+#SBATCH --partition=cpu              # cpu (default) | gpu   (pod / large_gpu / community: not enabled for us)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                   # processes (MPI ranks); = --nodes for one task per node
 #SBATCH --cpus-per-task=8            # threads per process
 #SBATCH --mem=32G                    # per node (or --mem-per-cpu=4G)
-#SBATCH --time=04:00:00              # D-HH:MM:SS; partition max: 96 h (cpu/gpu/pod), 24 h large_gpu, 336 h community
+#SBATCH --time=04:00:00              # D-HH:MM:SS; max 96 h on cpu and gpu
 #SBATCH --output=logs/%x_%j.out      # %x job name, %j job id, %A/%a array id/task
 #SBATCH --error=logs/%x_%j.err       # omit to merge into --output
 #SBATCH --mail-type=END,FAIL         # optional
@@ -46,8 +46,8 @@ srun python train.py
 ```
 
 Multiple GPUs on one node: `--gres=gpu:2` (gpu partition nodes have 1–2).
-Bind each process to its closest GPU: `--gpu-bind=closest`. For 8+ GPUs
-and multi-node see doc 08 (POD, `--account=ucsf_pod --qos=pod`).
+Bind each process to its closest GPU: `--gpu-bind=closest`. See doc 08 for
+two-GPU jobs. The lab has no POD or large_gpu access.
 
 ## Job arrays
 
