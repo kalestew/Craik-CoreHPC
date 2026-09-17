@@ -3,5 +3,7 @@
 *.tar
 *.log
 .DS_Store
+# per-machine / per-project overrides read by env.sh (see README)
+/chpc.env.local
 lab/chpc.env.local
 __pycache__/

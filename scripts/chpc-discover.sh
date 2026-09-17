@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Capture live CoreHPC facts into docs/cluster-facts.md.
-# Run from your laptop (uses the primed "chpc" SSH alias):
-#   scripts/chpc-discover.sh
-# or on the login node:
+# Capture live CoreHPC facts as Markdown.
+# From a laptop, through the primed SSH alias ($CHPC_HOST, default chpc):
+#   chpc-discover.sh                  # writes $CHPC_REPO/docs/cluster-facts.md
+#   chpc-discover.sh --out FILE       # write elsewhere, e.g. into the project
+#                                     # that embeds this repo; "-" = stdout
+#   CHPC_FACTS_OUT=FILE chpc-discover.sh     # same, via the environment
+# On the login node:
 #   bash chpc-discover.sh --local > cluster-facts.md
 set -uo pipefail
 
@@ -45,13 +48,32 @@ section "My recent jobs (7 days)"; code sacct -u "$USER" -S "$(date -d '7 days a
 REMOTE
 }
 
-if [[ "${1:-}" == "--local" ]]; then
+run_local=0; out=${CHPC_FACTS_OUT:-}
+while [[ $# -gt 0 ]]; do
+  case $1 in
+    --local) run_local=1 ;;
+    --out) out=${2:?--out needs a path}; shift ;;
+    --out=*) out=${1#--out=} ;;
+    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    *) echo "unknown option: $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [[ $run_local == 1 ]]; then
   bash -l -c "$(remote_script)"
   exit
 fi
 
-here=$(cd "$(dirname "$0")/.." && pwd)
-out="$here/docs/cluster-facts.md"
-ssh -O check chpc >/dev/null 2>&1 || "$here/scripts/chpc-prime.sh"
-ssh chpc 'bash -l -s' <<<"$(remote_script)" > "$out.tmp" && mv "$out.tmp" "$out"
+_s=${BASH_SOURCE[0]}; while [ -L "$_s" ]; do _d=$(cd "$(dirname "$_s")" && pwd); _s=$(readlink "$_s"); [[ $_s == /* ]] || _s=$_d/$_s; done
+# shellcheck source=../env.sh
+source "$(cd "$(dirname "$_s")/.." && pwd)/env.sh"
+: "${out:=$CHPC_REPO/docs/cluster-facts.md}"
+
+ssh -O check "$CHPC_HOST" >/dev/null 2>&1 || "$CHPC_REPO/scripts/chpc-prime.sh"
+if [[ $out == - ]]; then
+  exec ssh "$CHPC_HOST" 'bash -l -s' <<<"$(remote_script)"
+fi
+mkdir -p "$(dirname "$out")"
+ssh "$CHPC_HOST" 'bash -l -s' <<<"$(remote_script)" > "$out.tmp" && mv "$out.tmp" "$out"
 echo "wrote $out"

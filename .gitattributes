@@ -1,0 +1,9 @@
+# Scripts and configs end up on a Linux cluster: keep LF everywhere, on every OS.
+* text=auto eol=lf
+*.sh        text eol=lf
+*.env       text eol=lf
+*.sbatch    text eol=lf
+*.def       text eol=lf
+lab/bin/*   text eol=lf
+*.sif       binary
+*.tar       binary

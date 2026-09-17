@@ -8,7 +8,8 @@
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
 mkdir -p logs
-source /mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env 2>/dev/null || true
+CHPC_ENV=${CHPC_ENV:-/mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env}   # pinned copy (sbatch --export=ALL) or the FAC copy
+[ -f "$CHPC_ENV" ] && source "$CHPC_ENV"                               # optional for this job type
 module purge
 module load CBI miniforge3
 source "$_CONDA_ROOT/etc/profile.d/conda.sh"

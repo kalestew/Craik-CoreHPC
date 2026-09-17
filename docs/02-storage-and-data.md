@@ -41,7 +41,7 @@ Notes:
    data/        reference data, inputs
    results/     final outputs, one dir per project
 /mnt/scratch/group/CX500146_DS1/       hot copies for running jobs
-   containers/  rsync'd from FAC (scripts/stage)
+   containers/  rsync'd from FAC (lab/bin/chpc-stage-containers)
    <project>/   working dirs
 /mnt/scratch/user/$USER/
    envs/ pkgs/  conda (see doc 06)

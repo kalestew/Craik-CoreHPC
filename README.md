@@ -27,6 +27,84 @@ we say so and give the CoreHPC-specific version.
 8. Run lab software from shared containers in `$CHPC_LAB/containers`
    (see `docs/07-containers-apptainer.md` and `lab/README.md`).
 
+From any checkout, `source env.sh` (bash or zsh, any path) puts the
+`chpc-*.sh` scripts and `lab/bin` on `PATH` and exports the `CHPC_*`
+variables. It is also how other repos use this one, see below.
+
+## Using it from another repo (git submodule)
+
+This repo is built to be embedded. Nothing in it depends on where it is
+checked out, and per-project settings live in the project, not here.
+
+```bash
+# in your project
+git submodule add https://git.kalestew.io/ucsf/craik-lab/Craik-CoreHPC.git corehpc
+git commit -m "Add CoreHPC guide as submodule"
+
+# in fresh clones of your project (or: git clone --recurse-submodules ...)
+git submodule update --init
+
+# take a newer guide
+git submodule update --remote corehpc && git commit -am "Bump corehpc"
+```
+
+Use the https URL in `.gitmodules` so anyone with read access can clone the
+project without a GitLab SSH key, the login node included. Projects hosted
+in the same `ucsf/craik-lab` group can use the relative URL
+`../Craik-CoreHPC.git` instead. To push changes to the guide from inside a
+project, point the submodule's origin at the SSH URL:
+`git -C corehpc remote set-url origin git@git.kalestew.io:ucsf/craik-lab/Craik-CoreHPC.git`.
+
+Then, on a laptop or on the cluster:
+
+```bash
+source corehpc/env.sh                      # any path, bash or zsh
+chpc-prime.sh                              # Duo once; scripts/ and lab/bin/ are now on PATH
+chpc-stage.sh ./inputs/ "$CHPC_GROUP_SCRATCH/myproj/inputs/"
+cp corehpc/templates/slurm/gpu.sbatch jobs/train.sbatch   # copy templates out; edit the copy
+sbatch jobs/train.sbatch                   # the job sources the pinned chpc.env through $CHPC_ENV
+chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your project, not the submodule
+```
+
+`env.sh` exports:
+
+| Variable | Meaning |
+|----------|---------|
+| `CHPC_REPO` | this checkout, symlinks resolved |
+| `CHPC_PROJECT` | the repo that embeds it (git superproject), else `CHPC_REPO` |
+| `CHPC_HOST`, `CHPC_BASTION` | SSH aliases, default `chpc` and `chpc-bastion` |
+| `CHPC_USER` | campus username: from `ssh -G $CHPC_HOST` off-cluster, `$USER` on it |
+| `CHPC_ENV` | path of `lab/chpc.env` in this checkout; `sbatch --export=ALL` carries it into jobs |
+| `CHPC_ON_CLUSTER` | `1` on a CoreHPC node, `0` elsewhere |
+| `CHPC_*` paths | FAC, group scratch, user scratch, containers (from `lab/chpc.env`) |
+
+Off-cluster only the paths are set. The cache and conda redirections in
+`lab/chpc.env` apply on cluster nodes, so sourcing it on a laptop leaves
+pip, conda and Hugging Face alone.
+
+Per-project overrides go in `chpc.env.local` at the root of *your* repo
+(or a file named by `CHPC_ENV_LOCAL`). It is sourced before `lab/chpc.env`,
+so set inputs there, not derived paths:
+
+```bash
+FAC_SHARE=CX500146_DS1     # a different FAC share
+CHPC_HOST=chpc             # your SSH alias for the login node
+CHPC_USER=jdoe             # campus username, if ssh -G cannot tell
+```
+
+Suggested layout:
+
+```
+myproject/
+├── corehpc/            this repo, pinned to a commit
+├── chpc.env.local      optional overrides (above)
+├── jobs/*.sbatch       copied from corehpc/templates/slurm and edited
+└── ...
+```
+
+Do not edit files inside the submodule from a project; change them here and
+bump the pin.
+
 ## Contents
 
 | Doc | What it covers |
@@ -47,13 +125,14 @@ we say so and give the CoreHPC-specific version.
 ## Repo layout
 
 ```
+env.sh                      Source me: CHPC_* variables, scripts on PATH; standalone or submodule
 ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
-scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md
+scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
 scripts/chpc-stage.sh       rsync files to group scratch through the master session
 templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, gpu, multi-gpu, array, mpi, container, local-nvme)
 templates/apptainer/*.def   Example definition files + build helper
-lab/chpc.env                Lab-specific variables (FAC share name, paths)
+lab/chpc.env                Lab-specific variables (FAC share name, paths); copied to the FAC share
 lab/README.md               Layout of our shared FAC directory
 lab/bin/*                   Wrapper scripts lab members call from job scripts
 ```

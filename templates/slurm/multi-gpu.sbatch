@@ -11,7 +11,7 @@
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
 mkdir -p logs
-source /mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env
+source "${CHPC_ENV:-/mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env}"   # CHPC_ENV: pinned copy, via sbatch --export=ALL
 IMAGE="$CHPC_CONTAINERS/pytorch_24.01.sif"
 export OMP_NUM_THREADS=8
 

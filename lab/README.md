@@ -32,7 +32,7 @@ read/write), with a hot mirror on group scratch
 ## Bootstrapping it (once, by whoever owns the share)
 
 ```bash
-source lab/chpc.env             # after editing FAC_SHARE
+source env.sh                   # repo root; edit FAC_SHARE in lab/chpc.env first
 mkdir -p $CHPC_LAB/{bin,containers/defs,envs,data,slurm,results}
 mkdir -p $CHPC_GROUP_SCRATCH/containers
 cp lab/chpc.env $CHPC_LAB/chpc.env
@@ -51,6 +51,10 @@ Add to `~/.bashrc` on the cluster:
 
 That puts `$CHPC_LAB/bin` on `PATH`, points Apptainer caches and conda at
 scratch, and sets `APPTAINER_BIND` so containers see scratch and FAC.
+
+A project that carries this repo as a submodule can instead
+`source <project>/corehpc/env.sh` on the login node and get the pinned copy
+of `chpc.env`, plus the `chpc-*` scripts, without touching the FAC copy.
 
 ## Publishing a new container
 
