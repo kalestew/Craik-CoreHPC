@@ -4,6 +4,4 @@
 *.log
 .DS_Store
 lab/chpc.env.local
-# unrelated file that happened to be in this folder
-catg-hinge-program.html
 __pycache__/
