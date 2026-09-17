@@ -1,0 +1,45 @@
+# ~/.ssh/config — UCSF CoreHPC
+# Replace <campus-username> with your short campus login.
+#
+# Prime once per session (after VPN is up):   ssh chpc hostname   -> answer Duo
+# Then every ssh/scp/rsync/VS Code to "chpc" reuses the master sockets (10 h).
+# Stale sockets after a VPN drop:  ssh -O exit chpc-bastion ; ssh -O exit chpc
+
+Host chpc-bastion
+  HostName chpc-ucsf-bastion-vm1.corehpc.ucsf.edu
+  User <campus-username>
+  IdentityFile ~/.ssh/chpc
+  AddKeysToAgent yes
+  UseKeychain yes
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%r@%h-%p
+  ControlPersist 10h
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+
+# Fallback if bastion vm1 is down: ssh chpc-bastion2, or point chpc's
+# ProxyJump here temporarily.
+Host chpc-bastion2
+  HostName chpc-ucsf-bastion-vm2.corehpc.ucsf.edu
+  User <campus-username>
+  IdentityFile ~/.ssh/chpc
+  AddKeysToAgent yes
+  UseKeychain yes
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%r@%h-%p
+  ControlPersist 10h
+  ServerAliveInterval 60
+  ServerAliveCountMax 3
+
+Host chpc
+  HostName chpc-ucsf-login-vm1
+  User <campus-username>
+  IdentityFile ~/.ssh/chpc
+  ProxyJump chpc-bastion
+  AddKeysToAgent yes
+  UseKeychain yes
+  ControlMaster auto
+  ControlPath ~/.ssh/cm-%r@%h-%p
+  ControlPersist 10h
+  ServerAliveInterval 60
+  ServerAliveCountMax 3

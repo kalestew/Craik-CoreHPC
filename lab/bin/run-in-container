@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Generic wrapper: copy this to $CHPC_LAB/bin/<tool>, set IMAGE (and GPU=1 if
+# the tool needs --nv). Works identically on the login node, in salloc, in sbatch.
+#   mytool --help
+#   srun mytool input.fa
+# Override image: MYTOOL_IMAGE=/path/other.sif mytool ...
+set -euo pipefail
+IMAGE="${IMAGE:-mytool_1.0.sif}"        # file name inside $CHPC_CONTAINERS, or absolute path
+GPU="${GPU:-0}"                          # 1 = pass --nv
+EXTRA_BIND="${EXTRA_BIND:-}"             # e.g. "$CHPC_LAB/data:/refdata:ro"
+
+if [ -z "${CHPC_CONTAINERS:-}" ]; then
+  for f in "/mnt/fac/${FAC_SHARE:-}/chpc/chpc.env" "$HOME/chpc.env"; do
+    [ -f "$f" ] && source "$f" && break
+  done
+fi
+tool=$(basename "$0")
+img_var="$(echo "$tool" | tr '[:lower:]-' '[:upper:]_')_IMAGE"
+IMAGE="${!img_var:-$IMAGE}"
+case "$IMAGE" in /*) sif="$IMAGE" ;; *) sif="${CHPC_CONTAINERS:?set CHPC_CONTAINERS or source chpc.env}/$IMAGE" ;; esac
+[ -r "$sif" ] || { echo "$tool: image not found: $sif" >&2; exit 127; }
+
+args=(exec)
+[ "$GPU" = "1" ] && args+=(--nv)
+args+=(--bind /mnt/scratch,/mnt/fac)
+[ -n "$EXTRA_BIND" ] && args+=(--bind "$EXTRA_BIND")
+exec apptainer "${args[@]}" "$sif" "$@"

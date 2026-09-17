@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Mirror $CHPC_LAB/containers/*.sif to group scratch for fast job start-up.
+# Run after publishing a new image and after each quarterly scratch purge.
+set -euo pipefail
+: "${CHPC_LAB:?source chpc.env first}" "${CHPC_GROUP_SCRATCH:?source chpc.env first}"
+mkdir -p "$CHPC_GROUP_SCRATCH/containers"
+rsync -av --include='*.sif' --exclude='*' "$CHPC_LAB/containers/" "$CHPC_GROUP_SCRATCH/containers/"
+echo "mirrored to $CHPC_GROUP_SCRATCH/containers"

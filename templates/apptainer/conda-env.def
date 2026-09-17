@@ -1,0 +1,28 @@
+# Freeze a conda environment into a container. Build on the login node:
+#   apptainer build mytool_1.0.sif conda-env.def
+# environment.yml must sit next to this file.
+Bootstrap: docker
+From: condaforge/miniforge3:latest
+
+%files
+    environment.yml /opt/environment.yml
+
+%post
+    . /opt/conda/etc/profile.d/conda.sh
+    mamba env create -f /opt/environment.yml -p /opt/env
+    mamba clean -afy
+    echo ". /opt/conda/etc/profile.d/conda.sh; conda activate /opt/env" >> /etc/bash.bashrc
+
+%environment
+    export PATH=/opt/env/bin:/opt/conda/bin:$PATH
+    export PYTHONNOUSERSITE=1
+    export LC_ALL=C.UTF-8
+
+%runscript
+    exec "$@"
+
+%test
+    python -c "import sys; print(sys.version)"
+
+%labels
+    Author Craik Lab
