@@ -14,6 +14,7 @@ read/write), with a hot mirror on group scratch
 ├── moejobs/                                existing MOE job directory
 ├── bin/                                    wrappers; add to PATH via chpc.env
 │   ├── chpc-stage-containers               rsync containers/ -> group scratch
+│   ├── chpc-fac-fixacl                     repair the owner-deny ACL on things created at the share root
 │   └── <tool>                              one per container (see lab/bin/run-in-container)
 ├── containers/
 │   ├── README.md                           table of images
@@ -29,7 +30,12 @@ read/write), with a hot mirror on group scratch
 └── <project>/                              working dirs, intermediates, logs
 ```
 
-## Bootstrapping it (once, by whoever owns the share)
+## Bootstrapping it (done 2026-09-17)
+
+The layout below exists on the share with corrected ACLs. Do not create new
+top-level directories from the cluster without running `chpc-fac-fixacl`
+on them afterwards (see the FAC ACL quirk in docs/02). For the record, the
+steps were:
 
 ```bash
 source env.sh                   # repo root; edit FAC_SHARE in lab/chpc.env first

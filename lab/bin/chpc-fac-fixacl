@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+# Repair the NFSv4 ACL on files/dirs created on the FAC share from CoreHPC.
+#
+# Why: the share root's inheritable ACL contains "D:fdi:OWNER@:rwaDx", a DENY
+# for the owner. Anything you create directly under /mnt/fac/<share>/ (or
+# under a directory that inherited that entry) ends up as d---rwx--- or
+# ----rw----: your lab-mates can use it, you cannot, not even read it back.
+# Directories created through SMB (software/, moejobs/) carry a sane ACL.
+#
+# This script copies the ACL of a known-good template (default: the share's
+# software/ dir for directories, kja_test.txt for files) onto the given
+# paths, recursively, and sets the lab group. The owner always retains the
+# right to change ACLs on its own objects, so this works without admin help.
+#
+# Usage: chpc-fac-fixacl <path>...          (paths on /mnt/fac/<share>)
+set -euo pipefail
+: "${FAC_SHARE:=CX500146_DS1}"
+share="/mnt/fac/$FAC_SHARE"
+dir_tpl="${CHPC_FAC_ACL_DIR_TEMPLATE:-$share/software}"
+file_tpl="${CHPC_FAC_ACL_FILE_TEMPLATE:-$share/kja_test.txt}"
+group="${CHPC_FAC_GROUP:-sec_fac_$(echo "$FAC_SHARE" | tr '[:upper:]' '[:lower:]')}"
+command -v nfs4_setfacl >/dev/null || { echo "nfs4_setfacl not found (run on a CoreHPC node)" >&2; exit 1; }
+[ $# -ge 1 ] || { echo "usage: $(basename "$0") <path>..." >&2; exit 1; }
+dir_acl=$(nfs4_getfacl "$dir_tpl" | grep -v '^#')
+file_acl=$(nfs4_getfacl "$file_tpl" | grep -v '^#')
+n=0
+for p in "$@"; do
+  find "$p" -print0 | while IFS= read -r -d '' x; do
+    if [ -d "$x" ]; then printf '%s\n' "$dir_acl" | nfs4_setfacl -S - "$x"
+    else printf '%s\n' "$file_acl" | nfs4_setfacl -S - "$x"; fi
+    chgrp "$group" "$x" 2>/dev/null || true
+  done
+  n=$((n+1))
+done
+echo "fixed ACLs under $n path(s); owner and group $group now have full access"

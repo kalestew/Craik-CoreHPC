@@ -20,6 +20,18 @@ Notes:
 - `/mnt/fac` lists every share on campus, but only ours mounts on access.
 - FAC keeps snapshots: `/mnt/fac/CX500146_DS1/.qsnaps/` (managed by the FAC
   team; look there before asking for a restore).
+- **FAC ACL quirk (verified 2026-09-17):** the share root's inheritable NFSv4
+  ACL contains a DENY for `OWNER@`. Anything you create directly at the top
+  level from the cluster comes out as `d---rwx---` / `----rw----`: the lab
+  group can use it, but you, the owner, cannot, not even `cat` your own
+  file. Directories that came in through SMB (`software/`, `moejobs/`) and
+  the layout directories we bootstrapped (`bin/`, `containers/`, `envs/`,
+  `data/`, `slurm/`, `results/`) carry a correct ACL, and everything created
+  inside them is fine. So work inside those, never at the root. If you did
+  create something at the root, `chpc-fac-fixacl <path>` (in `$CHPC_LAB/bin`)
+  repairs it recursively. The permanent fix is for the FAC team to remove
+  `D:fdi:OWNER@:rwaDx` from the share root; ask via
+  <https://tiny.ucsf.edu/getfac>.
 - FAC costs ~$52/TB/yr plus setup. A recharge for scratch data kept >30 days
   (~$428/TiB/yr) is planned. Home cannot be expanded for free.
 - Quotas are soft/hard with a 7-day grace period. Check with `userquota`

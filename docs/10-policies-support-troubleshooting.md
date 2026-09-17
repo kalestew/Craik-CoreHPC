@@ -54,6 +54,7 @@ FAC beforehand. Emergency outages are announced on Slack/email.
 | Duo prompt never appears | ControlMaster already open (good) or VS Code swallowed it: prime from a terminal |
 | `Disk quota exceeded` in home | 20 GiB limit: move conda (`~/.conda`, `~/.condarc` dirs), `~/.cache`, `~/.apptainer`, `~/.vscode-server` to scratch; `userquota` |
 | Files vanished from scratch | >30 days old or maintenance purge; restore from FAC |
+| `Permission denied` reading or entering something you just created on `/mnt/fac/CX500146_DS1` | FAC owner-deny ACL at the share root (doc 02); create things inside the layout dirs, or run `chpc-fac-fixacl <path>` |
 | Job PENDING with `(Resources)` / `(Priority)` | normal queueing; `sprio -j`; ask for less, or use `community` |
 | `(QOSMaxJobsPerUserLimit)` / `(AssocMaxJobsLimit)` | per-user limits (doc 05) |
 | `Invalid account or account/partition combination` / `Invalid qos specification` | you targeted `pod`/`large_gpu`; our account `hpc_core` covers `cpu`, `gpu`, `community`, `community_short` |
