@@ -8,7 +8,7 @@
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
 mkdir -p logs
-source /mnt/fac/${FAC_SHARE:-CX000000_DS0}/chpc/chpc.env 2>/dev/null || true
+source /mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env 2>/dev/null || true
 module purge
 module load CBI miniforge3
 source "$_CONDA_ROOT/etc/profile.d/conda.sh"

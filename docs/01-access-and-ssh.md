@@ -81,7 +81,7 @@ If `ssh-copy-id` is unavailable:
 scripts/chpc-prime.sh          # = ssh chpc hostname; answers Duo, opens the master sockets
 ssh chpc                       # shell on login node
 scp file.txt chpc:/mnt/scratch/user/$USER/
-rsync -avP data/ chpc:/mnt/scratch/group/<FAC_SHARE>/data/
+rsync -avP data/ chpc:/mnt/scratch/group/CX500146_DS1/data/
 ssh chpc 'squeue -u $USER'
 ```
 

@@ -56,7 +56,10 @@ FAC beforehand. Emergency outages are announced on Slack/email.
 | Files vanished from scratch | >30 days old or maintenance purge; restore from FAC |
 | Job PENDING with `(Resources)` / `(Priority)` | normal queueing; `sprio -j`; ask for less, or use `community` |
 | `(QOSMaxJobsPerUserLimit)` / `(AssocMaxJobsLimit)` | per-user limits (doc 05) |
-| `Invalid account or account/partition combination` | you targeted `pod`/`large_gpu`; the lab only has `cpu` and `gpu` |
+| `Invalid account or account/partition combination` / `Invalid qos specification` | you targeted `pod`/`large_gpu`; our account `hpc_core` covers `cpu`, `gpu`, `community`, `community_short` |
+| Job killed after exactly 1 hour | you did not pass `--time`; the default is 1 h on every partition |
+| Apptainer build: `exec /.singularity.d/libs/fakeroot failed` | Alpine/musl base image; add `--ignore-fakeroot-command` |
+| Apptainer build: `--fakeroot` fails | not enabled on CoreHPC; drop it |
 | Job killed at exactly the time limit | add `--time`, checkpoint, or use `community` (336 h) |
 | `OUT_OF_MEMORY` in `sacct` | raise `--mem`; check `MaxRSS` |
 | `module: command not found` in a job | script does not start with `#!/bin/bash` or purges the profile; use `bash -l` or `source /etc/profile.d/lmod.sh` |

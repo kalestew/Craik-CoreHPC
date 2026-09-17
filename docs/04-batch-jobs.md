@@ -8,12 +8,12 @@ pieces. Wiki sources: Access Primer, Submission Examples, Advanced Topics.
 ```bash
 #!/bin/bash
 #SBATCH --job-name=myjob
-#SBATCH --partition=cpu              # cpu (default) | gpu   (pod / large_gpu / community: not enabled for us)
+#SBATCH --partition=cpu              # cpu (default) | gpu | community | community_short   (pod, large_gpu: not ours)
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                   # processes (MPI ranks); = --nodes for one task per node
 #SBATCH --cpus-per-task=8            # threads per process
 #SBATCH --mem=32G                    # per node (or --mem-per-cpu=4G)
-#SBATCH --time=04:00:00              # D-HH:MM:SS; max 96 h on cpu and gpu
+#SBATCH --time=04:00:00              # D-HH:MM:SS; default 1 h; max 96 h cpu/gpu, 14 d community, 1 h community_short
 #SBATCH --output=logs/%x_%j.out      # %x job name, %j job id, %A/%a array id/task
 #SBATCH --error=logs/%x_%j.err       # omit to merge into --output
 #SBATCH --mail-type=END,FAIL         # optional
@@ -127,6 +127,9 @@ Node state codes: `idle`, `mix` (partly allocated), `alloc`, `drain`/`drng`
 ## Good practice (CoreHPC's list plus ours)
 
 - Test interactively, then submit. Use `community_short` (1 h) for smoke tests.
+- Serial or embarrassingly parallel CPU work belongs on `community`: same
+  QoS we already have, 14-day limit, and the queue is empty while `cpu`
+  routinely has ~1000 pending jobs. Keep MPI on `cpu` (InfiniBand).
 - Request what you need with a buffer; over-asking slows your start and
   hurts fair-share. Check `sacct ... MaxRSS,TotalCPU` afterwards and tune.
 - Use arrays, not loops of `sbatch`.

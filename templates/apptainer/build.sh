@@ -9,9 +9,9 @@ name=${2:-$(basename "${def%.def}")}
 export APPTAINER_CACHEDIR APPTAINER_TMPDIR
 out="/mnt/scratch/user/$USER/apptainer/${name}.sif"
 mkdir -p "$APPTAINER_CACHEDIR" "$APPTAINER_TMPDIR" "$(dirname "$out")"
-if ! apptainer build "$out" "$def"; then
-  echo "plain build failed; retrying with --fakeroot" >&2
-  apptainer build --fakeroot "$out" "$def"
+if ! apptainer build --force "$out" "$def"; then
+  echo "plain build failed; retrying with --ignore-fakeroot-command (needed for Alpine/musl bases)" >&2
+  apptainer build --force --ignore-fakeroot-command "$out" "$def"
 fi
 echo "built $out"
 echo "test:    apptainer exec $out <cmd>"

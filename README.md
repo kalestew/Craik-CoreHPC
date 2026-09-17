@@ -17,9 +17,10 @@ we say so and give the CoreHPC-specific version.
 3. Install `ssh/config.example` into `~/.ssh/config`, create a key, and follow
    `docs/01-access-and-ssh.md`. After that, `ssh chpc` gets you to the login
    node with one Duo push per session.
-4. Fill in `lab/chpc.env` (FAC share name) and `source` it on the cluster.
-5. Never compute on the login node or on `/mnt/fac`. Work in
-   `/mnt/scratch/user/$USER` or `/mnt/scratch/group/<FAC_SHARE>`.
+4. Our FAC share is `/mnt/fac/CX500146_DS1` (5 TB). `source /mnt/fac/CX500146_DS1/chpc.env`
+   on the cluster (copy of `lab/chpc.env`).
+5. Never compute on the login node or against `/mnt/fac`. Work in
+   `/mnt/scratch/user/$USER` or `/mnt/scratch/group/CX500146_DS1` (both exist).
 6. Get a shell on a compute node: `salloc -p cpu -c 4 --mem 8G -t 2:00:00`
    (see `docs/03-interactive-jobs.md`).
 7. Submit batch work from `templates/slurm/` (see `docs/04-batch-jobs.md`).
@@ -40,7 +41,7 @@ we say so and give the CoreHPC-specific version.
 | `docs/08-multi-gpu-and-pod.md` | Two-GPU jobs on the `gpu` partition, GPU arrays; POD kept as reference only (not available to us) |
 | `docs/09-sge-to-slurm.md` | Wynton (SGE) to SLURM translation table |
 | `docs/10-policies-support-troubleshooting.md` | Acceptable-use essentials, downtimes, support channels, common errors |
-| `docs/cluster-facts.md` | Live facts captured from the cluster by `scripts/chpc-discover.sh` |
+| `docs/cluster-facts.md` | Live facts captured from the cluster by `scripts/chpc-discover.sh` (last: 2026-09-17) |
 | `docs/wiki-sources.md` | Index of the wiki pages this guide is built from |
 
 ## Repo layout
@@ -66,8 +67,14 @@ lab/bin/*                   Wrapper scripts lab members call from job scripts
   is wiped at quarterly maintenance. Persistent data lives on FAC.
 - FAC (`/mnt/fac/<share>`) is capacity storage: read inputs and write final
   results there, but do not run I/O-heavy jobs against it.
-- We have regular access only: partitions `cpu` and the shared `gpu` (1–2 GPUs
-  per node, 8 GPUs / 4 jobs per user). `pod` and `large_gpu` are not enabled
-  for the lab; jobs naming them are rejected.
+- Our account is `hpc_core` with QoS for `cpu`, `gpu`, `community` and
+  `community_short` (verified with `sacctmgr`). `pod` and `large_gpu` are
+  restricted to named accounts; jobs naming them are rejected.
+- `gpu` allows 8 GPUs and 21 jobs per user. `cpu` allows 2048 CPUs / 8 nodes.
+  `community` allows 768 CPUs / 8 nodes with a 14-day walltime and is usually
+  nearly empty while `cpu` has a deep queue: put serial and HTC work there.
+- Every partition defaults to 1 hour; always pass `--time`. Default memory is
+  4 GB per CPU (`cpu`, `community`) and 6 GB per CPU (`gpu`, which also gives
+  32 CPUs per GPU by default).
 - Support: <https://tiny.ucsf.edu/Gethpc> (ticket), CoreHPC user Slack,
   ARS office hours Tuesdays 10:10–11:00.

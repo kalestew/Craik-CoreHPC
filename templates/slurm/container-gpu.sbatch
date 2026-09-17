@@ -8,7 +8,7 @@
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
 mkdir -p logs
-source /mnt/fac/${FAC_SHARE:-CX000000_DS0}/chpc/chpc.env
+source /mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env
 IMAGE="$CHPC_CONTAINERS/pytorch_24.01.sif"
 
 srun -u apptainer exec --nv --bind /mnt/scratch,/mnt/fac "$IMAGE" python train.py

@@ -8,7 +8,7 @@
 # Pattern for I/O-heavy work: stage to node-local NVMe, compute, copy results back.
 set -euo pipefail
 mkdir -p logs
-source /mnt/fac/${FAC_SHARE:-CX000000_DS0}/chpc/chpc.env
+source /mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env
 IN="$CHPC_GROUP_SCRATCH/project/inputs"
 OUT="$CHPC_GROUP_SCRATCH/project/results/$SLURM_JOB_ID"
 JOBTMP="/tmp/$USER/job_$SLURM_JOB_ID"

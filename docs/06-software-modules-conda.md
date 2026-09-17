@@ -17,24 +17,46 @@ module show <name>           # what a module sets
 Loaded by default at login (from the primer's listing): `gnu14/14.2.0`,
 `openmpi5/5.0.7`, `hwloc`, `ucx`, `libfabric`, `autotools`, `prun`, `ohpc`.
 
-Top-level collections seen in `/etc/modulefiles`: `CBI`, `RAD`, `Sali`,
-`nvidia-hpc`. These are nested collections: load one, then `module avail`
-again to see what it adds. `CBI` (Computational Biology & Informatics, the
-same group that ran Wynton's CBI modules) provides Miniforge3 and many
-bioinformatics tools. `Sali` is the Sali lab's collection (likely IMP,
-modeller, etc.). `nvidia-hpc` provides the NVIDIA HPC SDK (`nvhpc`,
-`nvhpc-hpcx` for CUDA-aware MPI, CUDA toolkits). `RAD` is radiology's.
+Top-level collections in `/etc/modulefiles`: `CBI`, `RAD`, `Sali`,
+`nvidia-hpc`. These are nested: load one, then `module avail` again.
+Full lists are in `docs/cluster-facts.md` (captured 2026-09-17). Highlights:
 
-GPU jobs: `module load nvidia-hpc` then `module load nvhpc-hpcx` if you
-need CUDA compilers or CUDA-aware MPI. A conda env or container that ships
-its own CUDA runtime only needs the driver, which is always present.
+- **CBI** (`/mnt/software/cbi`, the group that ran Wynton's CBI stack):
+  `miniforge3` (25.11 to 26.3.2-3, default 26.3.2-3), `python/3.14.6`,
+  `r/4.5.3`, `julia/1.13`, `matlab/R2025b`, `uv`, `snakemake/9.27`,
+  `nextflow/26.04`, `samtools`, `bcftools`, `htslib`, `bwa`, `bowtie2`,
+  `star`, `salmon`, `kallisto`, `gatk/4.7`, `picard`, `bedtools2`,
+  `blast/2.17`, `cellranger/10.1`, `sratoolkit`, `cutadapt`, `trimgalore`,
+  `fastqc`, `globus-cli`, `rclone`, `restic`, `aws-cli`, `hdf5`, `netcdf`,
+  `gsl`, `openjdk`, `node`, `go`, `rust`, `cmake`, `scl-gcc-toolset/15`,
+  `dmtcp` (checkpointing), `tmux` helpers (`byobu`), `ncdu`, `htop`, `jq`.
+- **Sali** (Sali lab): `modeller/10.8`, `imp/2.25`, `rosetta/3.10`,
+  `phenix/1.19`, `relion/3.0`, `dssp`, `fpocket`, `psipred`, `muscle`,
+  `usearch`, `blast+/2.12`, `patch_dock`, `zdock`, `scwrl`, `cuda/12.8.1`
+  (also 12.4, 11.5), `eigen`, `boost`, `hdf5`, `gnuplot`, `imod`, a
+  `python3/*` set (biopython, numpy, scipy, pandas, matplotlib,
+  tensorflow/2.19, jax-cuda12/0.9, scikit, h5py, ihm, modelcif),
+  `anaconda/py311` and `conda-forge/py313` (prefer CBI miniforge3).
+- **nvidia-hpc** (`/opt/nvidia/hpc_sdk`): `nvhpc/26.5` (compilers + CUDA),
+  `nvhpc-hpcx/26.5` (CUDA-aware OpenMPI/HPC-X), `nvhpc-hpcx-cuda12/26.5`,
+  `nvhpc-hpcx-cuda13/26.5`, `nvhpc-hpcx-cuda12-openmpi5/26.5`, `nvhpc-nompi`,
+  `nvhpc-byo-compiler`; 25.1 versions also present.
+- **RAD** (radiology, `/mnt/software/rad`): `SCS/*` neuroimaging tools
+  (ANTs, ITK-SNAP, afni, MRIcroGL, dcmtk, connectome workbench, ...).
+
+GPU jobs: `module load nvidia-hpc` then `module load nvhpc-hpcx` (or
+`module load Sali cuda/12.8.1` for just a CUDA toolkit) when you need
+`nvcc` or CUDA-aware MPI. A conda env or container that ships its own
+CUDA runtime only needs the driver, which is always present on GPU nodes.
+`nvidia-smi` does not exist on the login node.
 
 Compilers and MPI stacks: `gnu14`, `openmpi5`, `mpich`, `mvapich2`, `cmake`,
 `boost`, `papi`, `tau`, `scorep` under `/opt/ohpc/pub`.
 
-Apptainer is installed as a base package; no module is needed (the generic
-Apptainer guide's `module load apptainer` line is harmless if it fails,
-but on CoreHPC just call `apptainer`).
+Apptainer 1.5.2 is installed as a base package at `/usr/bin/apptainer`;
+no module is needed and there is no `apptainer` module (the generic wiki
+guide's `module load apptainer` line fails harmlessly). `singularity` is a
+symlink to it.
 
 `scripts/chpc-discover.sh` records the full current module list in
 `docs/cluster-facts.md`.
@@ -48,9 +70,10 @@ do not install your own Miniforge in shared locations.
 
 ```bash
 module load CBI
-module load miniforge3
+module load miniforge3            # default 26.3.2-3 -> conda 26.5, mamba, python 3.13, jupyter
 conda --version
-# if 'conda activate' complains, source the hook once (the module exports _CONDA_ROOT):
+# if 'conda activate' complains, source the hook once (the module exports _CONDA_ROOT,
+# currently /mnt/software/cbi/software/miniforge3-26.3.2-3):
 source "$_CONDA_ROOT/etc/profile.d/conda.sh"
 
 # Keep envs and package cache OFF the 20 GiB home:
@@ -91,7 +114,7 @@ for `conda` in create/install commands.
 
 ```bash
 module load CBI miniforge3
-source "$_CONDA_ROOT/etc/profile.d/conda.sh"    # or: . /opt/ohpc/pub/miniforge3/<ver>/etc/profile.d/conda.sh
+source "$_CONDA_ROOT/etc/profile.d/conda.sh"    # the wiki's /opt/ohpc/pub/miniforge3 path no longer exists
 conda activate proj
 srun python script.py
 ```
@@ -131,4 +154,5 @@ OnDemand's JupyterLab. R: `conda install r-irkernel` then
 | Compilers, MPI, CUDA toolkit | modules |
 | Python/R stack for one project | conda env on scratch, `.yml` on FAC |
 | Reproducible, shareable, complex or fragile stack (deep-learning tools, bio pipelines, anything with system libs) | Apptainer container (doc 07) |
-| Tool already in the CBI/Sali collections | `module load CBI` then `module avail` |
+| Tool already in the CBI/Sali/RAD collections | `module load CBI` then `module avail` |
+| MOE | native install on FAC: `/mnt/fac/CX500146_DS1/software/moe2024.0601` (with `license.dat`, `custom/hpc.cfg`); jobs in `moejobs/` |

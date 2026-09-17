@@ -9,7 +9,7 @@
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
 mkdir -p logs
-source /mnt/fac/${FAC_SHARE:-CX000000_DS0}/chpc/chpc.env 2>/dev/null || true
+source /mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env 2>/dev/null || true
 module purge
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 

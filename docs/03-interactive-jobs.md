@@ -18,10 +18,12 @@ Equivalent with `srun` (the SGE guide prefers this form for interactive shells):
 srun -p cpu --cpus-per-task=4 --mem=8G --time=01:00:00 --pty bash -l
 ```
 
-Quick throwaway test (1 h max):
+Quick throwaway test (1 h max) or long serial work (14 d max) on the
+usually idle community nodes (96 CPUs, 256 GB, no InfiniBand):
 
 ```bash
 srun -p community_short -c 2 --mem 4G --pty bash -l
+salloc -p community -c 8 --mem 32G -t 2-00:00:00
 ```
 
 ## Get a shell on a GPU node
@@ -34,7 +36,7 @@ module load nvidia-hpc                    # CUDA toolkit / compilers if needed
 
 Pick a GPU model: `--gres=gpu:nvidia_h100_nvl:1` (see doc 05 for names).
 
-We only have `cpu` and `gpu`; `pod` and `large_gpu` are not enabled for the lab.
+`pod` and `large_gpu` are not enabled for the lab.
 
 ## Keep the session alive across disconnects
 
@@ -85,6 +87,8 @@ ssh -N -L 8888:NODE:8888 chpc
 
 - Ask for what you need plus a margin; big requests wait longer.
 - `--mem` is per node; `--mem-per-cpu` scales with `-c`.
-- Default walltime is partition-dependent; always pass `--time`.
-- The `gpu` partition allows 4 jobs and 8 GPUs per user; an idle
+- Default walltime is 1 hour everywhere; always pass `--time`.
+- Default memory is 4 GB per CPU (6 GB on `gpu`); `--gres=gpu:1` alone
+  also gives you 32 CPUs, so trim `-c` if you want to be a good citizen.
+- The `gpu` partition allows 21 jobs and 8 GPUs per user; an idle
   interactive GPU session counts against that and against fair-share.

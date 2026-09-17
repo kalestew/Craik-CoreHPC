@@ -1,12 +1,17 @@
 # Lab shared CoreHPC directory
 
-Everything the lab shares on CoreHPC lives in one directory on our FAC
-share, with a hot mirror on group scratch. Set the share name once in
-`lab/chpc.env`.
+Everything the lab shares on CoreHPC lives on our FAC share
+`/mnt/fac/CX500146_DS1` (group `sec_fac_cx500146_ds1`, POSIX ACLs, group
+read/write), with a hot mirror on group scratch
+`/mnt/scratch/group/CX500146_DS1`. Both exist and were verified writable on
+2026-09-17. The share already contains `software/moe2024.0601` and
+`moejobs/`; the layout below adds to that rather than moving it.
 
 ```
-/mnt/fac/<FAC_SHARE>/chpc/                  $CHPC_LAB  (persistent, canonical)
+/mnt/fac/CX500146_DS1/                      $CHPC_LAB  (persistent, canonical; 5 TB)
 ├── chpc.env                                copy of lab/chpc.env; everyone sources it
+├── software/                               native installs (already holds moe2024.0601)
+├── moejobs/                                existing MOE job directory
 ├── bin/                                    wrappers; add to PATH via chpc.env
 │   ├── chpc-stage-containers               rsync containers/ -> group scratch
 │   └── <tool>                              one per container (see lab/bin/run-in-container)
@@ -19,7 +24,7 @@ share, with a hot mirror on group scratch. Set the share name once in
 ├── slurm/                                  shared job templates (copy of templates/slurm)
 └── results/<project>/                      final outputs only
 
-/mnt/scratch/group/<FAC_SHARE>/             hot, volatile
+/mnt/scratch/group/CX500146_DS1/             hot, volatile
 ├── containers/                             mirror of $CHPC_LAB/containers (sif only)
 └── <project>/                              working dirs, intermediates, logs
 ```
@@ -33,7 +38,7 @@ mkdir -p $CHPC_GROUP_SCRATCH/containers
 cp lab/chpc.env $CHPC_LAB/chpc.env
 cp lab/bin/* $CHPC_LAB/bin/
 cp templates/slurm/* $CHPC_LAB/slurm/
-chmod -R g+rX,o-rwx $CHPC_LAB
+chmod -R g+rwX,o-rwx $CHPC_LAB/{bin,containers,envs,data,slurm,results} $CHPC_LAB/chpc.env
 ```
 
 ## Every lab member
@@ -41,7 +46,7 @@ chmod -R g+rX,o-rwx $CHPC_LAB
 Add to `~/.bashrc` on the cluster:
 
 ```bash
-[ -f /mnt/fac/<FAC_SHARE>/chpc/chpc.env ] && source /mnt/fac/<FAC_SHARE>/chpc/chpc.env
+[ -f /mnt/fac/CX500146_DS1/chpc.env ] && source /mnt/fac/CX500146_DS1/chpc.env
 ```
 
 That puts `$CHPC_LAB/bin` on `PATH`, points Apptainer caches and conda at

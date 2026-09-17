@@ -10,7 +10,7 @@ GPU="${GPU:-0}"                          # 1 = pass --nv
 EXTRA_BIND="${EXTRA_BIND:-}"             # e.g. "$CHPC_LAB/data:/refdata:ro"
 
 if [ -z "${CHPC_CONTAINERS:-}" ]; then
-  for f in "/mnt/fac/${FAC_SHARE:-}/chpc/chpc.env" "$HOME/chpc.env"; do
+  for f in "/mnt/fac/${FAC_SHARE:-}/chpc.env" "$HOME/chpc.env"; do
     [ -f "$f" ] && source "$f" && break
   done
 fi

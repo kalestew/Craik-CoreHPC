@@ -26,13 +26,14 @@ section "My associations (accounts/QoS I can use)"; code sacctmgr show assoc use
 section "GRES types"; code sh -c 'sinfo -o "%G" | sort -u'
 section "Storage: mounts"; code sh -c 'df -hT /home/remote 2>/dev/null; df -hT /mnt/scratch 2>/dev/null; df -hT /mnt/fac 2>/dev/null; mount | grep -E "vast|/mnt/fac|/mnt/scratch" '
 section "Storage: my quota (userquota)"; code sh -c 'userquota 2>/dev/null || /usr/local/bin/userquota'
-section "Storage: FAC shares visible"; code ls -la /mnt/fac/
-section "Storage: group scratch dirs visible"; code ls -la /mnt/scratch/group/
+section "Storage: FAC shares I belong to"; code sh -c 'ls -la /mnt/fac/ | grep -E "^total|$(id -Gn | tr " " "|")"'
+section "Storage: group scratch dirs I belong to"; code sh -c 'ls -la /mnt/scratch/group/ | grep -E "^total|$(id -Gn | tr " " "|")"'
 section "Storage: my scratch"; code ls -la "/mnt/scratch/user/$USER"
 section "Modules: default loaded"; code sh -c 'module list 2>&1'
 section "Modules: top level"; code sh -c 'module avail 2>&1'
 section "Modules: CBI collection"; code sh -c 'module load CBI 2>&1; module avail 2>&1'
 section "Modules: Sali collection"; code sh -c 'module purge; module load Sali 2>&1; module avail 2>&1'
+section "Modules: RAD collection"; code sh -c 'module purge; module load RAD 2>&1; module avail 2>&1'
 section "Modules: nvidia-hpc collection"; code sh -c 'module purge; module load nvidia-hpc 2>&1; module avail 2>&1'
 section "Apptainer"; code sh -c 'which apptainer; apptainer --version; apptainer buildcfg 2>/dev/null | grep -Ei "^(BIND PATH|ALLOW SETUID|MOUNT HOME|USER NAMESPACE|ENABLE FUSEMOUNT|ENABLE OVERLAY|NVIDIA)" ; echo "subuid entry: $(grep -c "^$USER:" /etc/subuid 2>/dev/null) (1 = --fakeroot allowed)"'
 section "Apptainer site config (bind paths)"; code sh -c 'grep -vE "^\s*#|^\s*$" /etc/apptainer/apptainer.conf 2>/dev/null | grep -iE "bind|mount|user|nvidia" '

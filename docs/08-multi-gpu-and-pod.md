@@ -1,7 +1,7 @@
 # 8. Multi-GPU jobs (and why we do not use the POD)
 
-Our lab has regular access: the `cpu` partition and the shared `gpu`
-partition. The `pod` partition (8× H200 nodes, InfiniBand) is by request
+Our lab has regular access: `cpu`, `community`/`community_short`, and the
+shared `gpu` partition. The `pod` partition (8× H200 nodes, InfiniBand) is by request
 only after a consultation, and `large_gpu` is condo-only until fall 2026.
 Neither is enabled for us; a job with `--partition=pod` or
 `--account=ucsf_pod` will be rejected. The POD notes at the bottom are
@@ -11,7 +11,7 @@ kept for reference in case that changes.
 
 | Node | GPUs per node | GPU memory | Per-user limit |
 |------|---------------|------------|----------------|
-| ggpu1-[06-12] | 2× L40S | 48 GB each | 4 jobs and 8 GPUs total in `gpu` |
+| ggpu1-[06-12] | 2× L40S | 48 GB each | 21 running jobs and 8 GPUs total in `gpu` |
 | ggpu1-[13-19] | 2× RTX PRO 6000 | 96 GB each | |
 | ggpu4-[01-06] | 1× H100 NVL | 94 GB | |
 
@@ -65,7 +65,7 @@ is simpler and schedules faster than one big job:
 ```bash
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:1
-#SBATCH --array=0-31%4          # %4 keeps us inside the 4-job limit
+#SBATCH --array=0-31%8          # %8 keeps us inside the 8-GPU limit
 srun python run.py --config configs/${SLURM_ARRAY_TASK_ID}.yml
 ```
 
@@ -85,7 +85,7 @@ nvidia-smi --query-compute-apps=pid,process_name,gpu_name,gpu_uuid,used_memory -
 | Only one GPU visible with `--gres=gpu:2` | `echo $CUDA_VISIBLE_DEVICES`; make sure the script does not pin device 0; with `--ntasks-per-node=2 --gpus-per-task=1` each task sees one GPU by design |
 | CUDA OOM on 2 GPUs but not 1 | per-GPU memory is unchanged; reduce batch per GPU or use a 96 GB RTX PRO 6000 |
 | Hang in `init_process_group` | with torchrun use `--standalone`; without it every rank needs `MASTER_ADDR`/`MASTER_PORT` |
-| Pending `(QOSMaxGRESPerUser)` or similar | 8 GPUs / 4 jobs per user across all your `gpu` jobs |
+| Pending `(QOSMaxGRESPerUser)` or similar | 8 GPUs / 21 jobs per user across all your `gpu` jobs |
 
 ## Reference: the POD (not available to us)
 

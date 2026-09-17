@@ -1,7 +1,7 @@
 # 7. Containers with Apptainer (and sharing them across the lab)
 
-Apptainer (formerly Singularity) is installed on every CoreHPC node, no
-module needed. It runs as your own user, mounts `$HOME`, `/tmp` and the
+Apptainer 1.5.2 (formerly Singularity; `singularity` still works as an
+alias) is installed on every CoreHPC node, no module needed. It runs as your own user, mounts `$HOME`, `/tmp` and the
 current directory by default, and needs no root to run. It is the right
 way to package software for the lab: one `.sif` file on FAC, one wrapper
 script, everybody gets the identical environment in their job scripts.
@@ -49,18 +49,28 @@ Test on a compute node, then promote to the lab share (below).
 
 ### Option A: build on the login node (usual case)
 
-CoreHPC's Apptainer supports unprivileged builds (user namespaces). Try
-the plain command first; if it fails with a permissions error inside
-`%post`, add `--fakeroot`. Keep builds modest; the login node kills heavy
-processes, so avoid compiling large code in `%post` there (compile in a
-sandbox in an interactive job instead, see Option C).
+Verified 2026-09-17: unprivileged builds work on the login node with the
+plain command (user namespaces are allowed; an Ubuntu 22.04 image with
+`apt-get install python3` in `%post` built in 85 s). `--fakeroot` is NOT
+available (no `/etc/subuid` entry) and fails; do not use it. Apptainer
+instead injects a `fakeroot` shim into `%post`, which needs glibc, so
+Alpine/musl-based images fail with `exec /.singularity.d/libs/fakeroot
+failed: a shared library is likely missing`; add
+`--ignore-fakeroot-command` for those (verified). The login node's proxy
+variables are inherited by the build, so `apt`, `pip`, `conda` inside
+`%post` reach the internet there and only there. Keep builds modest; the
+login node kills heavy processes, so compile large code in a sandbox in an
+interactive job instead (Option C).
 
 ```bash
 cd $CHPC_LAB/containers/defs      # keep .def files with the images
 apptainer build ../mytool_1.0.sif mytool_1.0.def
-# or, if the above complains about permissions:
-apptainer build --fakeroot ../mytool_1.0.sif mytool_1.0.def
+# Alpine / musl base images only:
+apptainer build --ignore-fakeroot-command ../mytool_1.0.sif mytool_1.0.def
 ```
+
+`templates/apptainer/build.sh` does this, retrying with
+`--ignore-fakeroot-command` automatically.
 
 Minimal definition file (`templates/apptainer/minimal.def`):
 
@@ -117,7 +127,7 @@ apptainer build mytool_1.0.sif docker-archive:///mnt/scratch/user/$USER/apptaine
 apptainer build --sandbox mytool_dev docker://ubuntu:22.04
 # compute node (CPU): compile / install interactively
 salloc -p cpu -c 16 --mem 32G -t 4:00:00
-apptainer shell --writable --fakeroot mytool_dev      # drop --fakeroot if not permitted
+apptainer shell --writable mytool_dev                 # (--fakeroot is not available on CoreHPC)
 # ... apt-get/pip/make (anything needing internet must be fetched on the login node first) ...
 exit; exit
 # login node: freeze it
@@ -141,9 +151,10 @@ apptainer exec --nv image.sif nvidia-smi        # GPU
 ### Bind mounts (important on CoreHPC)
 
 `$HOME`, `/tmp` and `$PWD` are bound automatically. `/mnt/scratch` and
-`/mnt/fac` are NOT (unless the admins configured it; `scripts/chpc-discover.sh`
-records the site bind list). Add them explicitly, and use the same path
-inside as outside so scripts work identically with and without the container:
+`/mnt/fac` are NOT: the site config binds only `/etc/localtime` and
+`/etc/hosts` (verified; `user bind control = yes`, `mount home = yes`).
+Add them explicitly, and use the same path inside as outside so scripts
+work identically with and without the container:
 
 ```bash
 apptainer exec --nv --bind /mnt/scratch,/mnt/fac image.sif python train.py
@@ -161,7 +172,7 @@ drops host env vars. `--pwd /path` sets the working directory.
 ```bash
 #!/bin/bash
 #SBATCH -p gpu --gres=gpu:1 -c 8 --mem 32G -t 4:00:00
-source /mnt/fac/<FAC_SHARE>/chpc/chpc.env
+source /mnt/fac/CX500146_DS1/chpc.env
 srun apptainer exec --nv --bind /mnt/scratch,/mnt/fac \
      $CHPC_CONTAINERS/pytorch_24.01.sif python train.py
 ```
@@ -176,12 +187,12 @@ images generally do.
 Layout on FAC (persistent, canonical) with a hot copy on group scratch:
 
 ```
-$CHPC_LAB = /mnt/fac/<FAC_SHARE>/chpc
+$CHPC_LAB = /mnt/fac/CX500146_DS1/chpc
 $CHPC_LAB/containers/<tool>_<version>.sif     immutable; never overwrite, bump the version
 $CHPC_LAB/containers/defs/<tool>_<version>.def the recipe (also in this git repo under templates/apptainer or a lab repo)
 $CHPC_LAB/containers/README.md                one line per image: what, version, who built, date, how to run
 $CHPC_LAB/bin/<tool>                          wrapper: apptainer exec --nv --bind ... $CHPC_CONTAINERS/<tool>_<version>.sif "$@"
-/mnt/scratch/group/<FAC_SHARE>/containers/    rsync'd copy for fast start-up (lab/bin/chpc-stage-containers)
+/mnt/scratch/group/CX500146_DS1/containers/    rsync'd copy for fast start-up (lab/bin/chpc-stage-containers)
 ```
 
 Rules:
@@ -206,7 +217,9 @@ Rules:
 
 | Problem | Fix |
 |---------|-----|
-| `FATAL: ... permission denied` during build | `--fakeroot`; or build on Mac (Option B) |
+| `exec /.singularity.d/libs/fakeroot failed: a shared library is likely missing` | Alpine/musl base: add `--ignore-fakeroot-command` |
+| `%post` step needs real root (chown, setuid, systemd) | not possible here; build on your Mac (Option B) |
+| `--fakeroot` errors | it is not enabled on CoreHPC; drop the flag |
 | `no space left on device` while building | `APPTAINER_TMPDIR`/`CACHEDIR` still on home; set them to scratch |
 | `Disk quota exceeded` | same |
 | Command not found inside | `$PATH` inside container; use absolute path or fix `%environment` |

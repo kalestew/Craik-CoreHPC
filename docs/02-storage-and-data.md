@@ -6,16 +6,20 @@
 |------|------|--------------|-------|-------------|---------|
 | `/home/remote/<user>` (`$HOME`) | VAST home | 20 GiB hard, 19 GiB soft | fast | kept | dotfiles, scripts, small configs. NOT conda envs, caches, data |
 | `/mnt/scratch/user/<user>` | VAST user scratch | 50 TiB hard per user | fastest shared (InfiniBand) | volatile: purge >30 days, wiped at quarterly maintenance | active job I/O, conda envs, container cache, checkpoints |
-| `/mnt/scratch/group/<FAC_SHARE>` | VAST group scratch | shared | fastest shared | volatile, same purge | shared inputs/outputs of running projects, staged lab containers |
-| `/mnt/fac/<FAC_SHARE>` | FAC capacity storage | what the lab bought (~$52/TB/yr) | slow (capacity tier) | persistent, lab-owned | long-term data, final results, canonical copies of containers/envs/scripts |
+| `/mnt/scratch/group/CX500146_DS1` | VAST group scratch | shared | fastest shared | volatile, same purge | shared inputs/outputs of running projects, staged lab containers |
+| `/mnt/fac/CX500146_DS1` | our FAC share (NFS 4.2, autofs) | 5.0 TB (0.5 GB used 2026-09-17); ~$52/TB/yr | slow (capacity tier) | persistent, lab-owned, snapshots under `.qsnaps/` | long-term data, final results, canonical copies of containers/envs/scripts |
 | `/tmp` on a compute node | local NVMe | cpu ~2 TB, gpu ~6 TB, large_gpu 6–12 TB, pod ~12 TB, community ~1 TB SAS SSD | fastest | gone when the job ends | scratch inside a job, tight-loop I/O |
 
 Notes:
 
 - `/scratch` is a compatibility symlink to `/mnt/scratch` (from Wynton). It
   may be removed, so write `/mnt/scratch` in scripts.
-- Group scratch is named after the FAC share, e.g. `CX000123_DS1`. Ask
-  CoreHPC to create it if it does not exist.
+- Group scratch `/mnt/scratch/group/CX500146_DS1` exists and is writable by
+  the `sec_fac_cx500146_ds1` group (all lab members with the share). Our
+  FAC share is writable the same way (POSIX ACLs; new files are group rw).
+- `/mnt/fac` lists every share on campus, but only ours mounts on access.
+- FAC keeps snapshots: `/mnt/fac/CX500146_DS1/.qsnaps/` (managed by the FAC
+  team; look there before asking for a restore).
 - FAC costs ~$52/TB/yr plus setup. A recharge for scratch data kept >30 days
   (~$428/TiB/yr) is planned. Home cannot be expanded for free.
 - Quotas are soft/hard with a 7-day grace period. Check with `userquota`
@@ -27,13 +31,16 @@ Notes:
 ## What goes where (lab convention)
 
 ```
-/mnt/fac/<FAC_SHARE>/chpc/            canonical, persistent, shared   (see lab/README.md)
-   containers/  *.sif + *.def
+/mnt/fac/CX500146_DS1/                 canonical, persistent, shared   (see lab/README.md)
+   chpc.env     lab environment file (everyone sources it)
+   software/    native installs (moe2024.0601 lives here already)
+   moejobs/     existing MOE job dir
+   containers/  *.sif + defs/*.def
    envs/        environment.yml exports
    bin/         wrapper scripts
    data/        reference data, inputs
    results/     final outputs, one dir per project
-/mnt/scratch/group/<FAC_SHARE>/       hot copies for running jobs
+/mnt/scratch/group/CX500146_DS1/       hot copies for running jobs
    containers/  rsync'd from FAC (scripts/stage)
    <project>/   working dirs
 /mnt/scratch/user/$USER/
@@ -56,10 +63,10 @@ Run on the login node for small/moderate copies; for large copies submit a
 job so it runs on a compute node instead (the login node kills heavy work):
 
 ```bash
-cp -R /mnt/fac/<FAC_SHARE>/MyFolder /mnt/scratch/group/<FAC_SHARE>/
-rsync -av /mnt/fac/<FAC_SHARE>/MyFolder/ /mnt/scratch/group/<FAC_SHARE>/MyFolder/
+cp -R /mnt/fac/CX500146_DS1/MyFolder /mnt/scratch/group/CX500146_DS1/
+rsync -av /mnt/fac/CX500146_DS1/MyFolder/ /mnt/scratch/group/CX500146_DS1/MyFolder/
 # big copy as a job:
-sbatch -p cpu -c 2 --mem 4G -t 12:00:00 --wrap 'rsync -a /mnt/fac/<FAC_SHARE>/big/ /mnt/scratch/group/<FAC_SHARE>/big/'
+sbatch -p cpu -c 2 --mem 4G -t 12:00:00 --wrap 'rsync -a /mnt/fac/CX500146_DS1/big/ /mnt/scratch/group/CX500146_DS1/big/'
 ```
 
 ### Laptop to cluster
