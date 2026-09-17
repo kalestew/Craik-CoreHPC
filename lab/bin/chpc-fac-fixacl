@@ -5,35 +5,56 @@
 # for the owner. Anything you create directly under /mnt/fac/<share>/ (or
 # under a directory that inherited that entry) ends up as d---rwx--- or
 # ----rw----: your lab-mates can use it, you cannot, not even read it back.
-# Directories created through SMB (software/, moejobs/) carry a sane ACL.
 #
-# This script copies the ACL of a known-good template onto the given paths,
-# recursively, and sets the lab group. Defaults: the share's SMB-created
-# software/ dir for directories, and any regular file inside it for files
-# (same provenance, same sane ACL). Override with CHPC_FAC_ACL_DIR_TEMPLATE
-# and CHPC_FAC_ACL_FILE_TEMPLATE. The owner always retains the right to
-# change ACLs on its own objects, so this works without admin help.
+# What it does, for each path and everything beneath it (fixing each
+# directory before descending, since a broken directory cannot be listed):
+#   1. drop every DENY entry, inheritable or not;
+#   2. give every OWNER@ ALLOW entry the union of its own bits and the
+#      GROUP@ bits with the same inheritance flags (so the owner gets exactly
+#      what the lab group already has; mode bits such as +x are preserved);
+#   3. chgrp to the lab group.
+# No templates are involved, so it works on any file or directory the caller
+# owns. The owner always retains the right to change ACLs on its own objects.
 #
 # Usage: chpc-fac-fixacl <path>...          (paths on /mnt/fac/<share>)
 set -euo pipefail
 : "${FAC_SHARE:=CX500146_DS1}"
-share="/mnt/fac/$FAC_SHARE"
-dir_tpl="${CHPC_FAC_ACL_DIR_TEMPLATE:-$share/software}"
-[ -d "$dir_tpl" ] || { echo "directory ACL template not found: $dir_tpl (set CHPC_FAC_ACL_DIR_TEMPLATE)" >&2; exit 1; }
-file_tpl="${CHPC_FAC_ACL_FILE_TEMPLATE:-$(find "$dir_tpl" -type f -print -quit 2>/dev/null)}"
-[ -n "$file_tpl" ] && [ -f "$file_tpl" ] || { echo "file ACL template not found under $dir_tpl (set CHPC_FAC_ACL_FILE_TEMPLATE)" >&2; exit 1; }
 group="${CHPC_FAC_GROUP:-sec_fac_$(echo "$FAC_SHARE" | tr '[:upper:]' '[:lower:]')}"
 command -v nfs4_setfacl >/dev/null || { echo "nfs4_setfacl not found (run on a CoreHPC node)" >&2; exit 1; }
 [ $# -ge 1 ] || { echo "usage: $(basename "$0") <path>..." >&2; exit 1; }
-dir_acl=$(nfs4_getfacl "$dir_tpl" | grep -v '^#')
-file_acl=$(nfs4_getfacl "$file_tpl" | grep -v '^#')
-n=0
-for p in "$@"; do
-  find "$p" -print0 | while IFS= read -r -d '' x; do
-    if [ -d "$x" ]; then printf '%s\n' "$dir_acl" | nfs4_setfacl -S - "$x"
-    else printf '%s\n' "$file_acl" | nfs4_setfacl -S - "$x"; fi
-    chgrp "$group" "$x" 2>/dev/null || true
-  done
-  n=$((n+1))
-done
-echo "fixed ACLs under $n path(s); owner and group $group now have full access"
+
+fix_one() {
+  local x=$1 acl new
+  acl=$(nfs4_getfacl "$x" 2>/dev/null | grep -v '^#') || return 0
+  grep -q '^D:' <<<"$acl" || { chgrp "$group" "$x" 2>/dev/null || true; return 0; }
+  new=$(awk -F: '
+    $1=="A" && $3=="GROUP@" { g[$2]=$4 }
+    { lines[NR]=$0 }
+    END {
+      for (i=1;i<=NR;i++) {
+        n=split(lines[i],f,":")
+        if (f[1]=="D") continue
+        if (f[1]=="A" && f[3]=="OWNER@" && (f[2] in g)) {
+          p=f[4]; gp=g[f[2]]
+          for (k=1;k<=length(gp);k++) { c=substr(gp,k,1); if (index(p,c)==0) p=p c }
+          f[4]=p
+          lines[i]=f[1] ":" f[2] ":" f[3] ":" f[4]
+        }
+        print lines[i]
+      }
+    }' <<<"$acl")
+  printf '%s\n' "$new" | nfs4_setfacl -S - "$x"
+  chgrp "$group" "$x" 2>/dev/null || true
+  fixed=$((fixed+1))
+}
+
+fixed=0
+walk() {
+  local x=$1 c
+  fix_one "$x"
+  if [ -d "$x" ]; then
+    while IFS= read -r -d '' c; do walk "$c"; done < <(find "$x" -mindepth 1 -maxdepth 1 -print0 2>/dev/null)
+  fi
+}
+for p in "$@"; do walk "$p"; done
+echo "repaired $fixed object(s); owner now has the lab group's access (group $group)"
