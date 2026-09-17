@@ -7,17 +7,21 @@
 # ----rw----: your lab-mates can use it, you cannot, not even read it back.
 # Directories created through SMB (software/, moejobs/) carry a sane ACL.
 #
-# This script copies the ACL of a known-good template (default: the share's
-# software/ dir for directories, kja_test.txt for files) onto the given
-# paths, recursively, and sets the lab group. The owner always retains the
-# right to change ACLs on its own objects, so this works without admin help.
+# This script copies the ACL of a known-good template onto the given paths,
+# recursively, and sets the lab group. Defaults: the share's SMB-created
+# software/ dir for directories, and any regular file inside it for files
+# (same provenance, same sane ACL). Override with CHPC_FAC_ACL_DIR_TEMPLATE
+# and CHPC_FAC_ACL_FILE_TEMPLATE. The owner always retains the right to
+# change ACLs on its own objects, so this works without admin help.
 #
 # Usage: chpc-fac-fixacl <path>...          (paths on /mnt/fac/<share>)
 set -euo pipefail
 : "${FAC_SHARE:=CX500146_DS1}"
 share="/mnt/fac/$FAC_SHARE"
 dir_tpl="${CHPC_FAC_ACL_DIR_TEMPLATE:-$share/software}"
-file_tpl="${CHPC_FAC_ACL_FILE_TEMPLATE:-$share/kja_test.txt}"
+[ -d "$dir_tpl" ] || { echo "directory ACL template not found: $dir_tpl (set CHPC_FAC_ACL_DIR_TEMPLATE)" >&2; exit 1; }
+file_tpl="${CHPC_FAC_ACL_FILE_TEMPLATE:-$(find "$dir_tpl" -type f -print -quit 2>/dev/null)}"
+[ -n "$file_tpl" ] && [ -f "$file_tpl" ] || { echo "file ACL template not found under $dir_tpl (set CHPC_FAC_ACL_FILE_TEMPLATE)" >&2; exit 1; }
 group="${CHPC_FAC_GROUP:-sec_fac_$(echo "$FAC_SHARE" | tr '[:upper:]' '[:lower:]')}"
 command -v nfs4_setfacl >/dev/null || { echo "nfs4_setfacl not found (run on a CoreHPC node)" >&2; exit 1; }
 [ $# -ge 1 ] || { echo "usage: $(basename "$0") <path>..." >&2; exit 1; }
