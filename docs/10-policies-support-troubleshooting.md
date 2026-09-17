@@ -58,6 +58,9 @@ FAC beforehand. Emergency outages are announced on Slack/email.
 | `(QOSMaxJobsPerUserLimit)` / `(AssocMaxJobsLimit)` | per-user limits (doc 05) |
 | `Invalid account or account/partition combination` / `Invalid qos specification` | you targeted `pod`/`large_gpu`; our account `hpc_core` covers `cpu`, `gpu`, `community`, `community_short` |
 | Job killed after exactly 1 hour | you did not pass `--time`; the default is 1 h on every partition |
+| Pending forever: `Job's QOS not permitted to use this partition` | `community_short` needs `--qos=cmnt_short`; `squeue -j <id> -o %r` shows the reason |
+| `apptainer pull` / `git clone` / `pip` fails only in `ssh chpc 'cmd'` one-liners | non-login shells lack the proxy variables; use `ssh chpc 'bash -lc "cmd"'` |
+| `ssh: connect to host git.kalestew.io port 22: Network is unreachable` on the login node | outbound SSH is blocked; use the HTTPS URL with a deploy token |
 | Apptainer build: `exec /.singularity.d/libs/fakeroot failed` | Alpine/musl base image; add `--ignore-fakeroot-command` |
 | Apptainer build: `--fakeroot` fails | not enabled on CoreHPC; drop it |
 | Job killed at exactly the time limit | add `--time`, checkpoint, or use `community` (336 h) |

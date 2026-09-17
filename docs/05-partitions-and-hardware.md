@@ -41,6 +41,11 @@ model with `--gres=gpu:nvidia_h100_nvl:1` (verify names with
 | `community_short` (`cmnt_short`) | 1 | – | – |
 | `pod` (`pod`) | 2 | 2 | not ours |
 
+QoS: our default is `hpc_core`, which `cpu`, `gpu` and `community` accept.
+`community_short` accepts only `cmnt_short`, so pass `--qos=cmnt_short`
+there. Passing `--qos=cpu`, `--qos=gpu` or `--qos=cmnt` is optional on the
+other partitions (they are also allowed for us).
+
 Scheduler defaults that matter: `DefaultTime=01:00:00` on every partition,
 `DefMemPerCPU` 4096 MB on `cpu`/`community` and 6144 MB on `gpu`,
 `DefCpuPerGPU=32` on `gpu`. Max array size 5000. Backfill scheduler with

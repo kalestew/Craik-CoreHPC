@@ -13,7 +13,7 @@ remote_script() {
 cat <<'REMOTE'
 set -uo pipefail
 section() { printf '\n## %s\n\n' "$1"; }
-code() { printf '```\n'; "$@" 2>&1 | head -n "${LINES_MAX:-400}"; printf '```\n'; }
+code() { printf '```\n'; "$@" 2>&1 | tr -d '\r' | head -n "${LINES_MAX:-400}"; printf '```\n'; }
 LINES_MAX=400
 echo "# CoreHPC live facts"
 echo

@@ -96,6 +96,14 @@ git.ucsf.edu, GitHub, Hugging Face, Docker Hub, Apptainer/Singularity
 registries and Python package indexes. Compute nodes (including the POD)
 have no internet. Bastions have no access at all.
 
+The proxy is configured through `http_proxy`/`https_proxy` variables set
+in the login profile (`chpc-proxy-vm1:3128`). They exist in interactive
+logins and `bash -l`, but not in `ssh chpc 'command'` one-liners or
+`bash -s` scripts, where downloads then fail silently. Use
+`ssh chpc 'bash -lc "..."'` for remote commands that need the network.
+Allowed destinations include GitHub, git.ucsf.edu, git.kalestew.io
+(HTTPS only; SSH is blocked), Hugging Face, Docker Hub, PyPI.
+
 So: `git clone`, `pip download`, `conda create`, `apptainer pull`,
 `huggingface-cli download`, model weights, reference databases: do them on
 the login node, into scratch or FAC, before submitting the job. Set

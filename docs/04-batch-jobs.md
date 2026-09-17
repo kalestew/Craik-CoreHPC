@@ -9,6 +9,7 @@ pieces. Wiki sources: Access Primer, Submission Examples, Advanced Topics.
 #!/bin/bash
 #SBATCH --job-name=myjob
 #SBATCH --partition=cpu              # cpu (default) | gpu | community | community_short   (pod, large_gpu: not ours)
+#SBATCH --qos=cmnt_short             # ONLY for community_short; other partitions take our default QoS hpc_core
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                   # processes (MPI ranks); = --nodes for one task per node
 #SBATCH --cpus-per-task=8            # threads per process
@@ -126,7 +127,8 @@ Node state codes: `idle`, `mix` (partly allocated), `alloc`, `drain`/`drng`
 
 ## Good practice (CoreHPC's list plus ours)
 
-- Test interactively, then submit. Use `community_short` (1 h) for smoke tests.
+- Test interactively, then submit. Use `community_short` (1 h, needs
+  `--qos=cmnt_short`) for smoke tests; it started our test job in seconds.
 - Serial or embarrassingly parallel CPU work belongs on `community`: same
   QoS we already have, 14-day limit, and the queue is empty while `cpu`
   routinely has ~1000 pending jobs. Keep MPI on `cpu` (InfiniBand).

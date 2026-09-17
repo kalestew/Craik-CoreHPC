@@ -22,6 +22,6 @@ case "$IMAGE" in /*) sif="$IMAGE" ;; *) sif="${CHPC_CONTAINERS:?set CHPC_CONTAIN
 
 args=(exec)
 [ "$GPU" = "1" ] && args+=(--nv)
-args+=(--bind /mnt/scratch,/mnt/fac)
+[ -z "${APPTAINER_BIND:-}" ] && args+=(--bind /mnt/scratch,/mnt/fac)   # chpc.env normally sets APPTAINER_BIND
 [ -n "$EXTRA_BIND" ] && args+=(--bind "$EXTRA_BIND")
 exec apptainer "${args[@]}" "$sif" "$@"

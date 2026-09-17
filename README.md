@@ -49,7 +49,21 @@ git submodule update --remote corehpc && git commit -am "Bump corehpc"
 ```
 
 Use the https URL in `.gitmodules` so anyone with read access can clone the
-project without a GitLab SSH key, the login node included. Projects hosted
+project without a GitLab SSH key, the login node included. That is the
+only option there: the login node reaches git.kalestew.io over HTTPS
+through the campus proxy, but outbound SSH (port 22) is blocked (verified
+2026-09-17). For a private project, create a Deploy Token (project
+Settings, Repository, Deploy tokens, scope `read_repository`) and store it
+on the login node once:
+
+```bash
+git config --global credential.helper 'store --file ~/.git-credentials'   # home is 700; fine for a read-only token
+git clone --recurse-submodules https://git.kalestew.io/ucsf/craik-lab/myproject.git   # prompts once, then cached
+```
+
+Run git and anything else that needs the internet from a login shell
+(`ssh chpc`, or `ssh chpc 'bash -lc "..."'`): the proxy variables live in
+the login profile, and a plain `ssh chpc cmd` has none. Projects hosted
 in the same `ucsf/craik-lab` group can use the relative URL
 `../Craik-CoreHPC.git` instead. To push changes to the guide from inside a
 project, point the submodule's origin at the SSH URL:
@@ -130,7 +144,7 @@ ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
 scripts/chpc-stage.sh       rsync files to group scratch through the master session
-templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, gpu, multi-gpu, array, mpi, container, local-nvme)
+templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, community, gpu, multi-gpu, array, mpi, container, local-nvme)
 templates/apptainer/*.def   Example definition files + build helper
 lab/chpc.env                Lab-specific variables (FAC share name, paths); copied to the FAC share
 lab/README.md               Layout of our shared FAC directory
@@ -149,6 +163,9 @@ lab/bin/*                   Wrapper scripts lab members call from job scripts
 - Our account is `hpc_core` with QoS for `cpu`, `gpu`, `community` and
   `community_short` (verified with `sacctmgr`). `pod` and `large_gpu` are
   restricted to named accounts; jobs naming them are rejected.
+- Our default QoS `hpc_core` is accepted by `cpu`, `gpu` and `community`, but
+  `community_short` accepts only `cmnt_short`: add `--qos=cmnt_short` or the
+  job pends forever with "QOS not permitted to use this partition" (verified).
 - `gpu` allows 8 GPUs and 21 jobs per user. `cpu` allows 2048 CPUs / 8 nodes.
   `community` allows 768 CPUs / 8 nodes with a 14-day walltime and is usually
   nearly empty while `cpu` has a deep queue: put serial and HTC work there.

@@ -22,8 +22,8 @@ Quick throwaway test (1 h max) or long serial work (14 d max) on the
 usually idle community nodes (96 CPUs, 256 GB, no InfiniBand):
 
 ```bash
-srun -p community_short -c 2 --mem 4G --pty bash -l
-salloc -p community -c 8 --mem 32G -t 2-00:00:00
+srun -p community_short --qos=cmnt_short -c 2 --mem 4G --pty bash -l   # --qos is mandatory here
+salloc -p community -c 8 --mem 32G -t 2-00:00:00                       # default QoS is fine
 ```
 
 ## Get a shell on a GPU node

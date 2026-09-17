@@ -160,8 +160,11 @@ work identically with and without the container:
 apptainer exec --nv --bind /mnt/scratch,/mnt/fac image.sif python train.py
 ```
 
-Set once in `lab/chpc.env` so every wrapper picks it up:
-`export APPTAINER_BIND=/mnt/scratch,/mnt/fac`.
+`lab/chpc.env` exports `APPTAINER_BIND=/mnt/scratch,/mnt/fac`, so after
+sourcing it (or `env.sh`) the `--bind` flag is unnecessary. Passing both
+still works but logs `WARNING: ... destination is already in the mount
+point list` twice per job; the templates therefore rely on the variable
+and only the manual examples above spell out `--bind`.
 
 `--containall` isolates `$HOME` and env vars (cleaner, avoids your
 `~/.local` Python packages leaking into the container); `--cleanenv` just
@@ -172,9 +175,8 @@ drops host env vars. `--pwd /path` sets the working directory.
 ```bash
 #!/bin/bash
 #SBATCH -p gpu --gres=gpu:1 -c 8 --mem 32G -t 4:00:00
-source /mnt/fac/CX500146_DS1/chpc.env
-srun apptainer exec --nv --bind /mnt/scratch,/mnt/fac \
-     $CHPC_CONTAINERS/pytorch_24.01.sif python train.py
+source "${CHPC_ENV:-/mnt/fac/CX500146_DS1/chpc.env}"     # sets APPTAINER_BIND, CHPC_CONTAINERS
+srun apptainer exec --nv $CHPC_CONTAINERS/pytorch_24.01.sif python train.py
 ```
 
 Mix host steps and container steps freely; each `srun` is a job step. MPI
