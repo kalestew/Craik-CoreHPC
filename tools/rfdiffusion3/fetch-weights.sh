@@ -36,6 +36,15 @@ echo "destination: $dest"
 echo "models:      $models"
 mkdir -p "$dest"
 
+# The read-only-image problem this tool has is handled by WRITABLE_TMPFS=1 in
+# its tool.conf, not here: foundry persists the checkpoint directory with
+# dotenv.set_key() into /app/foundry/.env, dotenv rewrites atomically, and so
+# it needs the DIRECTORY writable rather than the file -- a bind over the
+# file alone does not help, which cost a round trip to discover. The overlay
+# is in memory and discarded at exit, which is correct here: the write is
+# 2.5 KB of config nobody needs to keep, and the 14 GB payload goes to
+# --checkpoint-dir on the share.
+
 # --checkpoint-dir explicitly rather than relying on FOUNDRY_CHECKPOINT_DIRS.
 # That variable is a SEARCH path for reading; install still defaults to
 # ~/.foundry/checkpoints, and home is 20 GiB here (doc 02) against ~14 GB of

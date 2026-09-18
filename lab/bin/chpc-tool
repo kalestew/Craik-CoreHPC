@@ -60,7 +60,7 @@ fi
 : "${CHPC_ON_CLUSTER:=0}"
 
 # --- loading an entry ---------------------------------------------------------
-_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE"
+_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS"
 
 # Helpers a tool.conf may call from tool_exports / tool_doctor.
 _image_path() {
@@ -242,6 +242,16 @@ cmd_exec() {
       [ "$GPU" = "1" ] && _args="$_args --nv"
       # chpc.env normally exports APPTAINER_BIND; only bind explicitly if not.
       [ -z "${APPTAINER_BIND:-}" ] && _args="$_args --bind /mnt/scratch,/mnt/fac"
+      # WRITABLE_TMPFS=1 for tools that insist on writing inside their own
+      # image. rfdiffusion3 is the case: foundry persists the checkpoint
+      # directory with dotenv.set_key() into /app/foundry/.env, and dotenv
+      # rewrites atomically, so it needs the DIRECTORY writable, not just the
+      # file -- a bind over the file does not help. The overlay is in memory
+      # and discarded at exit, which is right: the write is ~2.5 KB of config
+      # we do not want to keep, and the real payload goes to --checkpoint-dir
+      # on the share. Do not reach for this to make a tool write DATA into its
+      # image; that belongs on FAC (doc 07).
+      [ "${WRITABLE_TMPFS:-0}" = "1" ] && _args="$_args --writable-tmpfs"
       # shellcheck disable=SC2086
       exec apptainer $_args ${CHPC_TOOL_BIND:+--bind "$CHPC_TOOL_BIND"} "$_sif" "$@" ;;
     native)

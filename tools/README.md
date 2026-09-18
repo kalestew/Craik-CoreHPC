@@ -79,6 +79,9 @@ UPSTREAM_REF=               # the exact commit the image was built from; set whe
 # --- container kinds ---
 IMAGE=proteinmpnn_1.0.sif   # bare name resolves under $CHPC_CONTAINERS; absolute also works
 GPU=1                       # 1 passes --nv. Set 0 for a CPU-only image and mean it.
+WRITABLE_TMPFS=1            # rare: --writable-tmpfs, for a tool that writes
+                            # inside its own image. See the note below before
+                            # using it.
 APPDIR=/opt/ProteinMPNN     # where the code lives INSIDE the image
 ENTRY=python                # default command when `chpc-tool exec` is given none
                             # (also prepended when the first argument is a FLAG;
@@ -177,6 +180,20 @@ then
     echo "failed"; tail -25 esm.log; exit 1
 fi
 ```
+
+**`WRITABLE_TMPFS=1` is for config, never for data.** Some tools insist on
+writing inside their own installation, which a read-only `.sif` forbids
+(doc 07). Where that write is small and disposable, an in-memory overlay is
+the honest fix. `rfdiffusion3` is the case: `foundry` persists its checkpoint
+directory with `dotenv.set_key()` into `/app/foundry/.env`, and python-dotenv
+rewrites atomically — so it creates a *sibling* temp file and needs the
+**directory** writable, not the file. Binding a writable `.env` over it does
+not work; that is worth knowing before you try it, because it looks like it
+should.
+
+The flag is the wrong answer whenever the write is real output or weights.
+Those go on the share through `CHPC_REFDATA`, because a tmpfs overlay is
+per-process, discarded at exit, and counts against the job's memory.
 
 **Quote anything with a space or a shell metacharacter.** A `tool.conf` is
 sourced, so `UPSTREAM_REF=v3.3.0 (tarball)` is a syntax error, and before the

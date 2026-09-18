@@ -218,6 +218,16 @@ entries in `tools/` hit this, each differently:
 | boltz | numba JIT cache, from `@numba.njit(cache=True)` at module scope | `RuntimeError: cannot cache function '_prepare_msa_arrays_inner': no locator available` — at *import*, before any input | `NUMBA_CACHE_DIR=/tmp/numba-cache` in `%environment` |
 | rfdiffusion | `schedules/` for its IGSO3 tables, mkdir'd inside the package | permission error on first run | pass `inference.schedule_directory_path` |
 | chai1 | model downloads, default inside `site-packages` | tries to download into a read-only path | `CHAI_DOWNLOADS_DIR` |
+| rfdiffusion3 | `tempfile(dir=os.getcwd())` staging | `OSError: [Errno 30] Read-only file system: '/app/foundry/.tmp_…'` mid-download | `cd` somewhere writable first |
+
+That last one is a variant worth naming separately, because nothing in the
+recipe or the command mentions the offending path. Apptainer sets the
+container's working directory to the host's — but when the host's cwd does
+not exist inside the container it falls back to the image's Docker `WORKDIR`,
+which is usually somewhere in the read-only layer. Any tool that writes
+relative to `.` then fails in a way that points at the image rather than at
+your shell. `cd` to a bound, writable directory before running, or pass
+`apptainer --pwd`.
 
 **`%test` is what catches these, and `%post` structurally cannot.** `%test`
 runs against the built image, so it is the only part of a recipe that sees the
