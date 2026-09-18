@@ -54,23 +54,37 @@ for key in COMPONENTS:
 download_if_not_exists(cached_conformers.url, cached_conformers.path)
 print(f"  {cached_conformers.path.stat().st_size:>13,}  {cached_conformers.path.name}")
 
+# The traced ESM-2 3B, which is a SEPARATE download from the six components
+# and easy to miss: chai-lab does not depend on fair-esm or transformers --
+# neither is installed in this image -- it ships its own TorchScript trace and
+# fetches it lazily from a different URL the first time embeddings are needed.
+# `--use-esm-embeddings` defaults to TRUE, so skipping this leaves a cache
+# that looks complete and fails on a compute node at the first real fold.
+# URL and folder both come from chai's own module so a rename is an
+# ImportError here rather than a 404 in a job.
+from chai_lab.data.dataset.embeddings.esm import ESM_URL, esm_cache_folder
+esm_path = esm_cache_folder / ESM_URL.rsplit("/", 1)[-1]
+download_if_not_exists(ESM_URL, esm_path)
+print(f"  {esm_path.stat().st_size:>13,}  {esm_path.name}")
+
 # torch.jit.load is the real check. A truncated download is still a file, and
 # every one of these is a TorchScript archive that either deserialises or does
 # not -- which is the same kind of structural check the rfdiffusion fetch uses
 # zipfile for, and it needs no manifest either.
 import torch
 bad = 0
-for key in COMPONENTS:
-    p = chai1_component(key)
+targets = [(k, chai1_component(k)) for k in COMPONENTS]
+targets.append((esm_path.name, esm_path))
+for name, p in targets:
     try:
         torch.jit.load(str(p), map_location="cpu")
     except Exception as e:
-        print(f"CORRUPT {key}: {type(e).__name__}: {e}", file=sys.stderr)
+        print(f"CORRUPT {name}: {type(e).__name__}: {e}", file=sys.stderr)
         bad += 1
 if bad:
-    print(f"FAILED: {bad} of {len(COMPONENTS)} components do not load", file=sys.stderr)
+    print(f"FAILED: {bad} of {len(targets)} artefacts do not load", file=sys.stderr)
     sys.exit(1)
-print(f"ok: all {len(COMPONENTS)} components deserialise")
+print(f"ok: all {len(targets)} TorchScript artefacts deserialise")
 PY
 
 echo
