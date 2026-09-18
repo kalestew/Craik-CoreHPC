@@ -43,6 +43,20 @@ PY
 %environment
     export LC_ALL=C.UTF-8
     export PYTHONNOUSERSITE=1
+    # Boltz decorates its MSA featurizer with @numba.njit(cache=True), and
+    # numba's default cache location is a __pycache__ beside the source file.
+    # A .sif is a read-only squashfs, so numba cannot find anywhere to put it
+    # and refuses at IMPORT time -- before any weights, any GPU, any input:
+    #
+    #   RuntimeError: cannot cache function '_prepare_msa_arrays_inner':
+    #   no locator available for file '.../boltz/data/feature/featurizer.py'
+    #
+    # NUMBA_CACHE_DIR switches numba to a user-wide locator rooted wherever
+    # this points. /tmp is right on this cluster: apptainer binds the host's,
+    # every compute node has local NVMe there, and it is per-node so two jobs
+    # cannot fight over one cache file. Overridable, because a site whose /tmp
+    # is tiny or noexec will want it elsewhere.
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
     # BOLTZ_CACHE is deliberately NOT set here. Boltz's --cache reads it, and
     # it has to point at this cluster's FAC share -- which is a site fact, not
     # a property of Boltz. The registry owns site facts: chpc-tool resolves it
@@ -51,9 +65,17 @@ PY
 
 %test
     set -eu
-    # Login node has no GPU; --help touches no weights and no device.
+    # This runs against the BUILT image, which is read-only -- and that is the
+    # point. `boltz predict --help` imports boltz.main, which imports the
+    # featurizer, which runs @numba.njit(cache=True) at module scope. On a
+    # writable filesystem that always works, so %post cannot catch it; only a
+    # read-only test can. It is the reason NUMBA_CACHE_DIR exists above.
+    test -n "${NUMBA_CACHE_DIR:-}" || { echo "NUMBA_CACHE_DIR unset"; exit 1; }
     boltz predict --help > /dev/null
     python -c "import boltz, torch; print('boltz ok, torch', torch.__version__)"
+    # Prove the cache was actually written somewhere, rather than numba having
+    # silently fallen back to not caching.
+    test -d "$NUMBA_CACHE_DIR" || { echo "numba wrote no cache at $NUMBA_CACHE_DIR"; exit 1; }
 
 %runscript
     exec boltz "$@"

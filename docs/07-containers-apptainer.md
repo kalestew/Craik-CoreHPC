@@ -177,6 +177,35 @@ Sandboxes are directories with many small files; keep them on scratch and
 delete them once frozen. Always regenerate the `.def` so the build is
 reproducible; a sif from a sandbox is a snapshot, not a recipe.
 
+## The commonest way a recipe passes `%post` and fails anyway
+
+A `.sif` is a **read-only** squashfs, but `%post` runs against a writable
+sandbox. So any package that writes inside its own installed location works
+perfectly while you build it and fails the moment it is an image. Three of the
+entries in `tools/` hit this, each differently:
+
+| Tool | What it writes | Symptom | Fix |
+|---|---|---|---|
+| boltz | numba JIT cache, from `@numba.njit(cache=True)` at module scope | `RuntimeError: cannot cache function '_prepare_msa_arrays_inner': no locator available` — at *import*, before any input | `NUMBA_CACHE_DIR=/tmp/numba-cache` in `%environment` |
+| rfdiffusion | `schedules/` for its IGSO3 tables, mkdir'd inside the package | permission error on first run | pass `inference.schedule_directory_path` |
+| chai1 | model downloads, default inside `site-packages` | tries to download into a read-only path | `CHAI_DOWNLOADS_DIR` |
+
+**`%test` is what catches these, and `%post` structurally cannot.** `%test`
+runs against the built image, so it is the only part of a recipe that sees the
+real filesystem semantics. That is the argument for putting a genuine
+import-and-run in `%test` rather than a `--version` check: for this whole class
+of bug, `%post` will tell you everything is fine.
+
+Two habits that avoid the class entirely:
+
+- Point anything cache-like at `/tmp` with an overridable default —
+  `export FOO_CACHE="${FOO_CACHE:-/tmp/foo}"`. On CoreHPC `/tmp` is local
+  NVMe on every compute node (doc 05) and per-node, so concurrent jobs do not
+  share one file.
+- Point anything data-like at the registry, not at `/tmp` and not at a path
+  baked into the image. `CHPC_REFDATA` exists for exactly this, and a share
+  path compiled into a recipe makes that recipe wrong for the next lab.
+
 ## Running containers
 
 ```bash
