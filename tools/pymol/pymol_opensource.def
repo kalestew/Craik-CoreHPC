@@ -1,0 +1,51 @@
+Bootstrap: docker
+From: debian:12-slim
+
+# PyMOL, open-source build, for scripted rendering in batch.
+#
+# Debian's `pymol` package IS the open-source build (2.5.0 in bookworm), which
+# is what we want: the Schrodinger incentive build is separately licensed and
+# must never be placed on a shared share. Taking it from the distro also means
+# the version is pinned by the base tag and the dependency graph is somebody
+# else's problem, which for a rendering utility is the right trade.
+#
+# Build:  chpc-tool build pymol
+
+%labels
+    Tool         pymol
+    Version      opensource-bookworm
+    Upstream     https://github.com/schrodinger/pymol-open-source
+    UpstreamRef  debian bookworm pymol package
+    Licence      BSD-like (open-source PyMOL; NOT the Schrodinger build)
+    Base         debian:12-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends pymol python3-pymol
+    rm -rf /var/lib/apt/lists/*
+
+    # Assert this is the open-source build and that it runs with no display,
+    # which is the only mode it will ever be used in here.
+    pymol -cq -d "print('pymol', cmd.get_version()[0])"
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYMOL_QUIET=1
+
+%test
+    set -eu
+    pymol -cq -d "print(cmd.get_version()[0])"
+
+%runscript
+    exec pymol "$@"
+
+%help
+    Open-source PyMOL, headless.
+
+      chpc-tool exec pymol -- pymol -cq model.pdb -d "hide everything; show cartoon; png out.png, dpi=300, ray=1"
+
+    Always pass -cq (command line, quiet): there is no display on a compute
+    node, and without it PyMOL waits for a GUI that never arrives.

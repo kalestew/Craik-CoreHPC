@@ -9,6 +9,7 @@ chpc-tool list                      # what exists, and whether it is actually bu
 chpc-tool export proteinmpnn        # the variables a project's site.conf needs
 chpc-tool exec proteinmpnn -- python -c 'import torch'
 chpc-tool doctor                    # is each tool really there, and really working
+chpc-tool test proteinmpnn          # run the entry's test.sh -- what STATUS=verified means
 ```
 
 A project embeds this repo as a submodule and reads the registry; it does not
@@ -53,7 +54,7 @@ does not.
 | `README.md` | once `STATUS` leaves `planned` | provenance: what was built, by whom, when, what `test.sh` proved, and any trap |
 | `<name>_<version>.def` | containers | the Apptainer recipe. Build with `chpc-tool build`. |
 | `assets.tsv` | if it needs weights or a licence | payloads by sha256; see `chpc-assets` |
-| `test.sh` | for `verified` | a self-test of about 30 seconds, run inside the tool |
+| `test.sh` | for `verified` | a self-test of about 30 seconds, run by `chpc-tool test` |
 
 A `planned` entry needs no README: `UPSTREAM`, `LICENSE` and a `NOTE=` line in
 `tool.conf` carry everything there is to say about a tool nobody has built. The
@@ -80,6 +81,8 @@ IMAGE=proteinmpnn_1.0.sif   # bare name resolves under $CHPC_CONTAINERS; absolut
 GPU=1                       # 1 passes --nv. Set 0 for a CPU-only image and mean it.
 APPDIR=/opt/ProteinMPNN     # where the code lives INSIDE the image
 ENTRY=python                # default command when `chpc-tool exec` is given none
+                            # (also prepended when the first argument is a FLAG;
+                            #  see the trap below -- a script PATH is not a flag)
 
 # --- native / conda kinds ---
 PREFIX=$CHPC_SOFTWARE/rosetta314    # install root
@@ -123,3 +126,30 @@ container is *"Commit the `.def` and the wrapper to this repo."* Until now there
 nowhere to put them, so `IgGase_eng` grew a `pipelines/slurm/containers/` that was
 going to hold the same files. Two homes for one recipe is how the lab ends up with two
 slightly different RFdiffusion images. This directory is that one home.
+
+## Two traps worth knowing before you write an entry
+
+**`ENTRY` is prepended for a flag, not for a script path.** `chpc-tool exec`
+prepends `ENTRY` when it is given no command at all, or when the first argument
+starts with a dash — so `chpc-tool exec dssp --version` means `mkdssp --version`.
+It does **not** prepend it in front of a path, because a path is a perfectly good
+command and `run_tool` passes whole command lines through. The consequence is
+that with `ENTRY=python`,
+
+```bash
+chpc-tool exec proteinmpnn -- /opt/ProteinMPNN/protein_mpnn_run.py --help
+```
+
+makes apptainer try to execute the `.py` itself and fails with a bare
+`FATAL: permission denied`, which says nothing about a missing interpreter.
+Spell the interpreter out. The generated `$CHPC_LAB/bin/<tool>` wrapper is the
+other way round — it always prepends `ENTRY`, because a wrapper named after a
+tool takes that tool's arguments.
+
+**A `test.sh` needs a fixture with real variety, not a minimal one.**
+`_template/make_test_pdb.sh` generates the backbone the tests use, and it
+alternates helix with extended segments *and* cycles residue names. Both matter:
+foldseek's prefilter scores a combined amino-acid + 3Di k-mer, so a pure helix
+(one 3Di state) or a poly-alanine chain (one residue type) fails to match
+**itself** and looks exactly like a broken tool. Anything doing structural or
+profile search has the same sensitivity.

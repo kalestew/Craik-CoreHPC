@@ -1,0 +1,55 @@
+Bootstrap: docker
+From: ghcr.io/sokrypton/colabfold:1.5.5-cuda12.2.2
+
+# ColabFold 1.5.5 -- AlphaFold2 with fast MMseqs2-based MSAs.
+#
+# A pull, not a build: upstream publishes a working CUDA image and there is
+# nothing the lab needs to add to it. The recipe exists anyway so the image has
+# provenance in git and can be reproduced after a purge, which a bare
+# `apptainer pull` in somebody's shell history cannot.
+#
+# HARDWARE LIMIT: the upstream tag is cuda12.2, which predates sm_120, so this
+# will not run on the RTX Pro 6000 (Blackwell) nodes ggpu1-[13-19]. Fine on
+# L40S (sm_89) and H100/H200 (sm_90). Ask for --gres=gpu:nvidia_l40s:1.
+#
+# Build:  chpc-tool build colabfold
+
+%labels
+    Tool         colabfold
+    Version      1.5.5
+    Upstream     https://github.com/sokrypton/ColabFold
+    UpstreamRef  ghcr.io/sokrypton/colabfold:1.5.5-cuda12.2.2
+    Licence      MIT (code); AlphaFold2 weights CC-BY-4.0
+    Base         ghcr.io/sokrypton/colabfold:1.5.5-cuda12.2.2
+    GPUArch      sm_89 sm_90 only -- NOT sm_120 (cuda12.2)
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    # Assert the entry point is where we think it is. Nothing else to do.
+    command -v colabfold_batch
+
+%environment
+    export LC_ALL=C.UTF-8
+
+%test
+    set -eu
+    colabfold_batch --help > /dev/null
+
+%runscript
+    exec colabfold_batch "$@"
+
+%help
+    ColabFold 1.5.5.
+
+      chpc-tool exec colabfold -- colabfold_batch in.fasta out/
+
+    AlphaFold2 weights are CC-BY-4.0 and may be used commercially -- unlike
+    AlphaFold3, which is why this is the AF2 route and not an AF3 one.
+
+    --use_msa_server sends sequences to a PUBLIC remote MSA server. For
+    unpublished designs, fetch MSAs locally with the mmseqs2 entry instead.
+
+    Weights download on first use into the image's own cache path, which is
+    read-only here; pass --data "$CHPC_LAB/data/colabfold" and populate it once
+    on the login node.

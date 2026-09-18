@@ -69,8 +69,12 @@ apptainer build ../mytool_1.0.sif mytool_1.0.def
 apptainer build --ignore-fakeroot-command ../mytool_1.0.sif mytool_1.0.def
 ```
 
-`templates/apptainer/build.sh` does this, retrying with
-`--ignore-fakeroot-command` automatically.
+`templates/apptainer/build.sh` does this, and retries with
+`--ignore-fakeroot-command` **only** when the log actually says
+`libs/fakeroot failed`. Apptainer prints that suggestion after any failed
+`%post`, so retrying on it blindly doubles the wall time of every genuine
+recipe error — ten minutes each, on a login node capped at 4 CPUs, to
+reproduce a failure you already have.
 
 Minimal definition file (`templates/apptainer/minimal.def`):
 
@@ -220,6 +224,7 @@ Rules:
 | Problem | Fix |
 |---------|-----|
 | `mount /mnt/fac->/mnt/fac error: destination /mnt/fac doesn't exist in container`, then `while running %post section: exit status 255` | **`APPTAINER_BIND` leaking into the build.** `chpc.env` exports `APPTAINER_BIND=/mnt/scratch,/mnt/fac` on every node, and `apptainer build` honours it while running `%post` — against a base image with no `/mnt/fac` to mount onto. `unset APPTAINER_BIND` before building; `templates/apptainer/build.sh` now does. Binds are a runtime concern, never a build one. Verified 2026-09-17. |
+| `error: externally-managed-environment` from `pip` in `%post`, then `exit status 1` | **PEP 668.** The `pytorch/pytorch` images ship a conda python marked EXTERNALLY-MANAGED, so a bare `pip install` refuses. Apptainer then suggests `--ignore-fakeroot-command`, which is unrelated and wastes a second full build. `export PIP_BREAK_SYSTEM_PACKAGES=1` at the top of `%post`: inside a container the system interpreter *is* the environment, so there is nothing to protect it from. Verified 2026-09-17. |
 | `exec /.singularity.d/libs/fakeroot failed: a shared library is likely missing` | Alpine/musl base: add `--ignore-fakeroot-command` |
 | `%post` step needs real root (chown, setuid, systemd) | not possible here; build on your Mac (Option B) |
 | `--fakeroot` errors | it is not enabled on CoreHPC; drop the flag |

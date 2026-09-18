@@ -8,6 +8,11 @@ set -euo pipefail
 IMAGE="${IMAGE:-mytool_1.0.sif}"        # file name inside $CHPC_CONTAINERS, or absolute path
 GPU="${GPU:-0}"                          # 1 = pass --nv
 EXTRA_BIND="${EXTRA_BIND:-}"             # e.g. "$CHPC_LAB/data:/refdata:ro"
+# The program this wrapper IS. `foldseek version` has to mean "run foldseek
+# with the argument version", not "run a program called version" -- a wrapper
+# named after a tool takes the tool's arguments, not a command line. Empty
+# means the caller names the program, which is the generic-copy behaviour.
+ENTRY="${ENTRY:-}"
 
 if [ -z "${CHPC_CONTAINERS:-}" ]; then
   for f in "${CHPC_ENV:-}" "/mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env" "$HOME/chpc.env"; do
@@ -24,4 +29,6 @@ args=(exec)
 [ "$GPU" = "1" ] && args+=(--nv)
 [ -z "${APPTAINER_BIND:-}" ] && args+=(--bind /mnt/scratch,/mnt/fac)   # chpc.env normally sets APPTAINER_BIND
 [ -n "$EXTRA_BIND" ] && args+=(--bind "$EXTRA_BIND")
-exec apptainer "${args[@]}" "$sif" "$@"
+# ENTRY unquoted on purpose: it may be more than one word ("python -u").
+# shellcheck disable=SC2086
+exec apptainer "${args[@]}" "$sif" ${ENTRY:+$ENTRY} "$@"

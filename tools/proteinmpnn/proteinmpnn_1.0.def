@@ -1,0 +1,76 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+
+# ProteinMPNN -- inverse folding / sequence design.
+#
+# The base tag matches the cluster's CUDA 13.2 exactly (driver 595.71.05), so
+# nothing is relying on minor-version compatibility. Runtime, not devel: nothing
+# here compiles.
+#
+# Build:  chpc-tool build proteinmpnn      (login node -- the only one with internet)
+
+%labels
+    Tool         proteinmpnn
+    Version      1.0
+    Upstream     https://github.com/dauparas/ProteinMPNN
+    UpstreamRef  8907e6671bfbfc92303b5f79c4b5e6ce47cdef57
+    Licence      MIT
+    Base         pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    # Pinned, not `main`. An image built from a moving branch is not a recipe.
+    REF=8907e6671bfbfc92303b5f79c4b5e6ce47cdef57
+    git clone https://github.com/dauparas/ProteinMPNN /opt/ProteinMPNN
+    git -C /opt/ProteinMPNN checkout --detach "$REF"
+    git -C /opt/ProteinMPNN rev-parse HEAD > /opt/ProteinMPNN/.built-from
+    rm -rf /opt/ProteinMPNN/.git
+
+    # ProteinMPNN ships its weights in-tree, and that is load-bearing: nothing
+    # downloads them at run time, so if the clone came up short the failure
+    # would surface in a job, not here. Assert instead.
+    for d in vanilla_model_weights soluble_model_weights ca_model_weights; do
+        ls /opt/ProteinMPNN/"$d"/*.pt >/dev/null 2>&1 \
+            || { echo "FATAL: no weights in $d" >&2; exit 1; }
+    done
+    # Stages 40 and 51 reach into helper_scripts/ by path; same argument.
+    test -f /opt/ProteinMPNN/helper_scripts/parse_multiple_chains.py
+    test -f /opt/ProteinMPNN/protein_mpnn_run.py
+
+    chmod -R a+rX /opt/ProteinMPNN
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PROTEINMPNN_DIR=/opt/ProteinMPNN
+    # Keep the caller's ~/.local/lib/python* off sys.path. Host site-packages
+    # leaking in is the classic way a container stops being reproducible.
+    export PYTHONNOUSERSITE=1
+
+%test
+    set -eu
+    # The login node has no GPU, so this must stay CPU-only.
+    python -c "import torch, numpy; print('torch', torch.__version__, 'numpy', numpy.__version__)"
+    python /opt/ProteinMPNN/protein_mpnn_run.py --help > /dev/null
+    echo "built from $(cat /opt/ProteinMPNN/.built-from)"
+
+%runscript
+    exec "$@"
+
+%help
+    ProteinMPNN, pinned at 8907e667.
+
+      chpc-tool exec proteinmpnn -- /opt/ProteinMPNN/protein_mpnn_run.py --help
+      chpc-tool exec proteinmpnn -- /opt/ProteinMPNN/helper_scripts/parse_multiple_chains.py ...
+
+    Weights ship inside the image: vanilla_model_weights/, soluble_model_weights/
+    (select with --use_soluble_model) and ca_model_weights/.
+
+    Note ProteinMPNN's own residue indexing walks every integer between a
+    chain's first and last residue number. Map through the project's
+    pipelines/filters/mpnn_inputs.py rather than assuming a chain index.

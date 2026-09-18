@@ -1,0 +1,58 @@
+Bootstrap: docker
+From: debian:12-slim
+
+# Foldseek -- structural homology search.
+#
+# Upstream ships a prebuilt AVX2 binary per release, so there is nothing to
+# compile: the recipe is a pinned download. Compute nodes are AMD EPYC 9745
+# (Zen 5, AVX2 and AVX-512 both present), verified 2026-09-17, so the avx2
+# asset is safe -- the sse41 one would only cost speed, but arm64 would SIGILL.
+#
+# Build:  chpc-tool build foldseek
+
+%labels
+    Tool         foldseek
+    Version      10-941cd33
+    Upstream     https://github.com/steineggerlab/foldseek
+    UpstreamRef  10-941cd33
+    Licence      GPL-3.0
+    Base         debian:12-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates libgomp1
+    rm -rf /var/lib/apt/lists/*
+
+    REL=10-941cd33
+    curl -fsSL -o /tmp/foldseek.tar.gz \
+        "https://github.com/steineggerlab/foldseek/releases/download/${REL}/foldseek-linux-avx2.tar.gz"
+    tar -xzf /tmp/foldseek.tar.gz -C /opt
+    rm -f /tmp/foldseek.tar.gz
+    ln -s /opt/foldseek/bin/foldseek /usr/local/bin/foldseek
+    chmod -R a+rX /opt/foldseek
+
+    foldseek version
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PATH=/opt/foldseek/bin:$PATH
+
+%test
+    set -eu
+    foldseek version
+    foldseek easy-search --help > /dev/null 2>&1 || true
+
+%runscript
+    exec foldseek "$@"
+
+%help
+    Foldseek 10-941cd33, CPU build.
+
+      chpc-tool exec foldseek -- foldseek easy-search query.pdb targetDB res.m8 tmp
+
+    Databases are reference data and belong under $CHPC_LAB/data/foldseek, not
+    in the image: `foldseek databases PDB <dir> tmp` on the login node, once.
+    They are large -- check the share has room before downloading.

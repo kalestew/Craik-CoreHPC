@@ -1,0 +1,57 @@
+Bootstrap: docker
+From: debian:12-slim
+
+# HH-suite 3.3.0 -- profile-HMM search, for remote homology where hmmer stops.
+#
+# Prebuilt AVX2 release tarball; compute nodes are AMD EPYC 9745 with AVX2 and
+# AVX-512, verified 2026-09-17.
+#
+# Build:  chpc-tool build hhsuite
+
+%labels
+    Tool         hhsuite
+    Version      3.3.0
+    Upstream     https://github.com/soedinglab/hh-suite
+    UpstreamRef  v3.3.0
+    Licence      GPL-3.0
+    Base         debian:12-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates libgomp1 python3
+    rm -rf /var/lib/apt/lists/*
+
+    mkdir -p /opt/hhsuite
+    curl -fsSL -o /tmp/hhsuite.tar.gz \
+        "https://github.com/soedinglab/hh-suite/releases/download/v3.3.0/hhsuite-3.3.0-AVX2-Linux.tar.gz"
+    tar -xzf /tmp/hhsuite.tar.gz -C /opt/hhsuite
+    rm -f /tmp/hhsuite.tar.gz
+    chmod -R a+rX /opt/hhsuite
+
+    /opt/hhsuite/bin/hhsearch -h 2>&1 | head -2
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PATH=/opt/hhsuite/bin:/opt/hhsuite/scripts:$PATH
+    export HHLIB=/opt/hhsuite
+
+%test
+    set -eu
+    /opt/hhsuite/bin/hhblits -h > /dev/null 2>&1 || true
+    test -x /opt/hhsuite/bin/hhsearch
+
+%runscript
+    exec hhsearch "$@"
+
+%help
+    HH-suite 3.3.0.
+
+      chpc-tool exec hhsuite -- hhblits -i query.fa -d $CHPC_LAB/data/hhsuite/UniRef30 -o out.hhr
+
+    This tool is useless without a database, and the databases are the
+    expensive part: UniRef30 is ~90 GB uncompressed, BFD ~1.7 TB. Budget the
+    share BEFORE downloading one -- FAC is 5 TB total for the whole lab.
+    Databases go in $CHPC_LAB/data/hhsuite/.

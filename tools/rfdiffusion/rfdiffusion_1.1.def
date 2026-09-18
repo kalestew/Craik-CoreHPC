@@ -1,0 +1,121 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+
+# RFdiffusion 1.1.0 -- generative backbone design.
+#
+# Deliberately NOT built from upstream's env/SE3nv.yml. That file asks for
+# python 3.9, pytorch 1.9 and cudatoolkit 11.1, and CUDA 11.1 emits no kernels
+# for sm_89, sm_90 or sm_120 -- which is every GPU on this cluster. An image
+# built to upstream's spec would import cleanly, allocate cleanly, and then die
+# with "no kernel image is available for execution on the device" on the first
+# forward pass. Upstream's README says to edit the file for your GPU; this is
+# that edit, written down.
+#
+# The replacement stack is torch 2.3.1 + cu121 + DGL, chosen because DGL is the
+# binding constraint: it publishes no wheels past torch 2.4, and SE3Transformer
+# -- which RFdiffusion vendors under env/SE3Transformer -- is a DGL program.
+# This is the same stack tools/placer uses, for the same reason.
+#
+# HARDWARE LIMIT: cu121 has no sm_120 kernels, so this cannot run on the RTX
+# Pro 6000 (Blackwell) nodes ggpu1-[13-19]. Fine on L40S (sm_89) and H100/H200
+# (sm_90). Ask for --gres=gpu:nvidia_l40s:1, not --gres=gpu:1.
+#
+# Build:  chpc-tool build rfdiffusion
+
+%labels
+    Tool         rfdiffusion
+    Version      1.1.0
+    Upstream     https://github.com/RosettaCommons/RFdiffusion
+    UpstreamRef  86507b6538f51fce57b5a72477165f03999ed7ae
+    Licence      BSD-3-Clause (covers source AND model weights)
+    Base         pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+    GPUArch      sm_89 sm_90 only -- NOT sm_120 (dgl/cu121)
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    python -c "import sys; assert sys.version_info[:2] == (3,10), sys.version"
+
+    # PEP 668: the pytorch base images ship a conda python marked
+    # EXTERNALLY-MANAGED, so a bare `pip install` refuses with
+    #   error: externally-managed-environment
+    # and apptainer then reports "exit status 1" under a message suggesting
+    # --ignore-fakeroot-command, which has nothing to do with it. Inside a
+    # container the system interpreter IS the environment -- there is no OS
+    # package manager to conflict with and nothing else sharing it -- so
+    # overriding the marker is correct here, not a workaround.
+    export PIP_BREAK_SYSTEM_PACKAGES=1
+
+    pip install --no-cache-dir dgl==2.4.0 -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
+    pip install --no-cache-dir e3nn==0.5.4 hydra-core omegaconf pyrsistent icecream \
+        "wandb<0.18" pynvml "git+https://github.com/NVIDIA/dllogger#egg=dllogger"
+
+    REF=86507b6538f51fce57b5a72477165f03999ed7ae
+    git clone https://github.com/RosettaCommons/RFdiffusion /opt/RFdiffusion
+    git -C /opt/RFdiffusion checkout --detach "$REF"
+    git -C /opt/RFdiffusion rev-parse HEAD > /opt/RFdiffusion/.built-from
+    rm -rf /opt/RFdiffusion/.git
+
+    # --no-deps on both: env/SE3Transformer/requirements.txt pins e3nn==0.3.3,
+    # wandb==0.12.0 and decorator==5.1.0, a 2021 set that pip would happily
+    # install straight over the stack above. The pins are upstream's snapshot,
+    # not requirements -- SE3Transformer only uses e3nn for o3.spherical_
+    # harmonics, whose signature is unchanged in 0.5.4. Installing the code and
+    # refusing the pins is the whole point.
+    cd /opt/RFdiffusion/env/SE3Transformer
+    pip install --no-cache-dir --no-deps .
+    cd /opt/RFdiffusion
+    pip install --no-cache-dir --no-deps -e .
+
+    # Prove the import graph actually resolves. This is the step that catches
+    # an e3nn or dgl API drift, and it is cheap here and expensive in a job.
+    python -c "
+import torch, dgl, e3nn, hydra
+import se3_transformer
+from rfdiffusion.inference import model_runners
+print('torch', torch.__version__, 'dgl', dgl.__version__, 'e3nn', e3nn.__version__)
+print('model_runners ok')
+"
+    chmod -R a+rX /opt/RFdiffusion
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    export RFDIFFUSION_DIR=/opt/RFdiffusion
+
+%test
+    set -eu
+    python -c "from rfdiffusion.inference import model_runners; print('ok')"
+    test -x /opt/RFdiffusion/scripts/run_inference.py
+
+%runscript
+    exec python /opt/RFdiffusion/scripts/run_inference.py "$@"
+
+%help
+    RFdiffusion 1.1.0, pinned at 86507b65, on a torch 2.3.1 / cu121 / DGL stack.
+
+    Weights are NOT in the image -- 4.1 GB on FAC, fetched once by
+    tools/rfdiffusion/fetch-weights.sh. Pass them explicitly:
+
+      chpc-tool exec rfdiffusion -- python /opt/RFdiffusion/scripts/run_inference.py \
+        inference.model_directory_path=$RFDIFFUSION_MODELS \
+        inference.schedule_directory_path=$RFDIFFUSION_SCHEDULES \
+        inference.output_prefix=out/design inference.num_designs=5 ...
+
+    The schedule_directory_path override is NOT optional. RFdiffusion defaults
+    it to a `schedules/` directory INSIDE the installed package, which it
+    mkdirs and writes IGSO3 tables into on first run -- and the package lives
+    in a read-only squashfs here, so the default fails. Point it at the
+    writable FAC directory the registry exports; the tables then compute once
+    and are reused, instead of every job paying the "Calculating IGSO3" cost.
+
+    RFdiffusion is a hydra app: it creates outputs/<date>/<time>/ in the
+    current working directory whether you asked for it or not. cd into the
+    output directory first.
+
+    Needs --gres=gpu:nvidia_l40s:1 (or H100/H200), never a bare --gres=gpu:1.

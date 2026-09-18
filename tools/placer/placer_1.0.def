@@ -1,0 +1,116 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+
+# PLACER -- stochastic active-site repacking, for preorganisation.
+#
+# This image is an ENVIRONMENT, not an application. PLACER's own checkout and
+# weights live on FAC under $CHPC_LAB/data/placer and are named by PLACER_DIR,
+# because the job invokes run_PLACER.py by path and cd's into the checkout.
+# Keeping the code outside means a PLACER update is a git pull, not a rebuild
+# of a 9 GB image.
+#
+# The version pins are not preference, they are PLACER's environment lockfile
+# (envs/placer_env.yml): python 3.10, torch 2.3.1 cu121, dgl 2.4.0 th23 cu121,
+# e3nn 0.5.4. DGL is what freezes it -- DGL publishes no wheels past torch 2.4,
+# so "just bump torch" is not available, and the SE3Transformer PLACER imports
+# is a DGL program.
+#
+# HARDWARE LIMIT: cu121 has no sm_120 kernels, so this cannot run on the RTX
+# Pro 6000 (Blackwell) nodes ggpu1-[13-19]. Fine on L40S (sm_89) and H100/H200
+# (sm_90). Jobs must say --gres=gpu:nvidia_l40s:1 rather than --gres=gpu:1,
+# which can land anywhere and dies with "no kernel image is available for
+# execution on the device".
+#
+# Build:  chpc-tool build placer
+
+%labels
+    Tool         placer
+    Version      1.0
+    Upstream     https://github.com/baker-laboratory/PLACER
+    UpstreamRef  7dc5563300e7143582d85636bdd413d4c7688e9a
+    Licence      BSD-3-Clause (covers source AND model weights)
+    Base         pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
+    GPUArch      sm_89 sm_90 only -- NOT sm_120 (dgl/cu121)
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    python -c "import sys; assert sys.version_info[:2] == (3,10), sys.version"
+
+    # PEP 668: the pytorch base images ship a conda python marked
+    # EXTERNALLY-MANAGED, so a bare `pip install` refuses with
+    #   error: externally-managed-environment
+    # and apptainer then reports "exit status 1" under a message suggesting
+    # --ignore-fakeroot-command, which has nothing to do with it. Inside a
+    # container the system interpreter IS the environment -- there is no OS
+    # package manager to conflict with and nothing else sharing it -- so
+    # overriding the marker is correct here, not a workaround.
+    export PIP_BREAK_SYSTEM_PACKAGES=1
+
+    # DGL is not on PyPI for CUDA builds; it has its own per-torch wheel index.
+    pip install --no-cache-dir dgl==2.4.0 -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
+    pip install --no-cache-dir e3nn==0.5.4
+    pip install --no-cache-dir "se3-transformer @ git+https://github.com/NVIDIA/DeepLearningExamples.git#subdirectory=DGLPyTorch/DrugDiscovery/SE3Transformer"
+
+    # openbabel has no usable PyPI wheel (it is a C++ library with python
+    # bindings); conda-forge is the supported route and this base is a conda
+    # image, so use it rather than fighting a source build.
+    conda install -y -c conda-forge openbabel=3.1.1
+    conda clean -afy
+
+    # Validate the environment against the real code. The checkout does not
+    # ship in this image, so clone it, import through it, and throw it away --
+    # otherwise the first thing to discover a broken dgl/e3nn/torch triple
+    # would be a six-hour array job.
+    git clone https://github.com/baker-laboratory/PLACER /tmp/PLACER
+    git -C /tmp/PLACER checkout --detach 7dc5563300e7143582d85636bdd413d4c7688e9a
+    cd /tmp/PLACER
+    python -c "
+import torch, dgl, e3nn
+print('torch', torch.__version__, 'dgl', dgl.__version__, 'e3nn', e3nn.__version__)
+from openbabel import openbabel
+import sys; sys.path.insert(0, '/tmp/PLACER')
+import PLACER
+print('PLACER imports')
+"
+    test -s /tmp/PLACER/weights/PLACER_model_1.pt
+    cd /
+    rm -rf /tmp/PLACER
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # PLACER_DIR is set by the registry, not here: the checkout is on the FAC
+    # share and its path is a site fact.
+
+%test
+    set -eu
+    python -c "import torch, dgl, e3nn; from openbabel import openbabel; print('env ok', torch.__version__, dgl.__version__)"
+
+%runscript
+    exec "$@"
+
+%help
+    PLACER's environment. The code and weights are on FAC:
+
+      chpc-tool exec placer -- python "$PLACER_DIR/run_PLACER.py" --help
+
+    Install the checkout once (login node):
+
+      git clone https://github.com/baker-laboratory/PLACER "$CHPC_LAB/data/placer"
+      git -C "$CHPC_LAB/data/placer" checkout --detach 7dc5563
+
+    Two things this pipeline learned the hard way:
+      - PLACER's multi-model output MUST be split before scoring. Handing the
+        whole ensemble to a scorer that reads model 0 scores sample 1 n times
+        and reports a fraction of exactly 0.000 or 1.000.
+      - Preorganisation measured off a constrained relax is not a measurement;
+        the constraints impose the geometry. PLACER's stochastic sampling is
+        what makes that column honest.
+
+    Needs --gres=gpu:nvidia_l40s:1 (or H100/H200), never a bare --gres=gpu:1.

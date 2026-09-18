@@ -1,0 +1,56 @@
+Bootstrap: docker
+From: debian:12-slim
+
+# MMseqs2 -- sequence search and clustering; also what ColabFold uses under
+# the hood for MSAs.
+#
+# Same shape as foldseek: upstream ships a prebuilt AVX2 binary, so the recipe
+# is a pinned download rather than a build.
+#
+# Build:  chpc-tool build mmseqs2
+
+%labels
+    Tool         mmseqs2
+    Version      18-8cc5c
+    Upstream     https://github.com/soedinglab/MMseqs2
+    UpstreamRef  18-8cc5c
+    Licence      GPL-3.0
+    Base         debian:12-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates libgomp1 zlib1g libbz2-1.0
+    rm -rf /var/lib/apt/lists/*
+
+    REL=18-8cc5c
+    curl -fsSL -o /tmp/mmseqs.tar.gz \
+        "https://github.com/soedinglab/MMseqs2/releases/download/${REL}/mmseqs-linux-avx2.tar.gz"
+    tar -xzf /tmp/mmseqs.tar.gz -C /opt
+    rm -f /tmp/mmseqs.tar.gz
+    ln -s /opt/mmseqs/bin/mmseqs /usr/local/bin/mmseqs
+    chmod -R a+rX /opt/mmseqs
+
+    mmseqs version
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PATH=/opt/mmseqs/bin:$PATH
+
+%test
+    set -eu
+    mmseqs version
+
+%runscript
+    exec mmseqs "$@"
+
+%help
+    MMseqs2 18-8cc5c, CPU build.
+
+      chpc-tool exec mmseqs2 -- mmseqs easy-search query.fa targetDB res.m8 tmp
+
+    Databases belong under $CHPC_LAB/data/mmseqs2, downloaded once on the login
+    node with `mmseqs databases`. UniRef90 and friends are hundreds of GB --
+    check the share before starting one.

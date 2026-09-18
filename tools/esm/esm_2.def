@@ -1,0 +1,102 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+
+# ESM-2 -- protein language model, for naturalness / pseudo-likelihood scoring.
+#
+# The weights are baked INTO the image, which is the opposite of what boltz and
+# rfdiffusion do here, and deliberately:
+#   - esm2_t33_650M_UR50D is frozen. It is a 2022 release that will never be
+#     revised, so "a weights refresh should not force an image rebuild" -- the
+#     argument for keeping RFdiffusion's weights outside -- does not apply.
+#   - it removes a download from run time entirely. fair-esm fetches through
+#     torch.hub into $TORCH_HOME, and TORCH_HOME is a SHARED variable name:
+#     exporting it for ESM from the registry would redirect torch.hub for every
+#     other tool in the same job script. Baking the file in means ESM needs no
+#     environment at all.
+#   - MIT licence, so redistribution inside a lab image is unencumbered.
+#
+# Build:  chpc-tool build esm
+
+%labels
+    Tool         esm
+    Version      2
+    Upstream     https://github.com/facebookresearch/esm
+    UpstreamRef  fair-esm==2.0.0 (PyPI)
+    Models       esm2_t33_650M_UR50D, esm2_t30_150M_UR50D
+    Licence      MIT
+    Base         pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends curl ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    # PEP 668: the pytorch base images ship a conda python marked
+    # EXTERNALLY-MANAGED, so a bare `pip install` refuses with
+    #   error: externally-managed-environment
+    # and apptainer then reports "exit status 1" under a message suggesting
+    # --ignore-fakeroot-command, which has nothing to do with it. Inside a
+    # container the system interpreter IS the environment -- there is no OS
+    # package manager to conflict with and nothing else sharing it -- so
+    # overriding the marker is correct here, not a workaround.
+    export PIP_BREAK_SYSTEM_PACKAGES=1
+
+    pip install --no-cache-dir fair-esm==2.0.0
+
+    # torch.hub's layout, so esm.pretrained.* finds these with no network call.
+    CKPT=/opt/torch/hub/checkpoints
+    mkdir -p "$CKPT"
+    B=https://dl.fbaipublicfiles.com/fair-esm
+    for m in esm2_t33_650M_UR50D esm2_t30_150M_UR50D; do
+        curl -fsSL -o "$CKPT/$m.pt"                     "$B/models/$m.pt"
+        curl -fsSL -o "$CKPT/$m-contact-regression.pt"  "$B/regression/$m-contact-regression.pt"
+    done
+    chmod -R a+rX /opt/torch
+
+    # Prove the weights load offline now, rather than discovering a truncated
+    # download in a job. TORCH_HOME is not yet set from %environment during
+    # %post, so point it explicitly.
+    TORCH_HOME=/opt/torch python - <<'PY'
+import esm, torch
+m, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+n = sum(p.numel() for p in m.parameters())
+assert n > 6e8, n
+print("esm2_t33_650M_UR50D loaded,", n, "parameters")
+PY
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # In-image, so nothing is fetched at run time and nothing outside is
+    # redirected: this only applies to processes inside this container.
+    export TORCH_HOME=/opt/torch
+
+%test
+    set -eu
+    python -c "import esm; print('fair-esm', esm.__version__ if hasattr(esm,'__version__') else '2.0.0')"
+    test -s /opt/torch/hub/checkpoints/esm2_t33_650M_UR50D.pt
+
+%runscript
+    exec "$@"
+
+%help
+    ESM-2 with weights included. No network access is needed at run time.
+
+      chpc-tool exec esm -- python -c "
+      import esm, torch
+      model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()
+      bc = alphabet.get_batch_converter()
+      _,_,toks = bc([('x','MKTAYIAKQRQISFVKSHFSRQ')])
+      print(model(toks)['logits'].shape)"
+
+    Included: esm2_t33_650M_UR50D (the usual choice for naturalness) and
+    esm2_t30_150M_UR50D (small, for smoke tests).
+
+    This is ESM-2 from the archived facebookresearch/esm, which is what the
+    `fair-esm` package installs and what pseudo-likelihood scoring in the
+    literature means. EvolutionaryScale's newer ESM-3 / ESM-C is a separate
+    package with different licence terms and is a separate registry entry if
+    the lab ever wants it -- do not conflate the two.

@@ -1,0 +1,74 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# Boltz-2 -- structure prediction / restrained refinement.
+#
+# Base is a plain python:3.12-slim rather than a pytorch/pytorch tag, because
+# boltz 2.2.1 pins `numpy<2.0` and `python<3.13` and the current pytorch images
+# ship 3.13. Letting pip resolve torch inside a 3.12 base is the only
+# combination that satisfies all three. The torch wheel it pulls from PyPI
+# bundles its own CUDA runtime; NVIDIA drivers are backward compatible, so a
+# cu12.x wheel runs fine on this cluster's 595.71.05 / CUDA 13.2 driver.
+#
+# Build:  chpc-tool build boltz
+
+%labels
+    Tool         boltz
+    Version      2.2.1
+    Upstream     https://github.com/jwohlwend/boltz
+    UpstreamRef  boltz==2.2.1 (PyPI)
+    Licence      MIT
+    Base         python:3.12-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir boltz==2.2.1
+
+    # Assert the three constraints that made this base necessary, so a future
+    # bump that quietly breaks one fails here and not in a two-day GPU job.
+    python - <<'PY'
+import numpy, sys, torch
+assert sys.version_info[:2] == (3, 12), sys.version
+assert numpy.__version__.startswith("1."), numpy.__version__
+print("python", sys.version.split()[0], "numpy", numpy.__version__, "torch", torch.__version__)
+PY
+    command -v boltz
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # BOLTZ_CACHE is deliberately NOT set here. Boltz's --cache reads it, and
+    # it has to point at this cluster's FAC share -- which is a site fact, not
+    # a property of Boltz. The registry owns site facts: chpc-tool resolves it
+    # from CHPC_REFDATA and exports it. Baking a share path into the image
+    # would make the image wrong for the next lab that builds from this recipe.
+
+%test
+    set -eu
+    # Login node has no GPU; --help touches no weights and no device.
+    boltz predict --help > /dev/null
+    python -c "import boltz, torch; print('boltz ok, torch', torch.__version__)"
+
+%runscript
+    exec boltz "$@"
+
+%help
+    Boltz-2, pinned at PyPI 2.2.1.
+
+      chpc-tool exec boltz -- boltz predict input.yaml --use_msa_server --cache "$BOLTZ_CACHE"
+
+    Weights and the CCD live on FAC at $CHPC_LAB/data/boltz (BOLTZ_CACHE), not
+    inside the image, and not on scratch. Fetch them once from the login node:
+    compute nodes have no internet, so a job that has to download is a job that
+    hangs until it times out.
+
+    Do NOT rank peptide substrates with the affinity head: it is ligand-only
+    and capped at 128 atoms. Boltz also renumbers every chain from 1 and its
+    constraint references are 1-based offsets into the sequence you supply --
+    map back to EU numbering explicitly, Boltz will not carry it.

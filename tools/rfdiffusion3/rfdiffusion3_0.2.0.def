@@ -1,0 +1,67 @@
+Bootstrap: docker
+From: rosettacommons/foundry:0.2.0-slim
+
+# RFdiffusion3, via RosettaCommons/foundry.
+#
+# Built on upstream's OWN slim image rather than pip-installing rc-foundry into
+# a pytorch base. Two reasons: foundry pins python >=3.12,<3.13 together with
+# cuequivariance CUDA-12 wheels, a combination that is fiddly to reproduce and
+# that upstream has already solved; and `slim` (3.47 GB) is the variant WITHOUT
+# checkpoints, which is what we want -- the 14.6 GB of weights belong on FAC,
+# where refreshing them does not mean rebuilding a 18 GB image.
+#
+# Build:  chpc-tool build rfdiffusion3
+
+%labels
+    Tool         rfdiffusion3
+    Version      0.2.0
+    Upstream     https://github.com/RosettaCommons/foundry
+    UpstreamRef  rc-foundry==0.2.0
+    Licence      BSD-3-Clause
+    Base         rosettacommons/foundry:0.2.0-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    # Upstream's image already has rc-foundry. Assert what we depend on rather
+    # than reinstalling it: if a future tag moves the console scripts or the
+    # python version, this build fails here instead of in a design job.
+    for s in rfd3 rf3 mpnn foundry; do command -v "$s"; done
+    python -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
+    python -c "import torch; print('torch', torch.__version__)"
+
+    # Record what we actually got, since the tag is the only version handle.
+    { echo "base: rosettacommons/foundry:0.2.0-slim"; date -u +%Y-%m-%dT%H:%M:%SZ; } > /opt/.built-from
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # FOUNDRY_CHECKPOINT_DIRS is deliberately NOT set here -- it names a
+    # location on this cluster's share, which is a site fact the registry owns.
+    # foundry's own default is ~/.foundry/checkpoints, which would put 14.6 GB
+    # on a 20 GiB home quota.
+
+%test
+    set -eu
+    rfd3 --help > /dev/null
+    foundry list-available > /dev/null
+
+%runscript
+    exec rfd3 "$@"
+
+%help
+    RFdiffusion3 (rc-foundry 0.2.0). BSD-3-Clause, commercial use permitted.
+
+    Checkpoints are not in this image. Install them ONCE, on the login node --
+    compute nodes have no internet:
+
+      chpc-tool exec rfdiffusion3 -- foundry install base-models \
+          --checkpoint-dir "$CHPC_LAB/data/rfdiffusion3"
+
+    Then:
+
+      chpc-tool exec rfdiffusion3 -- rfd3 design out_dir=... inputs=spec.json
+
+    foundry also provides `rf3` (structure prediction) and `mpnn`. This entry
+    exposes rfd3; add separate entries if the lab starts using the others, so
+    each one gets its own status and doctor check.

@@ -31,6 +31,56 @@ GRES names as SLURM reports them: `nvidia_l40s`, `nvidia_rtx_pro_6000`,
 model with `--gres=gpu:nvidia_h100_nvl:1` (verify names with
 `sinfo -o "%P %G"`), or just `--gres=gpu:1` for any.
 
+## The `gpu` partition is three architectures, and `--gres=gpu:1` picks one at random
+
+This matters far more than a performance footnote, because the oldest CUDA a
+tool supports decides which of these nodes it can run on at all.
+
+| Nodes | GPU | Compute capability | Oldest CUDA that emits kernels for it |
+|---|---|---|---|
+| ggpu1-[06-12] | L40S | `sm_89` (Ada) | 11.8 |
+| ggpu1-[13-19] | RTX PRO 6000 | `sm_120` (Blackwell) | **12.8** |
+| ggpu4-[01-06] | H100 NVL | `sm_90` (Hopper) | 11.8 |
+| ggpu3-*, ggpu5-* | H200 | `sm_90` (Hopper) | 11.8 |
+
+A CUDA binary carries kernels only for the architectures it was compiled for.
+Newer *drivers* run older CUDA fine — that direction is backward compatible, and
+this cluster's 595.71.05 runs cu121 binaries without complaint — but an older
+*toolkit* cannot produce code for a GPU that did not exist when it shipped. So a
+tool pinned below CUDA 12.8 works on every node here **except** the seven
+Blackwell ones, where it dies at the first kernel launch with
+
+```
+CUDA error: no kernel image is available for execution on the device
+```
+
+which reads like a broken installation and is a scheduling accident. It is also
+intermittent in the worst way: `--gres=gpu:1` matches all of `gpu`, so the same
+script passes on Monday and fails on Tuesday depending on what was free.
+
+Several widely used tools are pinned below 12.8 and cannot be bumped, because
+the pin comes from a dependency rather than preference — DGL publishes no wheels
+past torch 2.4, and `chai_lab` requires `torch<2.7`. Those entries in
+`tools/` carry a `GPUArch` label and say so in their README. When a tool is one
+of them, name the GPU:
+
+```bash
+#SBATCH --gres=gpu:nvidia_l40s:1        # or nvidia_h100_nvl
+```
+
+Only `nvidia_l40s` and `nvidia_h100_nvl` are real options for us — the H200
+nodes are in `large_gpu` and `pod`, which our QoS refuses with `Job's QOS not
+permitted` (verified 2026-09-17). That still leaves 14 L40S plus 6 H100 NVL
+against 14 Blackwell, so avoiding sm_120 costs roughly half the queue rather
+than all of it. `--gres=gpu:1 --exclude=ggpu1-[13-19]` is the other way to say
+it and keeps both models in play, at the cost of hardcoding node names.
+
+Naming a model costs queue breadth, so do it only where it is needed. Anything
+built on a CUDA 12.8+ base — which is everything in `tools/` on a
+`pytorch/pytorch:*-cuda13.2-*` base — should keep the unrestricted
+`--gres=gpu:1`. Verified on CoreHPC 2026-09-17: a cu13.2 image reports `sm_89`
+on an L40S and runs there.
+
 ## Per-user limits (live QoS, which differ from the wiki table)
 
 | Partition (QoS) | Max nodes | Max running jobs | Max resources |

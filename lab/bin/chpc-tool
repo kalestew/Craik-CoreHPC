@@ -7,6 +7,7 @@
 #   chpc-tool export <tool>...              plain assignments for a project site.conf
 #   chpc-tool exec <tool> [--] <cmd>...     run a command through the right runtime
 #   chpc-tool doctor [<tool>...]            is it really there, and really working
+#   chpc-tool test <tool>...                run the entry's test.sh (what STATUS=verified means)
 #   chpc-tool build <tool>                  build the container from its .def
 #   chpc-tool publish <tool>                the eight publish steps from lab/README.md
 #   chpc-tool wrapper <tool>                write $CHPC_LAB/bin/<tool>
@@ -146,7 +147,21 @@ cmd_export() {
   [ $# -ge 1 ] || die "usage: chpc-tool export <tool>..."
   for _t in "$@"; do
     ( _load "$_t"
-      if type tool_exports >/dev/null 2>&1; then tool_exports; fi )
+      # `export NAME=value`, not a bare assignment. Two things need it.
+      # Apptainer passes the HOST environment into a container, so a path the
+      # registry resolved -- BOLTZ_CACHE, RFDIFFUSION_MODELS -- reaches the
+      # software inside only if it was exported; a bare assignment in
+      # site.conf stops at the job script, and the tool then falls back to its
+      # own default, which for Boltz means trying to download 3 GB of weights
+      # from a compute node that has no internet. And a stage script that
+      # shells out gets the same value the job script had.
+      # This is still an UNCONDITIONAL assignment, so site.conf continues to
+      # win over whatever is already in the environment and a stray exported
+      # variable cannot redirect a tool path. Only the run-size knobs use the
+      # ${NAME:-default} form, and they are not emitted here.
+      if type tool_exports >/dev/null 2>&1; then
+        tool_exports | sed 's/^\([A-Za-z_][A-Za-z0-9_]*=\)/export \1/'
+      fi )
   done
 }
 
@@ -167,6 +182,20 @@ cmd_exec() {
     esac
   fi
   [ $# -gt 0 ] || die "$NAME: no command given and no ENTRY in tool.conf"
+  # This tool's own variables, exported, for the reason cmd_export gives: the
+  # weights and cache paths the registry resolves have to reach the process,
+  # and inside a container they only do if they are in the environment.
+  # Without this, `chpc-tool exec boltz -- boltz predict ...` would work after
+  # sourcing site.conf and silently try to download from a compute node
+  # without it. set -f because a value is a path and must not be globbed.
+  if type tool_exports >/dev/null 2>&1; then
+    set -f; _ifs=$IFS; IFS='
+'
+    for _l in $(tool_exports); do
+      case "$_l" in [A-Za-z_]*=*) eval "export $_l" ;; esac
+    done
+    IFS=$_ifs; set +f
+  fi
   case "$KIND" in
     container)
       _sif=$(_image_path)
@@ -328,6 +357,53 @@ cmd_doctor() {
   return 0
 }
 
+# Run an entry's test.sh. The registry says STATUS=verified means "test.sh has
+# passed on a compute node", and until this existed nothing actually ran it --
+# so `verified` was an assertion by whoever edited tool.conf rather than a
+# result. This makes it checkable.
+#
+# The test script is handed the tool's own environment: $TOOL, $CHPC_TOOL (this
+# script, by absolute path), $TOOLDIR, and everything tool_exports emits. It
+# runs in a scratch working directory, because several of these tools write
+# into $PWD whether asked to or not.
+cmd_test() {
+  [ $# -ge 1 ] || die "usage: chpc-tool test <tool>..."
+  _fails=0
+  for _t in "$@"; do
+    _rc=0
+    (
+      _load "$_t"
+      _ts="$TOOLDIR/test.sh"
+      [ -f "$_ts" ] || die "$NAME: no test.sh in $TOOLDIR (required for STATUS=verified)"
+      if type tool_exports >/dev/null 2>&1; then
+        set -f; _ifs=$IFS; IFS='
+'
+        for _l in $(tool_exports); do
+          case "$_l" in [A-Za-z_]*=*) eval "export $_l" ;; esac
+        done
+        IFS=$_ifs; set +f
+      fi
+      TOOL="$NAME"; CHPC_TOOL="$_self"; export TOOL CHPC_TOOL TOOLDIR
+      _wd=$(mktemp -d "${TMPDIR:-/tmp}/chpc-test-$NAME.XXXXXX")
+      # A tool that writes into the current directory -- and RFdiffusion,
+      # cartesian_ddg and hydra apps all do -- must not do it in the registry.
+      cd "$_wd" || exit 1
+      echo "--- $NAME: $_ts"
+      sh "$_ts"
+      _r=$?
+      cd /; rm -rf "$_wd"
+      exit $_r
+    ) || _rc=$?
+    if [ "$_rc" -eq 0 ]; then
+      echo "PASS $_t"
+    else
+      echo "FAIL $_t (exit $_rc)"
+      _fails=$((_fails + 1))
+    fi
+  done
+  [ "$_fails" -eq 0 ] || die "$_fails of $# failed"
+}
+
 cmd_build() {
   [ $# -ge 1 ] || die "usage: chpc-tool build <tool>"
   _load "$1"
@@ -357,11 +433,19 @@ cmd_wrapper() {
   # too and the override stops working, with the wrapper otherwise behaving
   # perfectly -- so it would not be noticed until someone needed it.
   sed -e "s|^IMAGE=\"\${IMAGE:-[^\"]*}\".*|IMAGE=\"\${IMAGE:-$IMAGE}\"|" \
-      -e "s|^GPU=\"\${GPU:-[^\"]*}\".*|GPU=\"\${GPU:-$GPU}\"|" "$_src" > "$_dst"
+      -e "s|^GPU=\"\${GPU:-[^\"]*}\".*|GPU=\"\${GPU:-$GPU}\"|" \
+      -e "s|^ENTRY=\"\${ENTRY:-[^\"]*}\".*|ENTRY=\"\${ENTRY:-${ENTRY:-}}\"|" "$_src" > "$_dst"
   grep -q 'img_var' "$_dst" \
     || die "generated wrapper lost run-in-container's <TOOL>_IMAGE override; $_src has changed shape"
   grep -q "IMAGE:-$IMAGE" "$_dst" \
     || die "generated wrapper did not pick up IMAGE=$IMAGE; $_src has changed shape"
+  # Without ENTRY the wrapper runs its first argument as a program, so
+  # `foldseek version` fails with `"version": executable file not found`.
+  # It looks like a broken image and is a wrapper that forgot what it wraps.
+  if [ -n "${ENTRY:-}" ]; then
+    grep -q "ENTRY:-$ENTRY" "$_dst" \
+      || die "generated wrapper did not pick up ENTRY=$ENTRY; $_src has changed shape"
+  fi
   chmod 755 "$_dst"
   echo "wrote $_dst  (IMAGE=$IMAGE GPU=$GPU)"
 }
@@ -393,7 +477,7 @@ cmd_publish() {
   echo "  8. set STATUS=verified and UPSTREAM_REF in $TOOLDIR/tool.conf, and commit"
 }
 
-usage() { sed -n '2,18p' "$_self" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,19p' "$_self" | sed 's/^# \{0,1\}//'; }
 
 # --- dispatch ------------------------------------------------------------------
 [ $# -ge 1 ] || { usage; exit 2; }
@@ -405,6 +489,7 @@ case "$_sub" in
   export)  cmd_export "$@" ;;
   exec)    cmd_exec "$@" ;;
   doctor)  cmd_doctor "$@" ;;
+  test)    cmd_test "$@" ;;
   build)   cmd_build "$@" ;;
   publish) cmd_publish "$@" ;;
   wrapper) cmd_wrapper "$@" ;;

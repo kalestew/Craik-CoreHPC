@@ -1,0 +1,87 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# Chai-1 -- structure prediction. Carried as an INDEPENDENT check on Boltz-2:
+# two models agreeing is evidence, one model is a guess.
+#
+# Base is python:3.12-slim and not a pytorch tag because chai_lab 0.6.1 pins
+# `torch>=2.3.1,<2.7` and `numpy~=1.21`. pip resolves torch 2.6.x with cu124
+# wheels inside a 3.12 base; no current pytorch/pytorch tag is that old.
+#
+# HARDWARE LIMIT, and it is not a build problem: torch<2.7 predates sm_120, so
+# this image cannot run on the RTX Pro 6000 (Blackwell) nodes ggpu1-[13-19].
+# It is fine on L40S (sm_89) and H100/H200 (sm_90), because cu124 binaries run
+# under this cluster's newer driver. A job that needs it must say which GPU:
+#     #SBATCH --gres=gpu:nvidia_l40s:1
+# A bare `--gres=gpu:1` can land on Blackwell and die with
+#     no kernel image is available for execution on the device
+# See tools/chai1/README.md.
+#
+# Build:  chpc-tool build chai1
+
+%labels
+    Tool         chai1
+    Version      0.6.1
+    Upstream     https://github.com/chaidiscovery/chai-lab
+    UpstreamRef  chai_lab==0.6.1 (PyPI)
+    Licence      Apache-2.0 (code AND model weights)
+    Base         python:3.12-slim
+    GPUArch      sm_89 sm_90 only -- NOT sm_120 (torch<2.7)
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir chai_lab==0.6.1
+
+    python - <<'PY'
+import torch, numpy, sys
+major, minor = torch.__version__.split(".")[:2]
+assert (int(major), int(minor)) < (2, 7), f"torch {torch.__version__} breaks the chai_lab<2.7 pin"
+assert numpy.__version__.startswith("1."), numpy.__version__
+print("python", sys.version.split()[0], "torch", torch.__version__, "numpy", numpy.__version__)
+PY
+
+    # chai_lab defaults CHAI_DOWNLOADS_DIR to <site-packages>/chai_lab/downloads,
+    # which is inside the image and therefore READ-ONLY at run time -- the
+    # first fold would fail trying to create it. Make the fallback a writable
+    # place so a bare `apptainer exec` still works; the registry overrides it
+    # with a FAC path so the weights actually persist.
+    mkdir -p /tmp/chai-downloads
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # Overridden by `chpc-tool export chai1` with a FAC path. The /tmp default
+    # is a last resort that keeps a hand-run from crashing, not a cache: /tmp
+    # is per-node and is wiped, so weights would be re-fetched every job, and
+    # on a compute node with no internet that means the job hangs.
+    export CHAI_DOWNLOADS_DIR="${CHAI_DOWNLOADS_DIR:-/tmp/chai-downloads}"
+
+%test
+    set -eu
+    python -c "import chai_lab, torch; print('chai_lab ok, torch', torch.__version__)"
+    command -v chai-lab
+
+%runscript
+    exec chai-lab "$@"
+
+%help
+    Chai-1 0.6.1. Apache-2.0 for code and weights, so commercial use is fine.
+
+      chpc-tool exec chai1 -- chai-lab fold input.fasta out/
+
+    Weights download on first use into $CHAI_DOWNLOADS_DIR, which the registry
+    points at the FAC share. Fetch them once from the login node; compute nodes
+    have no internet.
+
+    Will NOT run on the RTX Pro 6000 nodes -- ask for --gres=gpu:nvidia_l40s:1
+    or an H100/H200. See the GPUArch label.
+
+    As with Boltz: do not filter substrate poses on ipTM. Beta-strand addition
+    is confidence-penalised, so an ipTM filter preferentially discards the
+    correct extended geometry.

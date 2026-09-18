@@ -1,0 +1,93 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+
+# LigandMPNN -- ProteinMPNN that can see ligands, substrates and cofactors.
+#
+# NOT built from the repo's requirements.txt. That file is a `pip freeze` of
+# one developer's 2024 machine -- it pins torch==2.2.1, numpy==1.23.5 and a
+# complete set of nvidia-*-cu12 12.1 wheels -- so honouring it would tear out
+# the CUDA 13.2 stack this base exists to provide and replace it with one three
+# years older than the driver. The genuine dependencies are the four non-torch
+# packages below; the build asserts they import, which is the check that
+# actually matters.
+#
+# Build:  chpc-tool build ligandmpnn
+
+%labels
+    Tool         ligandmpnn
+    Version      1
+    Upstream     https://github.com/dauparas/LigandMPNN
+    UpstreamRef  26ec57ac976ade5379920dbd43c7f97a91cf82de
+    Licence      MIT
+    Base         pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git wget ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    REF=26ec57ac976ade5379920dbd43c7f97a91cf82de
+    git clone https://github.com/dauparas/LigandMPNN /opt/LigandMPNN
+    git -C /opt/LigandMPNN checkout --detach "$REF"
+    git -C /opt/LigandMPNN rev-parse HEAD > /opt/LigandMPNN/.built-from
+    rm -rf /opt/LigandMPNN/.git
+
+    # PEP 668: the pytorch base images ship a conda python marked
+    # EXTERNALLY-MANAGED, so a bare `pip install` refuses with
+    #   error: externally-managed-environment
+    # and apptainer then reports "exit status 1" under a message suggesting
+    # --ignore-fakeroot-command, which has nothing to do with it. Inside a
+    # container the system interpreter IS the environment -- there is no OS
+    # package manager to conflict with and nothing else sharing it -- so
+    # overriding the marker is correct here, not a workaround.
+    export PIP_BREAK_SYSTEM_PACKAGES=1
+
+    pip install --no-cache-dir ProDy ml-collections dm-tree biopython
+
+    # Weights are NOT in the repo; upstream ships a script that fetches them.
+    # Run that rather than hardcoding URLs, so the set stays whatever upstream
+    # considers current for this commit. ~1 GB, baked in: they are frozen
+    # release artefacts and a compute node has no internet to fetch them from.
+    cd /opt/LigandMPNN
+    bash get_model_params.sh "/opt/LigandMPNN/model_params"
+    # wget -q hides failures and writes a zero-byte file on a 404, so count.
+    n=$(ls -1 /opt/LigandMPNN/model_params/*.pt 2>/dev/null | wc -l)
+    test "$n" -ge 8 || { echo "FATAL: only $n weight files fetched" >&2; exit 1; }
+    for f in /opt/LigandMPNN/model_params/*.pt; do
+        test -s "$f" || { echo "FATAL: empty weights $f" >&2; exit 1; }
+    done
+
+    chmod -R a+rX /opt/LigandMPNN
+
+    python - <<'PY'
+import prody, ml_collections, tree, Bio, torch, numpy
+print("prody", prody.__version__, "torch", torch.__version__, "numpy", numpy.__version__)
+PY
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    export LIGANDMPNN_DIR=/opt/LigandMPNN
+
+%test
+    set -eu
+    python /opt/LigandMPNN/run.py --help > /dev/null
+    test -s /opt/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt
+    echo "built from $(cat /opt/LigandMPNN/.built-from)"
+
+%runscript
+    exec "$@"
+
+%help
+    LigandMPNN, pinned at 26ec57ac, weights included under
+    /opt/LigandMPNN/model_params.
+
+      chpc-tool exec ligandmpnn -- /opt/LigandMPNN/run.py \
+          --model_type ligand_mpnn --pdb_path in.pdb --out_folder out/
+
+    Use this rather than plain ProteinMPNN when the substrate or a covalent
+    intermediate should be visible to the design -- ProteinMPNN conditions on
+    backbone N/CA/C/O only and cannot see a ligand at all.
