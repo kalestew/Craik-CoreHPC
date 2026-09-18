@@ -58,7 +58,18 @@ cif=$(ls -1 out/*.cif 2>/dev/null | head -1 || true)
 # file of degenerate coordinates and exit 0.
 n_ca=$(grep -c ' CA ' "$cif" || true)
 [ "$n_ca" -ge 31 ] || { echo "expected >=31 CA records for a 31-mer, got $n_ca"; exit 1; }
-if grep -qi 'nan' "$cif"; then echo "NaN coordinates in $cif"; exit 1; fi
+
+# Check the COORDINATE FIELDS, not the whole file. `grep -i nan` over a CIF
+# matches `_chem_comp.ma_provenance` -- "nan" inside "provenance" -- and
+# fails a perfectly good structure. In chai's _atom_site layout the Cartesian
+# columns are fields 11-13:
+#   ATOM 1 N N . MET 1 1 ? A -22.294 4.872 -1.149 1.000 1 A MET 82.550 1
+if awk '/^ATOM/ { for (i = 11; i <= 13; i++)
+                    if ($i !~ /^-?([0-9]+\.?[0-9]*|\.[0-9]+)$/) { print; bad = 1 } }
+        END { exit !bad }' "$cif" | head -3
+then
+    echo "non-numeric coordinates in $cif (shown above)"; exit 1
+fi
 
 # A folded peptide is not a point cloud at the origin: demand real spread.
 # This is what separates "wrote a CIF" from "ran the diffusion module".

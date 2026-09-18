@@ -54,11 +54,20 @@ test -s "$pdb" || { echo "no backbone written at $pdb"; ls -R out 2>/dev/null | 
 # NaN coordinates and exit 0 when the checkpoint half-loaded.
 n_ca=$(grep -c '^ATOM.* CA ' "$pdb" || true)
 [ "$n_ca" -eq 20 ] || { echo "expected 20 CA atoms, got $n_ca"; exit 1; }
-# `if`, not `grep -q … && { … }`. Under set -e the && form is a trap: when
-# grep finds nothing it exits 1, the list's status is 1, and whether the shell
-# then exits depends on the shell. The success path is the common one here, so
-# that would fail the test precisely when the PDB is clean.
-if grep -q -i 'nan' "$pdb"; then echo "NaN coordinates in $pdb"; exit 1; fi
+# Check the coordinate COLUMNS, not the whole file. A substring search for
+# "nan" is a false-positive generator -- it fired on chai's CIF against
+# `_chem_comp.ma_provenance`, failing a good structure -- and a PDB REMARK
+# can carry the same trap. PDB columns are fixed-width: x is 31-38, y 39-46,
+# z 47-54.
+#
+# `if`, not `grep … && { … }`: under set -e the && form returns the failed
+# grep's status, which would fail the test exactly when the file is clean.
+if awk '/^ATOM/ { x = substr($0,31,8); y = substr($0,39,8); z = substr($0,47,8)
+                  if (x " " y " " z ~ /[Nn][Aa][Nn]|[Ii][Nn][Ff]|\*/) { print; bad = 1 } }
+        END { exit !bad }' "$pdb" | head -3
+then
+    echo "non-finite coordinates in $pdb (shown above)"; exit 1
+fi
 
 # Consecutive CA-CA distance is ~3.8 A in any real backbone. This is the
 # assertion that separates "wrote a PDB" from "diffused a protein".
