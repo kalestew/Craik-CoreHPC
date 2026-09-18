@@ -7,3 +7,15 @@
 /chpc.env.local
 lab/chpc.env.local
 __pycache__/
+
+# The tool registry holds DESCRIPTIONS of software, never software. An
+# allow-list rather than a deny-list, because the cost of getting it wrong is
+# redistributing someone else's licensed binary from a git repo: drop a FoldX
+# executable or a 5 GB weights file into tools/<tool>/ and git will ignore it
+# instead of offering to commit it. Record it in assets.tsv by sha256 instead.
+tools/*/*
+!tools/*/tool.conf
+!tools/*/*.def
+!tools/*/*.sh
+!tools/*/assets.tsv
+!tools/*/README.md

@@ -1,0 +1,199 @@
+#!/usr/bin/env bash
+# chpc-assets -- put a tool's licensed binaries, licences and model weights on
+# the FAC share, and prove afterwards that they are the right bytes.
+#
+#   chpc-assets list    <tool>                what the tool needs, and where it goes
+#   chpc-assets install <tool> --from <dir>   copy from <dir> into place, then verify
+#   chpc-assets verify  <tool>                re-check what is on the share
+#   chpc-assets record  <tool> --dest D <f>.. hash files already in place, append rows
+#   chpc-assets hash    <file>...             sha256 in the manifest's format
+#
+# None of this content is ever committed. Licences generally forbid
+# redistribution, and weights are far too large; what git carries is the
+# manifest -- filename, sha256, destination, mode -- so that a lab member with
+# share access runs one command, and one without gets an exact shopping list.
+#
+# The manifest is corehpc/tools/<tool>/assets.tsv, tab-separated:
+#
+#   filename <TAB> sha256 <TAB> dest <TAB> mode <TAB> note
+#
+# sha256 may be `-` for a payload whose hash nobody has recorded yet; install
+# computes it and --record writes it back for you to commit. dest may use
+# $CHPC_SOFTWARE, $CHPC_REFDATA, $CHPC_LICENSES or $CHPC_LAB, which are
+# substituted literally -- the file is never eval'd.
+#
+# Keep this bash-3.2 clean. See ../../tools/README.md.
+set -euo pipefail
+
+die()  { printf 'chpc-assets: %s\n' "$*" >&2; exit 1; }
+
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _d=$(cd "$(dirname "$_self")" && pwd); _self=$(readlink "$_self")
+  case $_self in /*) ;; *) _self="$_d/$_self" ;; esac
+done
+SELF_DIR=$(cd "$(dirname "$_self")" && pwd -P)
+
+TOOLS=""
+for _d in "${CHPC_TOOLS:-}" "$SELF_DIR/../../tools" "$SELF_DIR/../tools"; do
+  if [ -n "$_d" ] && [ -d "$_d" ]; then TOOLS=$(cd "$_d" && pwd -P); break; fi
+done
+[ -n "$TOOLS" ] || die "no tool registry found (set CHPC_TOOLS)"
+
+if [ -z "${CHPC_CONTAINERS:-}" ]; then
+  for _f in "${CHPC_ENV:-}" "$SELF_DIR/../chpc.env" \
+            "/mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env" "$HOME/chpc.env"; do
+    if [ -n "$_f" ] && [ -f "$_f" ]; then . "$_f"; break; fi
+  done
+fi
+: "${CHPC_LAB:=/mnt/fac/${FAC_SHARE:-CX500146_DS1}}"
+: "${CHPC_SOFTWARE:=$CHPC_LAB/software}"
+: "${CHPC_REFDATA:=$CHPC_LAB/data}"
+: "${CHPC_LICENSES:=$CHPC_LAB/licenses}"
+
+# sha256sum on Linux, shasum on macOS. Both here, because the manifest is
+# written on whichever machine has the licensed download.
+_sha() {
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'
+  elif command -v shasum >/dev/null 2>&1; then shasum -a 256 "$1" | awk '{print $1}'
+  else die "no sha256sum or shasum on PATH"; fi
+}
+
+# Literal substitution of the four share variables. Deliberately not eval:
+# a manifest is data, and data does not get to run commands.
+_expand() {
+  printf '%s' "$1" \
+    | sed -e "s#\\\$CHPC_SOFTWARE#$CHPC_SOFTWARE#g" \
+          -e "s#\\\$CHPC_REFDATA#$CHPC_REFDATA#g" \
+          -e "s#\\\$CHPC_LICENSES#$CHPC_LICENSES#g" \
+          -e "s#\\\$CHPC_LAB#$CHPC_LAB#g"
+}
+
+_manifest() {
+  _m="$TOOLS/$1/assets.tsv"
+  [ -f "$_m" ] || die "$1 has no assets.tsv (it may need none)"
+  printf '%s' "$_m"
+}
+
+cmd_list() {
+  [ $# -ge 1 ] || die "usage: chpc-assets list <tool>"
+  _m=$(_manifest "$1")
+  printf '%-34s %-6s %s\n' FILE MODE DESTINATION
+  while IFS="$(printf '\t')" read -r _f _h _dst _mode _note; do
+    case "${_f:-}" in ''|\#*) continue ;; esac
+    printf '%-34s %-6s %s\n' "$_f" "${_mode:-644}" "$(_expand "$_dst")"
+    [ -n "${_note:-}" ] && printf '%-34s %-6s   %s\n' "" "" "$_note"
+    [ "${_h:-}" = "-" ] && printf '%-34s %-6s   (no sha256 recorded yet)\n' "" ""
+  done < "$_m"
+}
+
+cmd_verify() {
+  [ $# -ge 1 ] || die "usage: chpc-assets verify <tool>"
+  _m=$(_manifest "$1"); _bad=0; _unrec=0; _ok=0
+  while IFS="$(printf '\t')" read -r _f _h _dst _mode _note; do
+    case "${_f:-}" in ''|\#*) continue ;; esac
+    _p="$(_expand "$_dst")/$_f"
+    if [ ! -f "$_p" ]; then printf '  MISS  %s\n' "$_p"; _bad=$((_bad+1)); continue; fi
+    if [ "${_h:--}" = "-" ]; then
+      printf '  ????  %s  (no sha256 in the manifest: %s)\n' "$_p" "$(_sha "$_p")"
+      _unrec=$((_unrec+1)); continue
+    fi
+    _got=$(_sha "$_p")
+    if [ "$_got" = "$_h" ]; then printf '  OK    %s\n' "$_p"; _ok=$((_ok+1))
+    else printf '  BAD   %s\n        expected %s\n        got      %s\n' "$_p" "$_h" "$_got"; _bad=$((_bad+1)); fi
+  done < "$_m"
+  printf '  %d ok, %d unrecorded, %d missing or wrong\n' "$_ok" "$_unrec" "$_bad"
+  [ "$_bad" -eq 0 ] || return 1
+  return 0
+}
+
+cmd_install() {
+  [ $# -ge 1 ] || die "usage: chpc-assets install <tool> --from <dir> [--record]"
+  _t="$1"; shift; _from=""; _record=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --from) _from="${2:?--from needs a directory}"; shift 2 ;;
+      --record) _record=1; shift ;;
+      *) die "unknown option '$1'" ;;
+    esac
+  done
+  [ -n "$_from" ] || die "--from <dir> is required: the directory holding your licensed download"
+  [ -d "$_from" ] || die "no such directory: $_from"
+  _m=$(_manifest "$_t"); _new="$_m.new"; : > "$_new"; _missing=0
+
+  while IFS="$(printf '\t')" read -r _f _h _dst _mode _note; do
+    case "${_f:-}" in
+      ''|\#*) printf '%s\n' "${_f:-}${_h:+	$_h}${_dst:+	$_dst}${_mode:+	$_mode}${_note:+	$_note}" >> "$_new"; continue ;;
+    esac
+    _src="$_from/$_f"
+    _d=$(_expand "$_dst")
+    if [ ! -f "$_src" ]; then
+      printf '  MISSING  %s  -- not in %s\n' "$_f" "$_from"
+      printf '           %s\n' "${_note:-}"
+      _missing=$((_missing+1))
+      printf '%s\t%s\t%s\t%s\t%s\n' "$_f" "${_h:--}" "$_dst" "${_mode:-644}" "${_note:-}" >> "$_new"
+      continue
+    fi
+    mkdir -p "$_d"
+    cp "$_src" "$_d/$_f"
+    chmod "${_mode:-644}" "$_d/$_f"
+    _got=$(_sha "$_d/$_f")
+    if [ "${_h:--}" != "-" ] && [ "$_got" != "$_h" ]; then
+      printf '  BAD      %s  sha256 does not match the manifest\n' "$_f"
+      printf '           expected %s\n           got      %s\n' "$_h" "$_got"
+      rm -f "$_new"; die "refusing to continue with a payload that is not the recorded bytes"
+    fi
+    printf '  installed %s -> %s  (mode %s)\n' "$_f" "$_d/$_f" "${_mode:-644}"
+    printf '%s\t%s\t%s\t%s\t%s\n' "$_f" "$_got" "$_dst" "${_mode:-644}" "${_note:-}" >> "$_new"
+  done < "$_m"
+
+  if [ "$_record" = 1 ]; then
+    mv "$_new" "$_m"
+    echo "  recorded the sha256 of everything installed into $_m -- commit it"
+  else
+    rm -f "$_new"
+    echo "  (re-run with --record to write the computed sha256 values into assets.tsv)"
+  fi
+  [ "$_missing" -eq 0 ] || echo "  $_missing payload(s) you still have to obtain; see the notes above"
+  echo
+  echo "  now: chpc-tool doctor $_t"
+}
+
+cmd_hash() {
+  [ $# -ge 1 ] || die "usage: chpc-assets hash <file>..."
+  for _f in "$@"; do printf '%s\t%s\n' "$(basename "$_f")" "$(_sha "$_f")"; done
+}
+
+# The inverse of install, for payloads nobody can list in advance: model
+# weights you have just fetched on the login node. Hash what is there and
+# append it to the manifest, so the next person can verify rather than refetch.
+cmd_record() {
+  [ $# -ge 3 ] || die "usage: chpc-assets record <tool> --dest '<dest>' <file>..."
+  _t="$1"; shift
+  [ "$1" = "--dest" ] || die "--dest '<dest>' is required (quote it: \$CHPC_REFDATA is substituted at read time, not now)"
+  _dst="$2"; shift 2
+  _m=$(_manifest "$_t")
+  for _f in "$@"; do
+    [ -f "$_f" ] || { printf '  skip (not a file): %s\n' "$_f"; continue; }
+    printf '%s\t%s\t%s\t%s\t%s\n' \
+      "$(basename "$_f")" "$(_sha "$_f")" "$_dst" "$(_mode_of "$_f")" "recorded $(date -u +%Y-%m-%d)" >> "$_m"
+    printf '  recorded %s\n' "$(basename "$_f")"
+  done
+  echo "  appended to $_m -- review and commit it"
+}
+
+_mode_of() { [ -x "$1" ] && printf '755' || printf '644'; }
+
+usage() { sed -n '2,25p' "$_self" | sed 's/^# \{0,1\}//'; }
+
+[ $# -ge 1 ] || { usage; exit 2; }
+_sub="$1"; shift
+case "$_sub" in
+  list)    cmd_list "$@" ;;
+  verify)  cmd_verify "$@" ;;
+  install) cmd_install "$@" ;;
+  record)  cmd_record "$@" ;;
+  hash)    cmd_hash "$@" ;;
+  -h|--help|help) usage ;;
+  *) die "unknown subcommand '$_sub'. Try: chpc-assets --help" ;;
+esac

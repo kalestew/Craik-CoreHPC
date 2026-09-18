@@ -1,0 +1,13 @@
+# NetMHCIIpan 4.3 -- licensed, free for academic use, from DTU Health Tech:
+# https://services.healthtech.dtu.dk/services/NetMHCIIpan-4.3/
+#
+# Two parts, requested separately on that page: the software tarball and the
+# data tarball. After installing, edit NMHOME in the netMHCIIpan wrapper to
+# point at the install directory -- it ships with the author's path baked in,
+# and the failure is at runtime, not at install. chpc-tool doctor checks it.
+#
+# Nothing in this pipeline calls NetMHCIIpan yet; the immunogenicity filter
+# is wired to skip and flag when NETMHCIIPAN is empty.
+#
+# columns, tab separated:  filename / sha256 / dest / mode / note
+netMHCIIpan	-	$CHPC_SOFTWARE/netMHCIIpan-4.3	755	the wrapper script; edit NMHOME after installing

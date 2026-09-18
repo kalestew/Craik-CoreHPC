@@ -1,0 +1,17 @@
+# FoldX 5.1 -- licensed. Free academic licence from https://foldxsuite.crg.es/
+#
+# Download the LINUX X86_64 build. The copy the lab already has is Mac arm64
+# and will not run on CoreHPC; the same licence covers both.
+#
+# The binary filename encodes its own expiry date, so yours will not match
+# anyone else's. Edit the first row to match your download before installing,
+# and edit it again when you renew. chpc-tool doctor foldx runs the binary and
+# reads its banner, because an expired FoldX is still present, still
+# executable, and only says so when it runs.
+#
+# molecules/ is a directory and so cannot be a row here; copy it alongside the
+# binary if your build ships one.
+#
+# columns, tab separated:  filename / sha256 / dest / mode / note
+foldx5.1_20261231	-	$CHPC_SOFTWARE/foldx5.1	755	the dated binary -- rename this row to match your download
+rotabase.txt	-	$CHPC_SOFTWARE/foldx5.1	644	rotamer library; only some builds ship it separately

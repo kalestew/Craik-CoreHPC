@@ -12,13 +12,21 @@
 #   CHPC_USER      campus username: `ssh -G $CHPC_HOST` off-cluster, $USER on it
 #   CHPC_ENV       path of lab/chpc.env in this checkout. sbatch's default
 #                  --export=ALL carries it into jobs; the templates source it.
+#   CHPC_TOOLS     path of tools/ in this checkout: the tool registry that
+#                  chpc-tool and chpc-assets read.
 #   CHPC_*         cluster paths from lab/chpc.env
 #   PATH           += $CHPC_REPO/scripts and $CHPC_REPO/lab/bin
 #
 # Overrides: the first existing file of $CHPC_ENV_LOCAL,
 # $CHPC_PROJECT/chpc.env.local, $CHPC_REPO/lab/chpc.env.local is sourced
 # before lab/chpc.env. Set inputs there (FAC_SHARE, CHPC_HOST, CHPC_USER),
-# not derived paths. Values already exported in the shell win over the file.
+# not derived paths.
+#
+# That file is sourced as-is, so a plain `CHPC_USER=jdoe` in it BEATS a value
+# you exported in the shell. Write `CHPC_USER="${CHPC_USER:-jdoe}"` if you want
+# the environment to win -- see chpc.env.local.example, which uses that form
+# throughout. (This comment used to claim the environment always won. It does
+# not, and nothing enforced it.)
 
 # --- locate this file, through symlinks, in bash or zsh ----------------------
 if [ -n "${ZSH_VERSION:-}" ]; then
@@ -66,6 +74,11 @@ export CHPC_USER
 # --- lab environment ---------------------------------------------------------
 CHPC_ENV=$CHPC_REPO/lab/chpc.env
 export CHPC_ENV
+# The tool registry, from THIS checkout rather than the copy on the share, so a
+# project pinned to a commit gets the tool definitions that commit describes.
+# Set before chpc.env is sourced, which only supplies a fallback.
+CHPC_TOOLS=$CHPC_REPO/tools
+export CHPC_TOOLS
 # shellcheck source=lab/chpc.env
 source "$CHPC_ENV"
 

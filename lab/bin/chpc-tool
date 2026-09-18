@@ -1,0 +1,413 @@
+#!/usr/bin/env bash
+# chpc-tool -- resolve and run the lab's software from the tool registry.
+#
+#   chpc-tool list                          what exists, and whether it is built
+#   chpc-tool show <tool>                   one entry, fully resolved
+#   chpc-tool path <tool>                   the image or install path, for scripts
+#   chpc-tool export <tool>...              plain assignments for a project site.conf
+#   chpc-tool exec <tool> [--] <cmd>...     run a command through the right runtime
+#   chpc-tool doctor [<tool>...]            is it really there, and really working
+#   chpc-tool build <tool>                  build the container from its .def
+#   chpc-tool publish <tool>                the eight publish steps from lab/README.md
+#   chpc-tool wrapper <tool>                write $CHPC_LAB/bin/<tool>
+#
+# The registry is ../../tools relative to this script (or ../tools when this
+# script has been copied to $CHPC_LAB/bin). $CHPC_TOOLS overrides it. Resolving
+# from the script's own location rather than from PATH is deliberate: a project
+# calls this by explicit path out of its pinned submodule, so the definitions it
+# gets are the ones its commit says, not whatever the FAC share happens to hold.
+#
+# Keep this bash-3.2 clean -- no associative arrays, no ${var^^}, no mapfile.
+# The lab Macs ship bash 3.2 and the local smoke test has to be able to run it.
+set -euo pipefail
+
+die()  { printf 'chpc-tool: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'chpc-tool: %s\n' "$*" >&2; }
+
+# --- locate ourselves, through symlinks -------------------------------------
+_self="${BASH_SOURCE[0]}"
+while [ -L "$_self" ]; do
+  _d=$(cd "$(dirname "$_self")" && pwd)
+  _self=$(readlink "$_self")
+  case $_self in /*) ;; *) _self="$_d/$_self" ;; esac
+done
+SELF_DIR=$(cd "$(dirname "$_self")" && pwd -P)
+
+# --- the registry ------------------------------------------------------------
+# Two layouts: corehpc/lab/bin/chpc-tool -> ../../tools, and a copy published at
+# $CHPC_LAB/bin/chpc-tool -> ../tools.
+TOOLS=""
+for _d in "${CHPC_TOOLS:-}" "$SELF_DIR/../../tools" "$SELF_DIR/../tools"; do
+  if [ -n "$_d" ] && [ -d "$_d" ]; then TOOLS=$(cd "$_d" && pwd -P); break; fi
+done
+[ -n "$TOOLS" ] || die "no tool registry found (looked beside $SELF_DIR; set CHPC_TOOLS)"
+
+# --- the lab environment ------------------------------------------------------
+# Same fallback chain as lab/bin/run-in-container. Sourcing our own pinned copy
+# before the FAC one keeps a submodule checkout self-consistent off-cluster.
+if [ -z "${CHPC_CONTAINERS:-}" ]; then
+  for _f in "${CHPC_ENV:-}" "$SELF_DIR/../chpc.env" \
+            "/mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env" "$HOME/chpc.env"; do
+    if [ -n "$_f" ] && [ -f "$_f" ]; then . "$_f"; break; fi
+  done
+fi
+: "${CHPC_LAB:=/mnt/fac/${FAC_SHARE:-CX500146_DS1}}"
+: "${CHPC_CONTAINERS:=$CHPC_LAB/containers}"
+: "${CHPC_SOFTWARE:=$CHPC_LAB/software}"
+: "${CHPC_REFDATA:=$CHPC_LAB/data}"
+: "${CHPC_LICENSES:=$CHPC_LAB/licenses}"
+: "${CHPC_ON_CLUSTER:=0}"
+
+# --- loading an entry ---------------------------------------------------------
+_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE"
+
+# Helpers a tool.conf may call from tool_exports / tool_doctor.
+_image_path() {
+  case "${IMAGE:-}" in
+    "") printf '' ;;
+    /*) printf '%s' "$IMAGE" ;;
+    *)  printf '%s/%s' "$CHPC_CONTAINERS" "$IMAGE" ;;
+  esac
+}
+_prefix()  { printf '%s' "${PREFIX:-}"; }
+_refdata() { printf '%s/%s' "$CHPC_REFDATA" "${1:-${NAME:-}}"; }
+
+_load() {
+  _t="$1"
+  _conf="$TOOLS/$_t/tool.conf"
+  [ -f "$_conf" ] || die "unknown tool '$_t' -- no $_conf. Try: chpc-tool list"
+  for _fld in $_FIELDS; do eval "$_fld="; done
+  unset -f tool_exports tool_doctor >/dev/null 2>&1 || true
+  TOOLDIR="$TOOLS/$_t"
+  # shellcheck disable=SC1090
+  . "$_conf"
+  NAME="${NAME:-$_t}"
+  KIND="${KIND:-container}"
+  STATUS="${STATUS:-planned}"
+  GPU="${GPU:-0}"
+}
+
+_all_tools() {
+  for _p in "$TOOLS"/*/tool.conf; do
+    [ -e "$_p" ] || continue
+    _n=$(dirname "$_p"); _n=$(basename "$_n")
+    case "$_n" in _*) continue ;; esac     # _template and friends
+    printf '%s\n' "$_n"
+  done
+}
+
+# --- subcommands ---------------------------------------------------------------
+cmd_list() {
+  printf '%-14s %-9s %-10s %-9s %-4s %s\n' NAME VERSION KIND STATUS GPU LICENSE
+  for _t in $(_all_tools); do
+    ( _load "$_t"
+      _g=no; [ "$GPU" = "1" ] && _g=yes
+      printf '%-14s %-9s %-10s %-9s %-4s %s\n' \
+        "$NAME" "${VERSION:--}" "$KIND" "$STATUS" "$_g" "${LICENSE:--}" )
+  done
+}
+
+cmd_show() {
+  [ $# -ge 1 ] || die "usage: chpc-tool show <tool>"
+  _load "$1"
+  printf 'name        %s\n' "$NAME"
+  printf 'version     %s\n' "${VERSION:--}"
+  printf 'kind        %s\n' "$KIND"
+  printf 'status      %s\n' "$STATUS"
+  printf 'licence     %s\n' "${LICENSE:--}"
+  printf 'upstream    %s\n' "${UPSTREAM:--}"
+  printf 'upstream#   %s\n' "${UPSTREAM_REF:-not recorded}"
+  printf 'entry dir   %s\n' "$TOOLDIR"
+  case "$KIND" in
+    container)
+      printf 'image       %s\n' "$(_image_path)"
+      printf 'gpu (--nv)  %s\n' "$([ "$GPU" = 1 ] && echo yes || echo no)"
+      [ -n "${APPDIR:-}" ] && printf 'appdir      %s  (inside the image)\n' "$APPDIR" ;;
+    *)
+      [ -n "${PREFIX:-}" ]  && printf 'prefix      %s\n' "$PREFIX"
+      [ -n "${ENV_YML:-}" ] && printf 'recipe      %s\n' "$ENV_YML" ;;
+  esac
+  if type tool_exports >/dev/null 2>&1; then
+    printf 'exports\n'
+    tool_exports | sed 's/^/            /'
+  fi
+}
+
+cmd_path() {
+  [ $# -ge 1 ] || die "usage: chpc-tool path <tool>"
+  _load "$1"
+  case "$KIND" in
+    container) _image_path; printf '\n' ;;
+    *)         printf '%s\n' "${PREFIX:-}" ;;
+  esac
+}
+
+cmd_export() {
+  [ $# -ge 1 ] || die "usage: chpc-tool export <tool>..."
+  for _t in "$@"; do
+    ( _load "$_t"
+      if type tool_exports >/dev/null 2>&1; then tool_exports; fi )
+  done
+}
+
+cmd_exec() {
+  [ $# -ge 1 ] || die "usage: chpc-tool exec <tool> [--] <command>..."
+  _load "$1"; shift
+  if [ "${1:-}" = "--" ]; then shift; fi
+  # ENTRY applies to every kind, not just containers: `chpc-tool exec dssp`
+  # should run mkdssp the same way `chpc-tool exec boltz` runs boltz. It is
+  # also prepended when the first argument is a FLAG, so that
+  # `chpc-tool exec dssp --version` means "mkdssp --version" rather than
+  # trying to execute a program called --version. No real command starts with
+  # a dash, so this is unambiguous in practice.
+  if [ -n "${ENTRY:-}" ]; then
+    case "${1:-}" in
+      ''|-*) # shellcheck disable=SC2086
+             set -- $ENTRY ${1:+"$@"} ;;
+    esac
+  fi
+  [ $# -gt 0 ] || die "$NAME: no command given and no ENTRY in tool.conf"
+  case "$KIND" in
+    container)
+      _sif=$(_image_path)
+      [ -n "$_sif" ] || die "$NAME: KIND=container but IMAGE is empty"
+      [ -r "$_sif" ] || die "$NAME: image not found: $_sif (status is $STATUS)"
+      _args="exec"
+      [ "$GPU" = "1" ] && _args="$_args --nv"
+      # chpc.env normally exports APPTAINER_BIND; only bind explicitly if not.
+      [ -z "${APPTAINER_BIND:-}" ] && _args="$_args --bind /mnt/scratch,/mnt/fac"
+      # shellcheck disable=SC2086
+      exec apptainer $_args ${CHPC_TOOL_BIND:+--bind "$CHPC_TOOL_BIND"} "$_sif" "$@" ;;
+    native)
+      [ $# -gt 0 ] || die "$NAME: no command given"
+      if [ -n "${PREFIX:-}" ] && [ -d "$PREFIX/bin" ]; then PATH="$PREFIX/bin:$PATH"; export PATH; fi
+      exec "$@" ;;
+    module)
+      [ $# -gt 0 ] || die "$NAME: no command given"
+      [ -n "${MODULE:-}" ] || die "$NAME: KIND=module but MODULE names nothing"
+      # Lmod is a shell FUNCTION, so a non-interactive shell has to source its
+      # init first or `module` is simply not found. And it must never be piped
+      # or otherwise run in a subshell: the environment change would happen in
+      # the subshell and never reach us, which looks exactly like the module
+      # not existing.
+      # `set -u` has to come off around this. CoreHPC's /etc/profile.d/lmod.sh
+      # reads $SLURM_NODELIST unguarded at line 10, so sourcing it under
+      # `set -u` dies with "SLURM_NODELIST: unbound variable" outside a job --
+      # which looks like a broken tool and is really a broken init script we do
+      # not own. Verified on the login node 2026-09-17.
+      set +u
+      # Only initialise Lmod if it is NOT already here, and never otherwise.
+      # bash exports the `module` function and MODULEPATH into child
+      # processes, so a script launched from a login shell already has a
+      # working, fully populated Lmod. Re-sourcing the init in that situation
+      # REBUILDS MODULEPATH from the system default and silently drops
+      # /etc/modulefiles and /etc/scl/modulefiles from the front of it -- and
+      # /etc/modulefiles is where the Sali, CBI and RAD collections live. The
+      # symptom is Lmod saying a module "exists but cannot be loaded as
+      # requested", which reads like a broken modulefile and is really a
+      # MODULEPATH we destroyed one line earlier. Verified 2026-09-17.
+      if ! command -v module >/dev/null 2>&1; then
+        # /etc/profile.d/lmod.sh is the one that exists on CoreHPC; the others
+        # are here for a differently packaged Lmod elsewhere.
+        for _i in /etc/profile.d/lmod.sh /usr/share/lmod/lmod/init/bash /etc/profile.d/z00_lmod.sh; do
+          if [ -f "$_i" ]; then . "$_i"; break; fi
+        done
+      fi
+      if ! command -v module >/dev/null 2>&1; then
+        set -u; die "$NAME: KIND=module but no Lmod here (cluster only)"
+      fi
+      # The CBI/Sali/RAD collections are modulefiles under /etc, which the
+      # OpenHPC default MODULEPATH does not include. A shell that inherited a
+      # login environment already has them; one started clean (env -i, or a
+      # job submitted without --export=ALL) does not, and then `module load
+      # Sali` fails. Put them back rather than depend on how we were invoked.
+      for _p in /etc/modulefiles /etc/scl/modulefiles; do
+        if [ -d "$_p" ]; then
+          case ":${MODULEPATH:-}:" in
+            *":$_p:"*) ;;
+            *) MODULEPATH="$_p${MODULEPATH:+:$MODULEPATH}"; export MODULEPATH ;;
+          esac
+        fi
+      done
+      # One at a time, in order. MODULE="Sali dssp/2.2.1" is a HIERARCHY: dssp
+      # is not visible until the Sali collection is loaded, and a single
+      # `module load Sali dssp/2.2.1` fails with "module(s) or extension(s)
+      # exist but cannot be loaded as requested". Verified 2026-09-17.
+      for _m in $MODULE; do module load "$_m"; done
+      set -u
+      exec "$@" ;;
+    conda|venv)
+      die "$NAME: KIND=$KIND has no exec form -- use \`chpc-tool export $NAME\` and call the interpreter it names" ;;
+    *) die "$NAME: unknown KIND '$KIND'" ;;
+  esac
+}
+
+# doctor ---------------------------------------------------------------------
+_drow() { printf '  %-14s %-6s %s\n' "$1" "$2" "${3:-}"; }
+
+# A tool that STATUS says is built, but which is not there. On the cluster that
+# is a real failure. Off the cluster it means nothing at all -- /mnt/fac is not
+# mounted on a laptop -- so it must not be reported as broken, or `doctor` on a
+# Mac would condemn every correctly installed tool on the share.
+_absent() {
+  if [ "$CHPC_ON_CLUSTER" = "1" ]; then _drow "$1" "FAIL" "$2"; return 1; fi
+  _drow "$1" "----" "cannot check from here: $2"; return 2
+}
+
+# Runs in a subshell so one entry's variables cannot leak into the next, which
+# is why it reports its verdict through the EXIT STATUS and the caller tallies:
+# 0 ok, 2 planned, 1 broken. Incrementing a counter in here would increment it
+# in the subshell and the totals would always read zero.
+_doctor_one() {
+  _load "$1"
+  if [ "$STATUS" = "planned" ]; then
+    _drow "$NAME" "----" "planned -- described only, nothing built yet"
+    return 2
+  fi
+  case "$KIND" in
+    container)
+      _sif=$(_image_path)
+      [ -r "$_sif" ] || { _absent "$NAME" "no image at $_sif"; return $?; }
+      _where="$_sif" ;;
+    native)
+      [ -n "${PREFIX:-}" ] || { _drow "$NAME" "FAIL" "KIND=native but PREFIX is unset"; return 1; }
+      [ -d "$PREFIX" ] || { _absent "$NAME" "no install at $PREFIX"; return $?; }
+      _where="$PREFIX" ;;
+    module)
+      [ -n "${MODULE:-}" ] \
+        || { _drow "$NAME" "FAIL" "KIND=module but MODULE names nothing"; return 1; }
+      # There is no Lmod on a laptop, so "the module is there" is not a
+      # question that can be answered from here -- and answering OK would be
+      # a lie about software we cannot see.
+      if [ "$CHPC_ON_CLUSTER" != "1" ]; then
+        _drow "$NAME" "----" "cannot check from here: needs Lmod (module load $MODULE)"
+        return 2
+      fi
+      _where="module load $MODULE" ;;
+    conda|venv)
+      [ -n "${PREFIX:-}" ] || { _drow "$NAME" "FAIL" "KIND=$KIND but PREFIX is unset"; return 1; }
+      [ -x "$PREFIX/bin/python" ] || { _absent "$NAME" "no interpreter at $PREFIX/bin/python"; return $?; }
+      _where="$PREFIX" ;;
+    *) _drow "$NAME" "FAIL" "unknown KIND '$KIND'"; return 1 ;;
+  esac
+  # A tool can be present and still not work: an expired licence, weights that
+  # a scratch purge took. That is what tool_doctor is for.
+  if type tool_doctor >/dev/null 2>&1; then
+    _st=0; _out=$(tool_doctor 2>&1) || _st=$?
+    if [ "$_st" -ne 0 ]; then _drow "$NAME" "FAIL" "${_out:-tool_doctor failed}"; return 1; fi
+    _drow "$NAME" "OK" "${_out:-$_where}"
+  else
+    _drow "$NAME" "OK" "$_where"
+  fi
+  return 0
+}
+
+cmd_doctor() {
+  if [ $# -eq 0 ]; then set -- $(_all_tools); fi
+  _ok=0; _skip=0; _bad=0
+  echo "tool registry: $TOOLS"
+  if [ "$CHPC_ON_CLUSTER" != "1" ]; then
+    echo "not on a CoreHPC node: the paths below are where things WOULD be, and"
+    echo "\$USER here (${USER:-?}) is not necessarily your campus username -- source"
+    echo "corehpc/env.sh first if any path should be user-specific."
+  fi
+  echo
+  for _t in "$@"; do
+    _rc=0; ( _doctor_one "$_t" ) || _rc=$?
+    case "$_rc" in
+      0) _ok=$((_ok+1)) ;;
+      2) _skip=$((_skip+1)) ;;
+      *) _bad=$((_bad+1)) ;;
+    esac
+  done
+  echo
+  # "not checked" rather than "planned": a row is skipped either because it is
+  # only described, or because it is real but unverifiable from this machine.
+  printf '  %d ok, %d not checked, %d broken\n' "$_ok" "$_skip" "$_bad"
+  [ "$_bad" -eq 0 ] || return 1
+  return 0
+}
+
+cmd_build() {
+  [ $# -ge 1 ] || die "usage: chpc-tool build <tool>"
+  _load "$1"
+  [ "$KIND" = container ] || die "$NAME: KIND=$KIND, nothing to build. See $TOOLDIR/README.md"
+  _def=$(ls -1 "$TOOLDIR"/*.def 2>/dev/null | head -1 || true)
+  [ -n "$_def" ] || die "$NAME: no .def in $TOOLDIR"
+  _bld="$SELF_DIR/../../templates/apptainer/build.sh"
+  [ -x "$_bld" ] || die "no build helper at $_bld (is this a full checkout?)"
+  _name="${IMAGE%.sif}"
+  echo "building $NAME from $(basename "$_def") -> ${_name}.sif"
+  echo "note: the login node is the only node with internet, and it kills heavy builds."
+  exec "$_bld" "$_def" "$_name"
+}
+
+cmd_wrapper() {
+  [ $# -ge 1 ] || die "usage: chpc-tool wrapper <tool>"
+  _load "$1"
+  [ "$KIND" = container ] || die "$NAME: wrappers are for containers"
+  _src="$SELF_DIR/run-in-container"
+  [ -f "$_src" ] || die "no $_src"
+  _dst="${2:-$CHPC_LAB/bin/$NAME}"
+  mkdir -p "$(dirname "$_dst")"
+  # Anchor on the DEFAULT-VALUE form, not on a bare `^IMAGE=`. run-in-container
+  # assigns IMAGE twice: line 8 is the default we are replacing, and further
+  # down comes `IMAGE="${!img_var:-$IMAGE}"`, which is the <TOOL>_IMAGE
+  # override. A `^IMAGE=.*` substitution silently rewrites that second line
+  # too and the override stops working, with the wrapper otherwise behaving
+  # perfectly -- so it would not be noticed until someone needed it.
+  sed -e "s|^IMAGE=\"\${IMAGE:-[^\"]*}\".*|IMAGE=\"\${IMAGE:-$IMAGE}\"|" \
+      -e "s|^GPU=\"\${GPU:-[^\"]*}\".*|GPU=\"\${GPU:-$GPU}\"|" "$_src" > "$_dst"
+  grep -q 'img_var' "$_dst" \
+    || die "generated wrapper lost run-in-container's <TOOL>_IMAGE override; $_src has changed shape"
+  grep -q "IMAGE:-$IMAGE" "$_dst" \
+    || die "generated wrapper did not pick up IMAGE=$IMAGE; $_src has changed shape"
+  chmod 755 "$_dst"
+  echo "wrote $_dst  (IMAGE=$IMAGE GPU=$GPU)"
+}
+
+cmd_publish() {
+  [ $# -ge 1 ] || die "usage: chpc-tool publish <tool>"
+  _load "$1"
+  [ "$KIND" = container ] || die "$NAME: publish is for containers"
+  _built="${CHPC_USER_SCRATCH:-/mnt/scratch/user/${CHPC_USER:-$USER}}/apptainer/$IMAGE"
+  [ -r "$_built" ] || die "no built image at $_built -- run: chpc-tool build $NAME"
+  _def=$(ls -1 "$TOOLDIR"/*.def 2>/dev/null | head -1 || true)
+  echo "publishing $NAME $VERSION"
+  mkdir -p "$CHPC_LAB/containers/defs"
+  cp "$_built" "$CHPC_LAB/containers/$IMAGE"          # 3
+  chmod 644 "$CHPC_LAB/containers/$IMAGE"
+  [ -n "$_def" ] && cp "$_def" "$CHPC_LAB/containers/defs/"   # 4
+  cmd_wrapper "$NAME"                                          # 5
+  # Must match the six-column header already in that file:
+  #   | Image | What | Source / def | Built by | Date | Run |
+  if [ -n "$_def" ]; then _srccol="defs/$(basename "$_def")"; else _srccol="${UPSTREAM:--}"; fi
+  printf '| `%s` | %s %s | %s | %s | %s | `chpc-tool exec %s -- ...` |\n' \
+    "$IMAGE" "$NAME" "${VERSION:--}" "$_srccol" \
+    "${CHPC_USER:-$USER}" "$(date -u +%Y-%m-%d)" "$NAME" \
+    >> "$CHPC_LAB/containers/README.md"                        # 6
+  "$SELF_DIR/chpc-stage-containers"                            # 7
+  echo
+  echo "Done 3-7. Still yours to do:"
+  echo "  2. test it in an interactive job:  chpc-tool exec $NAME -- <something cheap>"
+  echo "  8. set STATUS=verified and UPSTREAM_REF in $TOOLDIR/tool.conf, and commit"
+}
+
+usage() { sed -n '2,18p' "$_self" | sed 's/^# \{0,1\}//'; }
+
+# --- dispatch ------------------------------------------------------------------
+[ $# -ge 1 ] || { usage; exit 2; }
+_sub="$1"; shift
+case "$_sub" in
+  list)    cmd_list "$@" ;;
+  show)    cmd_show "$@" ;;
+  path)    cmd_path "$@" ;;
+  export)  cmd_export "$@" ;;
+  exec)    cmd_exec "$@" ;;
+  doctor)  cmd_doctor "$@" ;;
+  build)   cmd_build "$@" ;;
+  publish) cmd_publish "$@" ;;
+  wrapper) cmd_wrapper "$@" ;;
+  -h|--help|help) usage ;;
+  *) die "unknown subcommand '$_sub'. Try: chpc-tool --help" ;;
+esac

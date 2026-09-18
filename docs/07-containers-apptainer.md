@@ -189,9 +189,9 @@ images generally do.
 Layout on FAC (persistent, canonical) with a hot copy on group scratch:
 
 ```
-$CHPC_LAB = /mnt/fac/CX500146_DS1/chpc
+$CHPC_LAB = /mnt/fac/CX500146_DS1                the share root; lab/chpc.env sets it
 $CHPC_LAB/containers/<tool>_<version>.sif     immutable; never overwrite, bump the version
-$CHPC_LAB/containers/defs/<tool>_<version>.def the recipe (also in this git repo under templates/apptainer or a lab repo)
+$CHPC_LAB/containers/defs/<tool>_<version>.def a COPY of the recipe; the original is in git, at tools/<tool>/
 $CHPC_LAB/containers/README.md                one line per image: what, version, who built, date, how to run
 $CHPC_LAB/bin/<tool>                          wrapper: apptainer exec --nv --bind ... $CHPC_CONTAINERS/<tool>_<version>.sif "$@"
 /mnt/scratch/group/CX500146_DS1/containers/    rsync'd copy for fast start-up (lab/bin/chpc-stage-containers)
@@ -219,6 +219,7 @@ Rules:
 
 | Problem | Fix |
 |---------|-----|
+| `mount /mnt/fac->/mnt/fac error: destination /mnt/fac doesn't exist in container`, then `while running %post section: exit status 255` | **`APPTAINER_BIND` leaking into the build.** `chpc.env` exports `APPTAINER_BIND=/mnt/scratch,/mnt/fac` on every node, and `apptainer build` honours it while running `%post` — against a base image with no `/mnt/fac` to mount onto. `unset APPTAINER_BIND` before building; `templates/apptainer/build.sh` now does. Binds are a runtime concern, never a build one. Verified 2026-09-17. |
 | `exec /.singularity.d/libs/fakeroot failed: a shared library is likely missing` | Alpine/musl base: add `--ignore-fakeroot-command` |
 | `%post` step needs real root (chown, setuid, systemd) | not possible here; build on your Mac (Option B) |
 | `--fakeroot` errors | it is not enabled on CoreHPC; drop the flag |

@@ -147,6 +147,41 @@ The kernelspec lands in `~/.local/share/jupyter/kernels/` and shows up in
 OnDemand's JupyterLab. R: `conda install r-irkernel` then
 `R -e 'IRkernel::installspec(name="proj-r", displayname="R (proj)")'`.
 
+## Three ways Lmod breaks in a script
+
+All three were hit while wiring `chpc-tool`'s `KIND=module` support, and all
+three look like a missing or broken module rather than what they are. Verified
+on the login node 2026-09-17.
+
+**Never pipe `module load`.** `module` is a shell *function*, and
+`module load CBI | head` runs it in a subshell, so the environment change never
+reaches you. It looks exactly like the module not existing.
+
+**Do not re-source `/etc/profile.d/lmod.sh` if Lmod is already there.** bash
+exports both the `module` function and `MODULEPATH` to child processes, so a
+script started from a login shell already has a working, fully populated Lmod.
+Sourcing the init again rebuilds `MODULEPATH` from the system default and drops
+`/etc/modulefiles` and `/etc/scl/modulefiles` from the front of it — which is
+where the `CBI`, `Sali` and `RAD` collections live. The symptom is
+
+```
+Lmod has detected the following error: These module(s) or extension(s) exist
+but cannot be loaded as requested: "Sali"
+```
+
+which reads like a broken modulefile and is really a `MODULEPATH` the script
+destroyed one line earlier. Guard it with `command -v module`. A script that
+must work from a genuinely empty environment should prepend those two
+directories itself rather than re-initialise.
+
+**`/etc/profile.d/lmod.sh` is not `set -u` clean.** It reads `$SLURM_NODELIST`
+unguarded at line 10, so sourcing it under `set -u` outside a job dies with
+`SLURM_NODELIST: unbound variable`. Wrap the source in `set +u` / `set -u`.
+
+**Collections are a hierarchy, and load in order.** `module load Sali dssp/2.2.1`
+as a single command fails: `dssp` is not visible until `Sali` is loaded. Load
+them one at a time.
+
 ## When to use what
 
 | Need | Use |

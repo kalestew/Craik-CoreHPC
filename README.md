@@ -24,8 +24,10 @@ we say so and give the CoreHPC-specific version.
 6. Get a shell on a compute node: `salloc -p cpu -c 4 --mem 8G -t 2:00:00`
    (see `docs/03-interactive-jobs.md`).
 7. Submit batch work from `templates/slurm/` (see `docs/04-batch-jobs.md`).
-8. Run lab software from shared containers in `$CHPC_LAB/containers`
-   (see `docs/07-containers-apptainer.md` and `lab/README.md`).
+8. Run lab software through the tool registry: `chpc-tool list` to see what
+   exists, `chpc-tool doctor` to see what actually works, `chpc-tool exec
+   <tool> -- <cmd>` to run it (see `tools/README.md`, and
+   `docs/07-containers-apptainer.md` for what it is doing underneath).
 
 From any checkout, `source env.sh` (bash or zsh, any path) puts the
 `chpc-*.sh` scripts and `lab/bin` on `PATH` and exports the `CHPC_*`
@@ -89,6 +91,7 @@ chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your
 | `CHPC_HOST`, `CHPC_BASTION` | SSH aliases, default `chpc` and `chpc-bastion` |
 | `CHPC_USER` | campus username: from `ssh -G $CHPC_HOST` off-cluster, `$USER` on it |
 | `CHPC_ENV` | path of `lab/chpc.env` in this checkout; `sbatch --export=ALL` carries it into jobs |
+| `CHPC_TOOLS` | path of `tools/` in this checkout: the registry `chpc-tool` reads |
 | `CHPC_ON_CLUSTER` | `1` on a CoreHPC node, `0` elsewhere |
 | `CHPC_*` paths | FAC, group scratch, user scratch, containers (from `lab/chpc.env`) |
 
@@ -98,13 +101,23 @@ pip, conda and Hugging Face alone.
 
 Per-project overrides go in `chpc.env.local` at the root of *your* repo
 (or a file named by `CHPC_ENV_LOCAL`). It is sourced before `lab/chpc.env`,
-so set inputs there, not derived paths:
+so set inputs there, not derived paths. Start from
+[`chpc.env.local.example`](chpc.env.local.example):
 
 ```bash
-FAC_SHARE=CX500146_DS1     # a different FAC share
-CHPC_HOST=chpc             # your SSH alias for the login node
-CHPC_USER=jdoe             # campus username, if ssh -G cannot tell
+cp corehpc/chpc.env.local.example chpc.env.local && $EDITOR chpc.env.local
 ```
+
+```bash
+FAC_SHARE="${FAC_SHARE:-CX500146_DS1}"   # a different FAC share
+CHPC_HOST="${CHPC_HOST:-chpc}"           # your SSH alias for the login node
+CHPC_USER="${CHPC_USER:-jdoe}"           # campus username, if ssh -G cannot tell
+```
+
+Use the `${NAME:-value}` form. The file is sourced as-is, so a plain
+`CHPC_USER=jdoe` beats a value you exported in the shell and beats
+`sbatch --export` — which is exactly the failure that once had a job quietly
+run at a sixth of the sample count it was asked for.
 
 Suggested layout:
 
@@ -140,16 +153,46 @@ bump the pin.
 
 ```
 env.sh                      Source me: CHPC_* variables, scripts on PATH; standalone or submodule
+chpc.env.local.example      Copy to <your project>/chpc.env.local: username, share, SSH alias
 ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
 scripts/chpc-stage.sh       rsync files to group scratch through the master session
+tools/<tool>/tool.conf      THE TOOL REGISTRY: one entry per piece of software
+tools/README.md             What an entry must declare, and how to add one
 templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, community, gpu, multi-gpu, array, mpi, container, local-nvme)
 templates/apptainer/*.def   Example definition files + build helper
 lab/chpc.env                Lab-specific variables (FAC share name, paths); copied to the FAC share
 lab/README.md               Layout of our shared FAC directory
+lab/bin/chpc-tool           Resolve, run, build and publish anything in the registry
+lab/bin/chpc-assets         Install and verify licensed binaries and model weights
 lab/bin/*                   Wrapper scripts lab members call from job scripts
 ```
+
+## The tool registry
+
+Containers, native builds, conda environments and licensed binaries are each
+declared once, in [`tools/`](tools/README.md), so that a project gets the whole
+catalogue by adding this submodule rather than restating tool paths of its own.
+
+```bash
+chpc-tool list                     # every tool, and whether it is actually built
+chpc-tool show proteinmpnn         # where one resolves to, and what it exports
+chpc-tool doctor                   # what is really on the share, and really working
+chpc-tool build proteinmpnn        # login node
+chpc-tool publish proteinmpnn      # image, recipe, wrapper, README row, staging
+chpc-assets install foldx --from ~/Downloads/foldx   # licensed payloads, by sha256
+```
+
+A project consumes it in one line. `IgGase_eng` does this in its `site.conf`:
+
+```bash
+eval "$("$REPO/corehpc/lab/bin/chpc-tool" export rosetta proteinmpnn boltz placer)"
+```
+
+which sets `ROSETTA_BIN`, `SIF_PROTEINMPNN` and the rest. Most entries are
+`STATUS=planned` — described, not yet built. That is deliberate and `list`
+shows it; nothing here ever implies an image exists when it does not.
 
 ## Key facts to remember
 
