@@ -77,6 +77,18 @@ _load() {
   _t="$1"
   _conf="$TOOLS/$_t/tool.conf"
   [ -f "$_conf" ] || die "unknown tool '$_t' -- no $_conf. Try: chpc-tool list"
+  # Parse before sourcing. A tool.conf is plain shell, so an unquoted value --
+  #   UPSTREAM_REF=v3.3.0 (the release tarball)
+  # -- is a syntax error, and sourcing it prints a bare
+  #   tool.conf: line 8: syntax error near unexpected token `('
+  # with no tool name and nothing to say the registry is what is broken. The
+  # message matters more than the check: this fails at `export` time, inside
+  # an eval, in a job script, where the reader has no reason to suspect a
+  # config file. Costs one subshell per load.
+  sh -n "$_conf" 2>/dev/null || die "$_t: $_conf is not valid shell.
+Values with spaces or shell metacharacters must be quoted:
+  UPSTREAM_REF=\"v3.3.0 release tarball\"    not    UPSTREAM_REF=v3.3.0 (release tarball)
+$(sh -n "$_conf" 2>&1 | sed 's/^/  /')"
   for _fld in $_FIELDS; do eval "$_fld="; done
   unset -f tool_exports tool_doctor >/dev/null 2>&1 || true
   TOOLDIR="$TOOLS/$_t"
