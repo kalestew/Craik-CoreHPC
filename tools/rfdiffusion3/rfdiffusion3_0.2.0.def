@@ -10,6 +10,14 @@ From: rosettacommons/foundry:0.2.0-slim
 # checkpoints, which is what we want -- the 14.6 GB of weights belong on FAC,
 # where refreshing them does not mean rebuilding a 18 GB image.
 #
+# HARDWARE LIMIT: upstream's image ships torch 2.7.1+cu126, and measured
+# in it, torch._C._cuda_getArchFlags() is
+#   sm_50 sm_60 sm_70 sm_75 sm_80 sm_86 sm_90
+# with no sm_120. So this CANNOT run on the RTX Pro 6000 (Blackwell) nodes
+# ggpu1-[13-19], despite being the newest tool here and built on a CUDA 12.6
+# base -- 12.6 predates Blackwell, and "new tool" is not the same as "new
+# enough CUDA". Ask for --gres=gpu:nvidia_l40s:1, never a bare --gres=gpu:1.
+#
 # Build:  chpc-tool build rfdiffusion3
 
 %labels
@@ -19,6 +27,7 @@ From: rosettacommons/foundry:0.2.0-slim
     UpstreamRef  rc-foundry==0.2.0
     Licence      BSD-3-Clause
     Base         rosettacommons/foundry:0.2.0-slim
+    GPUArch      sm_50-sm_90 only -- NOT sm_120 (torch 2.7.1/cu126, measured)
     Maintainer   Craik Lab, UCSF
 
 %post
