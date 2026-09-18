@@ -66,6 +66,15 @@ PY
     set -eu
     python -c "import chai_lab, torch; print('chai_lab ok, torch', torch.__version__)"
     command -v chai-lab
+    # The import above proves nothing about where chai will try to WRITE, and
+    # its default download path is inside site-packages -- read-only in a .sif.
+    # Assert the redirect is set and usable, which is the part that fails as
+    # an image and passes during %post.
+    test -n "${CHAI_DOWNLOADS_DIR:-}" || { echo "CHAI_DOWNLOADS_DIR unset"; exit 1; }
+    mkdir -p "$CHAI_DOWNLOADS_DIR"
+    touch "$CHAI_DOWNLOADS_DIR/.writable" && rm -f "$CHAI_DOWNLOADS_DIR/.writable" \
+        || { echo "CHAI_DOWNLOADS_DIR=$CHAI_DOWNLOADS_DIR is not writable"; exit 1; }
+    echo "downloads dir $CHAI_DOWNLOADS_DIR is writable"
 
 %runscript
     exec chai-lab "$@"
