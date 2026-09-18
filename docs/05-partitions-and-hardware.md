@@ -79,7 +79,28 @@ Naming a model costs queue breadth, so do it only where it is needed. Anything
 built on a CUDA 12.8+ base — which is everything in `tools/` on a
 `pytorch/pytorch:*-cuda13.2-*` base — should keep the unrestricted
 `--gres=gpu:1`. Verified on CoreHPC 2026-09-17: a cu13.2 image reports `sm_89`
-on an L40S and runs there.
+on an L40S and runs there. Verified again 2026-09-18 on the hard case, an
+RTX PRO 6000 (ggpu1-16, compute capability 12.0): the `esm` image reports
+
+```
+torch 2.14.0+cu132   arch list ['sm_75','sm_80','sm_86','sm_90','sm_100','sm_120']
+```
+
+and completes a forward pass with finite output. So cu13.2 images really are
+unrestricted here, and only the cu121 ones need a `--gres` model name.
+
+**Check the image, not the cluster.** `torch.cuda.get_arch_list()` reports
+which architectures a build carries kernels for, and it is a property of the
+*build*, not of the device you happen to be on — so it answers "can this image
+run on Blackwell?" from any node, including a CPU one, in seconds:
+
+```bash
+chpc-tool exec <tool> -- python -c "import torch; print(torch.cuda.get_arch_list())"
+```
+
+`sm_120` in the list means the image is safe on every `gpu` node. Absent, it
+needs `--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`. That beats
+waiting in the queue for a Blackwell allocation to find out the expensive way.
 
 ## Per-user limits (live QoS, which differ from the wiki table)
 
