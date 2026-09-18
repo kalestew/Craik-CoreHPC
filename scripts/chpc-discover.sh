@@ -5,11 +5,15 @@
 #   chpc-discover.sh --out FILE       # write elsewhere, e.g. into the project
 #                                     # that embeds this repo; "-" = stdout
 #   CHPC_FACTS_OUT=FILE chpc-discover.sh     # same, via the environment
+#   chpc-discover.sh --gpu            # also capture nvidia-smi from a REAL gpu
+#                                     # job; queues briefly, so it is opt-in
 # On the login node:
 #   bash chpc-discover.sh --local > cluster-facts.md
 set -uo pipefail
 
 remote_script() {
+# Injected, because the heredoc below is quoted and expands nothing.
+printf 'WANT_GPU=%s\n' "${want_gpu:-0}"
 cat <<'REMOTE'
 set -uo pipefail
 section() { printf '\n## %s\n\n' "$1"; }
@@ -27,6 +31,22 @@ section "Partition config (scontrol)"; code scontrol show partition
 section "QoS"; code sacctmgr show qos format=Name,Priority,MaxWall,MaxTRESPU%40,MaxJobsPU,MaxSubmitPU,GrpTRES%30 -P
 section "My associations (accounts/QoS I can use)"; code sacctmgr show assoc user="$USER" format=Cluster,Account,Partition,QOS%40,MaxJobs,MaxSubmit -P
 section "GRES types"; code sh -c 'sinfo -o "%G" | sort -u'
+# Everything else here runs on the LOGIN NODE, which has no GPU and no
+# nvidia-smi -- so every capture before this recorded the GRES name and no
+# driver or CUDA version at all. An image built against a newer CUDA than the
+# node driver supports fails at run time, which made that omission expensive.
+# This is the only section that queues a job, so it is opt-in via --gpu.
+# The account is read back from the user's own associations rather than
+# hardcoded, so this works for any lab on the cluster.
+if [ "${WANT_GPU:-0}" = 1 ]; then
+section "GPU detail (from a real gpu job, not the login node)"
+# `< /dev/null` is load-bearing. This whole script is fed to `bash -l -s` over
+# ssh, so the script itself IS stdin -- and srun reads stdin to forward it to
+# the task. Without the redirect srun swallows every remaining line and the
+# capture just stops here: measured, it silently truncated 27 sections to 10,
+# losing storage, modules, Apptainer and the proxy, while still exiting 0.
+code sh -c '_a=$(sacctmgr -nP show assoc user="$USER" format=Account | head -1); srun -p gpu --gres=gpu:1 -t 00:05:00 ${_a:+-A "$_a"} nvidia-smi < /dev/null'
+fi
 section "Storage: mounts"; code sh -c 'df -hT /home/remote 2>/dev/null; df -hT /mnt/scratch 2>/dev/null; df -hT /mnt/fac 2>/dev/null; mount | grep -E "vast|/mnt/fac|/mnt/scratch" '
 section "Storage: my quota (userquota)"; code sh -c 'userquota 2>/dev/null || /usr/local/bin/userquota'
 section "Storage: FAC shares I belong to"; code sh -c 'ls -la /mnt/fac/ | grep -E "^total|$(id -Gn | tr " " "|")"'
@@ -48,13 +68,14 @@ section "My recent jobs (7 days)"; code sacct -u "$USER" -S "$(date -d '7 days a
 REMOTE
 }
 
-run_local=0; out=${CHPC_FACTS_OUT:-}
+run_local=0; want_gpu=0; out=${CHPC_FACTS_OUT:-}
 while [[ $# -gt 0 ]]; do
   case $1 in
     --local) run_local=1 ;;
+    --gpu) want_gpu=1 ;;
     --out) out=${2:?--out needs a path}; shift ;;
     --out=*) out=${1#--out=} ;;
-    -h|--help) sed -n '2,10p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,11p' "$0"; exit 0 ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift

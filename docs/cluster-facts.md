@@ -1,6 +1,6 @@
 # CoreHPC live facts
 
-Captured 2026-09-17 03:50 UTC on chpc-ucsf-login-vm1.corehpc.ucsf.edu by kanderson6 with scripts/chpc-discover.sh.
+Captured 2026-09-18 03:56 UTC on chpc-ucsf-login-vm1.corehpc.ucsf.edu by kanderson6 with scripts/chpc-discover.sh.
 
 ## Identity and groups
 
@@ -31,9 +31,9 @@ PARTITION AVAIL TIMELIMIT NODES CPUS MEMORY GRES NODELIST
 community up 14-00:00:00 80 96 256000 (null) ccpu1-[01-80]
 community_short up 1:00:00 80 96 256000 (null) ccpu1-[01-80]
 cpu* up 4-00:00:00 47 336+ 1540000+ (null) gcpu2-[03-48,55]
-gpu up 4-00:00:00 6 64 386000 gpu:nvidia_h100_nvl:1(S:0) ggpu4-[01-06]
 gpu up 4-00:00:00 7 64 386000 gpu:nvidia_l40s:2 ggpu1-[06-12]
 gpu up 4-00:00:00 7 128 380000 gpu:nvidia_rtx_pro_6000:2 ggpu1-[13-19]
+gpu up 4-00:00:00 6 64 386000 gpu:nvidia_h100_nvl:1(S:0) ggpu4-[01-06]
 large_gpu up 1-00:00:00 13 208+ 2060000 gpu:nvidia_h200:8 ggpu3-[17-29]
 large_gpu up 1-00:00:00 3 256 1540000 gpu:nvidia_h200_nvl:4 ggpu5-[01-03]
 pod up 4-00:00:00 8 208 2063700 gpu:nvidia_h200:8 ggpu3-[09-16]
@@ -44,256 +44,256 @@ pod up 4-00:00:00 8 208 2063700 gpu:nvidia_h200:8 ggpu3-[09-16]
 ```
 PARTITION HOSTNAMES FREE_MEM MEMORY AVAIL CPUS CPUS(A/I/O/T) GRES
 community ccpu1-05 N/A 256000 up 96 0/0/96/96 (null)
-community ccpu1-01 48704 256000 up 96 4/92/0/96 (null)
-community ccpu1-02 155398 256000 up 96 0/96/0/96 (null)
-community ccpu1-03 179667 256000 up 96 0/96/0/96 (null)
-community ccpu1-04 191393 256000 up 96 0/96/0/96 (null)
-community ccpu1-06 191620 256000 up 96 0/96/0/96 (null)
-community ccpu1-07 176617 256000 up 96 0/96/0/96 (null)
-community ccpu1-08 194720 256000 up 96 0/96/0/96 (null)
-community ccpu1-09 193514 256000 up 96 0/96/0/96 (null)
-community ccpu1-10 140249 256000 up 96 0/96/0/96 (null)
-community ccpu1-11 200869 256000 up 96 0/96/0/96 (null)
-community ccpu1-12 224064 256000 up 96 0/96/0/96 (null)
-community ccpu1-13 225204 256000 up 96 0/96/0/96 (null)
-community ccpu1-14 240278 256000 up 96 0/96/0/96 (null)
-community ccpu1-15 236341 256000 up 96 0/96/0/96 (null)
-community ccpu1-16 237111 256000 up 96 0/96/0/96 (null)
-community ccpu1-17 237159 256000 up 96 0/96/0/96 (null)
-community ccpu1-18 238948 256000 up 96 0/96/0/96 (null)
-community ccpu1-19 241465 256000 up 96 0/96/0/96 (null)
-community ccpu1-20 241553 256000 up 96 0/96/0/96 (null)
-community ccpu1-21 241445 256000 up 96 0/96/0/96 (null)
-community ccpu1-22 241563 256000 up 96 0/96/0/96 (null)
-community ccpu1-23 241671 256000 up 96 0/96/0/96 (null)
-community ccpu1-24 241628 256000 up 96 0/96/0/96 (null)
-community ccpu1-25 241679 256000 up 96 0/96/0/96 (null)
-community ccpu1-26 241540 256000 up 96 0/96/0/96 (null)
-community ccpu1-27 241530 256000 up 96 0/96/0/96 (null)
-community ccpu1-28 241571 256000 up 96 0/96/0/96 (null)
-community ccpu1-29 241515 256000 up 96 0/96/0/96 (null)
-community ccpu1-30 241493 256000 up 96 0/96/0/96 (null)
-community ccpu1-31 241539 256000 up 96 0/96/0/96 (null)
-community ccpu1-32 241629 256000 up 96 0/96/0/96 (null)
-community ccpu1-33 241658 256000 up 96 0/96/0/96 (null)
-community ccpu1-34 241671 256000 up 96 0/96/0/96 (null)
-community ccpu1-35 241545 256000 up 96 0/96/0/96 (null)
-community ccpu1-36 241675 256000 up 96 0/96/0/96 (null)
-community ccpu1-37 241681 256000 up 96 0/96/0/96 (null)
-community ccpu1-38 241494 256000 up 96 0/96/0/96 (null)
-community ccpu1-39 241468 256000 up 96 0/96/0/96 (null)
-community ccpu1-40 241491 256000 up 96 0/96/0/96 (null)
-community ccpu1-41 241506 256000 up 96 0/96/0/96 (null)
-community ccpu1-42 241521 256000 up 96 0/96/0/96 (null)
-community ccpu1-43 241616 256000 up 96 0/96/0/96 (null)
-community ccpu1-44 241454 256000 up 96 0/96/0/96 (null)
-community ccpu1-45 241495 256000 up 96 0/96/0/96 (null)
-community ccpu1-46 241552 256000 up 96 0/96/0/96 (null)
-community ccpu1-47 241630 256000 up 96 0/96/0/96 (null)
-community ccpu1-48 241459 256000 up 96 0/96/0/96 (null)
-community ccpu1-49 241679 256000 up 96 0/96/0/96 (null)
-community ccpu1-50 241434 256000 up 96 0/96/0/96 (null)
-community ccpu1-51 241337 256000 up 96 0/96/0/96 (null)
-community ccpu1-52 241524 256000 up 96 0/96/0/96 (null)
-community ccpu1-53 241574 256000 up 96 0/96/0/96 (null)
-community ccpu1-54 241668 256000 up 96 0/96/0/96 (null)
-community ccpu1-55 241459 256000 up 96 0/96/0/96 (null)
-community ccpu1-56 241490 256000 up 96 0/96/0/96 (null)
-community ccpu1-57 241658 256000 up 96 0/96/0/96 (null)
-community ccpu1-58 241483 256000 up 96 0/96/0/96 (null)
-community ccpu1-59 241691 256000 up 96 0/96/0/96 (null)
-community ccpu1-60 241629 256000 up 96 0/96/0/96 (null)
-community ccpu1-61 241583 256000 up 96 0/96/0/96 (null)
-community ccpu1-62 241513 256000 up 96 0/96/0/96 (null)
-community ccpu1-63 241519 256000 up 96 0/96/0/96 (null)
-community ccpu1-64 241597 256000 up 96 0/96/0/96 (null)
-community ccpu1-65 241584 256000 up 96 0/96/0/96 (null)
-community ccpu1-66 241500 256000 up 96 0/96/0/96 (null)
-community ccpu1-67 241465 256000 up 96 0/96/0/96 (null)
-community ccpu1-68 241431 256000 up 96 0/96/0/96 (null)
-community ccpu1-69 241507 256000 up 96 0/96/0/96 (null)
-community ccpu1-70 241641 256000 up 96 0/96/0/96 (null)
-community ccpu1-71 241525 256000 up 96 0/96/0/96 (null)
-community ccpu1-72 241501 256000 up 96 0/96/0/96 (null)
-community ccpu1-73 241527 256000 up 96 0/96/0/96 (null)
-community ccpu1-74 241449 256000 up 96 0/96/0/96 (null)
-community ccpu1-75 241604 256000 up 96 0/96/0/96 (null)
-community ccpu1-76 241557 256000 up 96 0/96/0/96 (null)
-community ccpu1-77 241587 256000 up 96 0/96/0/96 (null)
-community ccpu1-78 241702 256000 up 96 0/96/0/96 (null)
-community ccpu1-79 241540 256000 up 96 0/96/0/96 (null)
-community ccpu1-80 241668 256000 up 96 0/96/0/96 (null)
+community ccpu1-01 47558 256000 up 96 6/90/0/96 (null)
+community ccpu1-02 155867 256000 up 96 0/96/0/96 (null)
+community ccpu1-03 179365 256000 up 96 0/96/0/96 (null)
+community ccpu1-04 190822 256000 up 96 0/96/0/96 (null)
+community ccpu1-06 191592 256000 up 96 0/96/0/96 (null)
+community ccpu1-07 176263 256000 up 96 0/96/0/96 (null)
+community ccpu1-08 194210 256000 up 96 0/96/0/96 (null)
+community ccpu1-09 191832 256000 up 96 0/96/0/96 (null)
+community ccpu1-10 140100 256000 up 96 0/96/0/96 (null)
+community ccpu1-11 200998 256000 up 96 0/96/0/96 (null)
+community ccpu1-12 224122 256000 up 96 0/96/0/96 (null)
+community ccpu1-13 225247 256000 up 96 0/96/0/96 (null)
+community ccpu1-14 240255 256000 up 96 0/96/0/96 (null)
+community ccpu1-15 236380 256000 up 96 0/96/0/96 (null)
+community ccpu1-16 237099 256000 up 96 0/96/0/96 (null)
+community ccpu1-17 237233 256000 up 96 0/96/0/96 (null)
+community ccpu1-18 239014 256000 up 96 0/96/0/96 (null)
+community ccpu1-19 241352 256000 up 96 0/96/0/96 (null)
+community ccpu1-20 241650 256000 up 96 0/96/0/96 (null)
+community ccpu1-21 241520 256000 up 96 0/96/0/96 (null)
+community ccpu1-22 241611 256000 up 96 0/96/0/96 (null)
+community ccpu1-23 241483 256000 up 96 0/96/0/96 (null)
+community ccpu1-24 241654 256000 up 96 0/96/0/96 (null)
+community ccpu1-25 241657 256000 up 96 0/96/0/96 (null)
+community ccpu1-26 241580 256000 up 96 0/96/0/96 (null)
+community ccpu1-27 241485 256000 up 96 0/96/0/96 (null)
+community ccpu1-28 241532 256000 up 96 0/96/0/96 (null)
+community ccpu1-29 241656 256000 up 96 0/96/0/96 (null)
+community ccpu1-30 241449 256000 up 96 0/96/0/96 (null)
+community ccpu1-31 241549 256000 up 96 0/96/0/96 (null)
+community ccpu1-32 241656 256000 up 96 0/96/0/96 (null)
+community ccpu1-33 241646 256000 up 96 0/96/0/96 (null)
+community ccpu1-34 241651 256000 up 96 0/96/0/96 (null)
+community ccpu1-35 241639 256000 up 96 0/96/0/96 (null)
+community ccpu1-36 241662 256000 up 96 0/96/0/96 (null)
+community ccpu1-37 241675 256000 up 96 0/96/0/96 (null)
+community ccpu1-38 241655 256000 up 96 0/96/0/96 (null)
+community ccpu1-39 241639 256000 up 96 0/96/0/96 (null)
+community ccpu1-40 241618 256000 up 96 0/96/0/96 (null)
+community ccpu1-41 241694 256000 up 96 0/96/0/96 (null)
+community ccpu1-42 241603 256000 up 96 0/96/0/96 (null)
+community ccpu1-43 241473 256000 up 96 0/96/0/96 (null)
+community ccpu1-44 241612 256000 up 96 0/96/0/96 (null)
+community ccpu1-45 241563 256000 up 96 0/96/0/96 (null)
+community ccpu1-46 241635 256000 up 96 0/96/0/96 (null)
+community ccpu1-47 241602 256000 up 96 0/96/0/96 (null)
+community ccpu1-48 241452 256000 up 96 0/96/0/96 (null)
+community ccpu1-49 241641 256000 up 96 0/96/0/96 (null)
+community ccpu1-50 241498 256000 up 96 0/96/0/96 (null)
+community ccpu1-51 241505 256000 up 96 0/96/0/96 (null)
+community ccpu1-52 241509 256000 up 96 0/96/0/96 (null)
+community ccpu1-53 241660 256000 up 96 0/96/0/96 (null)
+community ccpu1-54 241666 256000 up 96 0/96/0/96 (null)
+community ccpu1-55 241557 256000 up 96 0/96/0/96 (null)
+community ccpu1-56 241465 256000 up 96 0/96/0/96 (null)
+community ccpu1-57 241575 256000 up 96 0/96/0/96 (null)
+community ccpu1-58 241563 256000 up 96 0/96/0/96 (null)
+community ccpu1-59 241627 256000 up 96 0/96/0/96 (null)
+community ccpu1-60 241679 256000 up 96 0/96/0/96 (null)
+community ccpu1-61 241545 256000 up 96 0/96/0/96 (null)
+community ccpu1-62 241630 256000 up 96 0/96/0/96 (null)
+community ccpu1-63 241641 256000 up 96 0/96/0/96 (null)
+community ccpu1-64 241503 256000 up 96 0/96/0/96 (null)
+community ccpu1-65 241562 256000 up 96 0/96/0/96 (null)
+community ccpu1-66 241519 256000 up 96 0/96/0/96 (null)
+community ccpu1-67 241527 256000 up 96 0/96/0/96 (null)
+community ccpu1-68 241574 256000 up 96 0/96/0/96 (null)
+community ccpu1-69 241563 256000 up 96 0/96/0/96 (null)
+community ccpu1-70 241574 256000 up 96 0/96/0/96 (null)
+community ccpu1-71 241671 256000 up 96 0/96/0/96 (null)
+community ccpu1-72 241654 256000 up 96 0/96/0/96 (null)
+community ccpu1-73 241553 256000 up 96 0/96/0/96 (null)
+community ccpu1-74 241669 256000 up 96 0/96/0/96 (null)
+community ccpu1-75 241621 256000 up 96 0/96/0/96 (null)
+community ccpu1-76 241717 256000 up 96 0/96/0/96 (null)
+community ccpu1-77 241701 256000 up 96 0/96/0/96 (null)
+community ccpu1-78 241679 256000 up 96 0/96/0/96 (null)
+community ccpu1-79 241545 256000 up 96 0/96/0/96 (null)
+community ccpu1-80 241710 256000 up 96 0/96/0/96 (null)
 community_short ccpu1-05 N/A 256000 up 96 0/0/96/96 (null)
-community_short ccpu1-01 48704 256000 up 96 4/92/0/96 (null)
-community_short ccpu1-02 155398 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-03 179667 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-04 191393 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-06 191620 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-07 176617 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-08 194720 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-09 193514 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-10 140249 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-11 200869 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-12 224064 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-13 225204 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-14 240278 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-15 236341 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-16 237111 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-17 237159 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-18 238948 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-19 241465 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-20 241553 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-21 241445 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-22 241563 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-23 241671 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-24 241628 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-25 241679 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-26 241540 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-27 241530 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-28 241571 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-29 241515 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-30 241493 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-31 241539 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-32 241629 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-33 241658 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-34 241671 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-35 241545 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-36 241675 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-37 241681 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-38 241494 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-39 241468 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-40 241491 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-41 241506 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-42 241521 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-43 241616 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-44 241454 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-45 241495 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-46 241552 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-47 241630 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-48 241459 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-49 241679 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-50 241434 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-51 241337 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-52 241524 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-53 241574 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-54 241668 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-55 241459 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-56 241490 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-57 241658 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-58 241483 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-59 241691 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-60 241629 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-61 241583 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-62 241513 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-63 241519 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-64 241597 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-65 241584 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-66 241500 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-67 241465 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-68 241431 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-69 241507 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-70 241641 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-71 241525 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-72 241501 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-73 241527 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-74 241449 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-75 241604 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-76 241557 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-77 241587 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-78 241702 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-79 241540 256000 up 96 0/96/0/96 (null)
-community_short ccpu1-80 241668 256000 up 96 0/96/0/96 (null)
-cpu* gcpu2-31 1526043 1540000 up 512 0/0/512/512 (null)
-cpu* gcpu2-08 73439 1547000 up 336 60/276/0/336 (null)
-cpu* gcpu2-03 309935 1547000 up 336 8/328/0/336 (null)
-cpu* gcpu2-06 175170 1547000 up 336 46/290/0/336 (null)
-cpu* gcpu2-07 179104 1547000 up 336 46/290/0/336 (null)
-cpu* gcpu2-09 40223 1547000 up 336 50/286/0/336 (null)
-cpu* gcpu2-10 240768 1547000 up 336 46/290/0/336 (null)
-cpu* gcpu2-11 48679 1547000 up 336 54/282/0/336 (null)
-cpu* gcpu2-12 16567 1547000 up 336 308/28/0/336 (null)
-cpu* gcpu2-13 907252 1547000 up 336 200/136/0/336 (null)
-cpu* gcpu2-14 483933 1547000 up 336 32/304/0/336 (null)
-cpu* gcpu2-15 42951 1547000 up 336 46/290/0/336 (null)
-cpu* gcpu2-16 16890 1547000 up 336 108/228/0/336 (null)
-cpu* gcpu2-17 208672 1540000 up 512 18/494/0/512 (null)
-cpu* gcpu2-18 167424 1540000 up 512 192/320/0/512 (null)
-cpu* gcpu2-19 1082227 1540000 up 512 2/510/0/512 (null)
-cpu* gcpu2-32 108456 1540000 up 512 50/462/0/512 (null)
-cpu* gcpu2-33 223998 1540000 up 512 46/466/0/512 (null)
-cpu* gcpu2-34 430285 1540000 up 512 96/416/0/512 (null)
-cpu* gcpu2-04 180203 1547000 up 336 0/336/0/336 (null)
-cpu* gcpu2-05 45402 1547000 up 336 0/336/0/336 (null)
-cpu* gcpu2-20 723355 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-21 808344 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-22 1031324 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-23 1211988 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-24 559260 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-25 1360282 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-26 1416637 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-27 1441043 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-28 1351881 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-29 1525768 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-30 1085902 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-36 777848 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-37 902169 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-38 770896 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-39 957502 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-40 1525643 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-41 1525647 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-42 1525568 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-43 1525659 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-44 1525697 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-45 1525714 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-46 1525662 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-47 425079 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-48 529699 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-55 496345 1540000 up 512 0/512/0/512 (null)
-cpu* gcpu2-35 1525781 1540000 up 512 0/0/512/512 (null)
-gpu ggpu1-07 27750 386000 up 64 4/60/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-08 5235 386000 up 64 16/48/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-09 27394 386000 up 64 10/54/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-10 21461 386000 up 64 16/48/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-11 18659 386000 up 64 10/54/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-14 2767 380000 up 128 24/104/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu1-16 67431 380000 up 128 18/110/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu1-17 52835 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu4-01 21305 386000 up 64 32/32/0/64 gpu:nvidia_h100_nvl:1(S:0)
-gpu ggpu4-02 16332 386000 up 64 2/62/0/64 gpu:nvidia_h100_nvl:1(S:0)
-gpu ggpu4-03 4966 386000 up 64 4/60/0/64 gpu:nvidia_h100_nvl:1(S:0)
-gpu ggpu4-04 16149 386000 up 64 2/62/0/64 gpu:nvidia_h100_nvl:1(S:0)
-gpu ggpu4-06 18971 386000 up 64 40/24/0/64 gpu:nvidia_h100_nvl:1(S:0)
-gpu ggpu1-06 4704 386000 up 64 20/44/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-12 16843 386000 up 64 32/32/0/64 gpu:nvidia_l40s:2
-gpu ggpu1-13 4706 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu1-15 100696 380000 up 128 16/112/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu1-18 48776 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu1-19 161490 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
-gpu ggpu4-05 25195 386000 up 64 60/4/0/64 gpu:nvidia_h100_nvl:1(S:0)
-large_gpu ggpu3-17 146930 2060000 up 240 226/14/0/240 gpu:nvidia_h200:8
-large_gpu ggpu3-18 239802 2060000 up 240 212/28/0/240 gpu:nvidia_h200:8
-large_gpu ggpu3-19 492808 2060000 up 240 40/200/0/240 gpu:nvidia_h200:8
-large_gpu ggpu3-23 835138 2060000 up 208 96/112/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-26 653150 2060000 up 208 198/10/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-28 110118 2060000 up 208 184/24/0/208 gpu:nvidia_h200:8
-large_gpu ggpu5-01 1005771 1540000 up 256 106/150/0/256 gpu:nvidia_h200_nvl:4
-large_gpu ggpu3-20 221031 2060000 up 240 240/0/0/240 gpu:nvidia_h200:8
-large_gpu ggpu3-21 112741 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-22 609824 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-24 84213 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-25 73012 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-29 98534 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
-large_gpu ggpu3-27 253748 2060000 up 208 0/208/0/208 gpu:nvidia_h200:8
-large_gpu ggpu5-02 1273014 1540000 up 256 0/256/0/256 gpu:nvidia_h200_nvl:4
-large_gpu ggpu5-03 1395238 1540000 up 256 0/256/0/256 gpu:nvidia_h200_nvl:4
-pod ggpu3-09 42212 2063700 up 208 130/78/0/208 gpu:nvidia_h200:8
-pod ggpu3-12 76364 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
-pod ggpu3-13 51884 2063700 up 208 40/168/0/208 gpu:nvidia_h200:8
-pod ggpu3-15 117134 2063700 up 208 60/148/0/208 gpu:nvidia_h200:8
-pod ggpu3-10 52032 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
-pod ggpu3-11 210501 2063700 up 208 52/156/0/208 gpu:nvidia_h200:8
-pod ggpu3-14 772844 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
-pod ggpu3-16 508018 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
+community_short ccpu1-01 47558 256000 up 96 6/90/0/96 (null)
+community_short ccpu1-02 155867 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-03 179365 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-04 190822 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-06 191592 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-07 176263 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-08 194210 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-09 191832 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-10 140100 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-11 200998 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-12 224122 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-13 225247 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-14 240255 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-15 236380 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-16 237099 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-17 237233 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-18 239014 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-19 241352 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-20 241650 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-21 241520 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-22 241611 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-23 241483 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-24 241654 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-25 241657 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-26 241580 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-27 241485 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-28 241532 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-29 241656 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-30 241449 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-31 241549 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-32 241656 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-33 241646 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-34 241651 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-35 241639 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-36 241662 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-37 241675 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-38 241655 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-39 241639 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-40 241618 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-41 241694 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-42 241603 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-43 241473 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-44 241612 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-45 241563 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-46 241635 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-47 241602 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-48 241452 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-49 241641 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-50 241498 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-51 241505 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-52 241509 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-53 241660 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-54 241666 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-55 241557 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-56 241465 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-57 241575 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-58 241563 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-59 241627 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-60 241679 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-61 241545 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-62 241630 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-63 241641 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-64 241503 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-65 241562 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-66 241519 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-67 241527 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-68 241574 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-69 241563 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-70 241574 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-71 241671 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-72 241654 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-73 241553 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-74 241669 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-75 241621 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-76 241717 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-77 241701 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-78 241679 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-79 241545 256000 up 96 0/96/0/96 (null)
+community_short ccpu1-80 241710 256000 up 96 0/96/0/96 (null)
+cpu* gcpu2-31 1526010 1540000 up 512 0/0/512/512 (null)
+cpu* gcpu2-03 261998 1547000 up 336 100/236/0/336 (null)
+cpu* gcpu2-05 603129 1547000 up 336 308/28/0/336 (null)
+cpu* gcpu2-06 810963 1547000 up 336 2/334/0/336 (null)
+cpu* gcpu2-07 644211 1547000 up 336 6/330/0/336 (null)
+cpu* gcpu2-08 489199 1547000 up 336 6/330/0/336 (null)
+cpu* gcpu2-09 640583 1547000 up 336 12/324/0/336 (null)
+cpu* gcpu2-11 306355 1547000 up 336 32/304/0/336 (null)
+cpu* gcpu2-12 140547 1547000 up 336 286/50/0/336 (null)
+cpu* gcpu2-13 502473 1547000 up 336 130/206/0/336 (null)
+cpu* gcpu2-14 584533 1547000 up 336 106/230/0/336 (null)
+cpu* gcpu2-15 379548 1547000 up 336 6/330/0/336 (null)
+cpu* gcpu2-17 266778 1540000 up 512 24/488/0/512 (null)
+cpu* gcpu2-32 162705 1540000 up 512 26/486/0/512 (null)
+cpu* gcpu2-34 463704 1540000 up 512 196/316/0/512 (null)
+cpu* gcpu2-40 1243244 1540000 up 512 2/510/0/512 (null)
+cpu* gcpu2-42 500297 1540000 up 512 56/456/0/512 (null)
+cpu* gcpu2-04 556844 1547000 up 336 0/336/0/336 (null)
+cpu* gcpu2-10 861519 1547000 up 336 0/336/0/336 (null)
+cpu* gcpu2-16 312976 1547000 up 336 0/336/0/336 (null)
+cpu* gcpu2-18 856355 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-19 1116344 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-20 722377 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-21 805515 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-22 1029264 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-23 1165346 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-24 559320 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-25 1360412 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-26 1416280 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-27 1441032 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-28 1352023 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-29 1525863 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-30 1085976 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-33 946178 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-36 777271 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-37 1420891 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-38 1313688 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-39 1190141 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-41 1432104 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-43 1321921 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-44 1480513 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-45 1480934 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-46 1482333 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-47 424427 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-48 529629 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-55 496284 1540000 up 512 0/512/0/512 (null)
+cpu* gcpu2-35 1525629 1540000 up 512 0/0/512/512 (null)
+gpu ggpu1-11 13992 386000 up 64 0/64/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-06 81254 386000 up 64 34/30/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-08 22568 386000 up 64 24/40/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-09 4797 386000 up 64 32/32/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-10 34631 386000 up 64 34/30/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-12 35911 386000 up 64 32/32/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-13 6435 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
+gpu ggpu1-14 72756 380000 up 128 12/116/0/128 gpu:nvidia_rtx_pro_6000:2
+gpu ggpu1-16 122330 380000 up 128 16/112/0/128 gpu:nvidia_rtx_pro_6000:2
+gpu ggpu1-19 161294 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
+gpu ggpu4-01 29101 386000 up 64 32/32/0/64 gpu:nvidia_h100_nvl:1(S:0)
+gpu ggpu4-02 4244 386000 up 64 8/56/0/64 gpu:nvidia_h100_nvl:1(S:0)
+gpu ggpu4-03 3177 386000 up 64 16/48/0/64 gpu:nvidia_h100_nvl:1(S:0)
+gpu ggpu4-04 5280 386000 up 64 32/32/0/64 gpu:nvidia_h100_nvl:1(S:0)
+gpu ggpu4-05 27854 386000 up 64 60/4/0/64 gpu:nvidia_h100_nvl:1(S:0)
+gpu ggpu4-06 14156 386000 up 64 4/60/0/64 gpu:nvidia_h100_nvl:1(S:0)
+gpu ggpu1-07 31112 386000 up 64 32/32/0/64 gpu:nvidia_l40s:2
+gpu ggpu1-15 34854 380000 up 128 16/112/0/128 gpu:nvidia_rtx_pro_6000:2
+gpu ggpu1-17 18058 380000 up 128 16/112/0/128 gpu:nvidia_rtx_pro_6000:2
+gpu ggpu1-18 48746 380000 up 128 100/28/0/128 gpu:nvidia_rtx_pro_6000:2
+large_gpu ggpu3-17 125142 2060000 up 240 200/40/0/240 gpu:nvidia_h200:8
+large_gpu ggpu3-18 159549 2060000 up 240 196/44/0/240 gpu:nvidia_h200:8
+large_gpu ggpu3-19 329118 2060000 up 240 64/176/0/240 gpu:nvidia_h200:8
+large_gpu ggpu3-20 723663 2060000 up 240 64/176/0/240 gpu:nvidia_h200:8
+large_gpu ggpu3-21 143333 2060000 up 208 184/24/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-22 426321 2060000 up 208 188/20/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-23 483945 2060000 up 208 64/144/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-24 534676 2060000 up 208 40/168/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-26 427676 2060000 up 208 182/26/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-28 133214 2060000 up 208 84/124/0/208 gpu:nvidia_h200:8
+large_gpu ggpu5-01 774315 1540000 up 256 94/162/0/256 gpu:nvidia_h200_nvl:4
+large_gpu ggpu3-25 90271 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-29 57510 2060000 up 208 208/0/0/208 gpu:nvidia_h200:8
+large_gpu ggpu3-27 1014199 2060000 up 208 0/208/0/208 gpu:nvidia_h200:8
+large_gpu ggpu5-02 1240219 1540000 up 256 0/256/0/256 gpu:nvidia_h200_nvl:4
+large_gpu ggpu5-03 1395345 1540000 up 256 0/256/0/256 gpu:nvidia_h200_nvl:4
+pod ggpu3-09 171353 2063700 up 208 128/80/0/208 gpu:nvidia_h200:8
+pod ggpu3-13 23941 2063700 up 208 96/112/0/208 gpu:nvidia_h200:8
+pod ggpu3-15 133163 2063700 up 208 60/148/0/208 gpu:nvidia_h200:8
+pod ggpu3-16 410405 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
+pod ggpu3-10 67184 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
+pod ggpu3-11 204188 2063700 up 208 52/156/0/208 gpu:nvidia_h200:8
+pod ggpu3-12 14080 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
+pod ggpu3-14 43808 2063700 up 208 200/8/0/208 gpu:nvidia_h200:8
 ```
 
 ## Partition config (scontrol)
@@ -420,13 +420,40 @@ GRES
 (null)
 ```
 
+## GPU detail (from a real gpu job, not the login node)
+
+```
+srun: job 1860956 queued and waiting for resources
+srun: job 1860956 has been allocated resources
+Thu Sep 17 20:56:20 2026       
++-----------------------------------------------------------------------------------------+
+| NVIDIA-SMI 595.71.05              Driver Version: 595.71.05      CUDA Version: 13.2     |
++-----------------------------------------+------------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id          Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |           Memory-Usage | GPU-Util  Compute M. |
+|                                         |                        |               MIG M. |
+|=========================================+========================+======================|
+|   0  NVIDIA H100 NVL                On  |   00000000:C4:00.0 Off |                    0 |
+| N/A   36C    P0             92W /  350W |       0MiB /  95830MiB |      0%      Default |
+|                                         |                        |             Disabled |
++-----------------------------------------+------------------------+----------------------+
+
++-----------------------------------------------------------------------------------------+
+| Processes:                                                                              |
+|  GPU   GI   CI              PID   Type   Process name                        GPU Memory |
+|        ID   ID                                                               Usage      |
+|=========================================================================================|
+|  No running processes found                                                             |
++-----------------------------------------------------------------------------------------+
+```
+
 ## Storage: mounts
 
 ```
 Filesystem                       Type  Size  Used Avail Use% Mounted on
 ucsf.vast.corehpc.ucsf.edu:/home nfs   2.3P  8.2T  2.3P   1% /home/remote
 Filesystem                          Type  Size  Used Avail Use% Mounted on
-ucsf.vast.corehpc.ucsf.edu:/scratch nfs   2.3P  499T  1.8P  22% /mnt/scratch
+ucsf.vast.corehpc.ucsf.edu:/scratch nfs   2.3P  514T  1.8P  23% /mnt/scratch
 Filesystem                          Type  Size  Used Avail Use% Mounted on
 fac-ha.fac.corehpc.ucsf.edu:/export nfs4   49G   23G   24G  50% /mnt/fac
 systemd-1 on /mnt/scratch type autofs (rw,relatime,fd=58,pgrp=1,timeout=600,minproto=5,maxproto=5,direct,pipe_ino=32883)
@@ -831,32 +858,38 @@ fac-ha.fac.corehpc.ucsf.edu:/export/CX500006_DS1 on /mnt/fac/CX500006_DS1 type n
 user: kanderson6 (uid 1631829934)
 
   Filesystem                            Used      Soft      Hard      Use%    |  Status
-  ucsf.vast.corehpc.ucsf.edu:/scratch   36 MiB    49 TiB    50 TiB    0%      |  OK
-  ucsf.vast.corehpc.ucsf.edu:/home      8 KiB     19 GiB    20 GiB    0%      |  OK
+  ucsf.vast.corehpc.ucsf.edu:/scratch   574 MiB   49 TiB    50 TiB    0%      |  OK
+  ucsf.vast.corehpc.ucsf.edu:/home      107 MiB   19 GiB    20 GiB    1%      |  OK
 
 ```
 
 ## Storage: FAC shares I belong to
 
 ```
-total 5986
-drwxrwx---+   4 root   sec_fac_cx500146_ds1       6 Sep 16 20:45 CX500146_DS1
+total 6002
+drwxrwx---+  10 root   sec_fac_cx500146_ds1      14 Sep 16 21:45 CX500146_DS1
 ```
 
 ## Storage: group scratch dirs I belong to
 
 ```
 total 0
-drwxrwx---. 2 root   sec_fac_cx500146_ds1   4096 Sep 16 20:45 CX500146_DS1
+drwxrwx---. 2 root   sec_fac_cx500146_ds1   4096 Sep 17 20:43 CX500146_DS1
 ```
 
 ## Storage: my scratch
 
 ```
 total 0
-drwx------. 2 kanderson6 kanderson6 4096 Sep 16 20:45 .
-drwxr-xr-x. 2 root       root       4096 Sep 16 20:34 ..
+drwx------. 2 kanderson6 kanderson6 4096 Sep 16 21:41 .
+drwxr-xr-x. 2 root       root       4096 Sep 17 16:33 ..
 drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 16 20:50 apptainer
+drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 17 20:40 cache
+drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 17 20:41 envs
+drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 16 21:25 hf
+drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 16 21:25 pip
+drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 17 20:41 pkgs
+drwxr-xr-x. 2 kanderson6 kanderson6 4096 Sep 16 21:25 torch
 ```
 
 ## Modules: default loaded
@@ -1343,19 +1376,39 @@ singularity  /usr/bin/singularity
 
 ```
       2 community RUNNING
-   1001 cpu PENDING
-    250 cpu RUNNING
-      1 gpu COMPLETING
-     85 gpu PENDING
-     31 gpu RUNNING
-     62 large_gpu PENDING
-     83 large_gpu RUNNING
-     17 pod PENDING
-     11 pod RUNNING
+    977 cpu PENDING
+    100 cpu RUNNING
+     90 gpu PENDING
+     25 gpu RUNNING
+    515 large_gpu PENDING
+     66 large_gpu RUNNING
+     21 pod PENDING
+      9 pod RUNNING
 ```
 
 ## My recent jobs (7 days)
 
 ```
 JobID|JobName|Partition|State|Elapsed|MaxRSS|AllocTRES
+1805851|chpc_smoke|community_short|CANCELLED by 1631829934|00:00:00||
+1806076|chpc_smoke|community_short|FAILED|00:00:01||billing=2,cpu=2,mem=4G,node=1
+1806076.batch|batch||FAILED|00:00:01|18808K|cpu=2,mem=4G,node=1
+1806076.extern|extern||COMPLETED|00:00:01|0|billing=2,cpu=2,mem=4G,node=1
+1806076.0|apptainer||FAILED|00:00:00|19064K|cpu=2,mem=4G,node=1
+1806085|chpc_smoke|community_short|COMPLETED|00:00:00||billing=2,cpu=2,mem=4G,node=1
+1806085.batch|batch||COMPLETED|00:00:00|20560K|cpu=2,mem=4G,node=1
+1806085.extern|extern||COMPLETED|00:00:00|0|billing=2,cpu=2,mem=4G,node=1
+1806085.0|apptainer||COMPLETED|00:00:00|27048K|cpu=2,mem=4G,node=1
+1860390|igg-prep|cpu|COMPLETED|00:00:23||billing=4,cpu=4,mem=16G,node=1
+1860390.batch|batch||COMPLETED|00:00:23|84496K|cpu=4,mem=16G,node=1
+1860390.extern|extern||COMPLETED|00:00:23|0|billing=4,cpu=4,mem=16G,node=1
+1860744|nvidia-smi|gpu|COMPLETED|00:00:00||billing=32,cpu=32,gres/gpu:nvidia_l40s=1,gres/gpu=1,mem=192G,node=1
+1860744.extern|extern||COMPLETED|00:00:00|256K|billing=32,cpu=32,gres/gpu:nvidia_l40s=1,gres/gpu=1,mem=192G,node=1
+1860744.0|nvidia-smi||COMPLETED|00:00:00|17712K|cpu=32,gres/gpu:nvidia_l40s=1,gres/gpu=1,mem=192G,node=1
+1860930|nvidia-smi|gpu|COMPLETED|00:00:00||billing=32,cpu=32,gres/gpu:nvidia_l40s=1,gres/gpu=1,mem=192G,node=1
+1860930.extern|extern||COMPLETED|00:00:00|256K|billing=32,cpu=32,gres/gpu:nvidia_l40s=1,gres/gpu=1,mem=192G,node=1
+1860930.0|nvidia-smi||COMPLETED|00:00:00|17836K|cpu=32,gres/gpu:nvidia_l40s=1,gres/gpu=1,mem=192G,node=1
+1860956|nvidia-smi|gpu|COMPLETED|00:00:00||billing=32,cpu=32,gres/gpu:nvidia_h100_nvl=1,gres/gpu=1,mem=192G,node=1
+1860956.extern|extern||COMPLETED|00:00:00|256K|billing=32,cpu=32,gres/gpu:nvidia_h100_nvl=1,gres/gpu=1,mem=192G,node=1
+1860956.0|nvidia-smi||COMPLETED|00:00:00|19760K|cpu=32,gres/gpu:nvidia_h100_nvl=1,gres/gpu=1,mem=192G,node=1
 ```
