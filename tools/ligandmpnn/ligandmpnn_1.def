@@ -35,6 +35,36 @@ From: pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
     git -C /opt/LigandMPNN rev-parse HEAD > /opt/LigandMPNN/.built-from
     rm -rf /opt/LigandMPNN/.git
 
+    # LigandMPNN vendors a copy of openfold from the numpy-1 era, and this base
+    # ships numpy 2. The vendored code uses np.int, which numpy DEPRECATED in
+    # 1.20 and REMOVED in 1.24:
+    #
+    #   File "openfold/np/residue_constants.py", line 1124
+    #     restype_atom37_to_rigid_group = np.zeros([21, 37], dtype=np.int)
+    #   AttributeError: module 'numpy' has no attribute 'int'
+    #
+    # Rewriting them is not a workaround. np.int, np.float, np.bool, np.object,
+    # np.str and np.complex were never distinct types -- they were aliases for
+    # the Python builtins, which is exactly why numpy removed them, and numpy's
+    # own error message says substituting the builtin "will not modify any
+    # behavior and is safe". This is the change upstream openfold made too.
+    #
+    # The word boundary is what keeps it safe: np.int64, np.float32, np.bool_
+    # and np.str_ are REAL numpy types and must survive. A digit or underscore
+    # after the name is a word character, so \b does not match there. Verified
+    # by the grep below, which fails the build rather than trusting the sed.
+    find /opt/LigandMPNN -name '*.py' -print0 | xargs -0 sed -i -E \
+        -e 's/\bnp\.(int|float|bool|object|str|complex)\b/\1/g' \
+        -e 's/\bnumpy\.(int|float|bool|object|str|complex)\b/\1/g' \
+        -e 's/\bnp\.NaN\b/np.nan/g' -e 's/\bnp\.Inf\b/np.inf/g'
+    if grep -rnE '\b(np|numpy)\.(int|float|bool|object|str|complex)\b' \
+            /opt/LigandMPNN --include='*.py'; then
+        echo "FATAL: deprecated numpy aliases survived the rewrite" >&2; exit 1
+    fi
+    # And confirm the real types were NOT collateral damage.
+    grep -rq 'np\.int64\|np\.float32' /opt/LigandMPNN --include='*.py' \
+        || { echo "FATAL: sed ate the real numpy dtypes" >&2; exit 1; }
+
     # PEP 668: the pytorch base images ship a conda python marked
     # EXTERNALLY-MANAGED, so a bare `pip install` refuses with
     #   error: externally-managed-environment
@@ -62,9 +92,21 @@ From: pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
 
     chmod -R a+rX /opt/LigandMPNN
 
+    # Import the chain run.py actually opens with, not just the leaf packages.
+    # The first build of this image checked prody/ml_collections/tree/Bio/torch
+    # here, passed, and then failed in %test -- because what was broken was the
+    # vendored openfold underneath sc_utils, which none of those touch. A build
+    # check is only worth the minutes it costs if it fails where the recipe is
+    # wrong.
+    cd /opt/LigandMPNN
     python - <<'PY'
+import sys
+sys.path.insert(0, "/opt/LigandMPNN")
 import prody, ml_collections, tree, Bio, torch, numpy
+import openfold.np.residue_constants          # the numpy-alias casualty
+from sc_utils import Packer, pack_side_chains  # what run.py imports at line 24
 print("prody", prody.__version__, "torch", torch.__version__, "numpy", numpy.__version__)
+print("sc_utils and vendored openfold import cleanly")
 PY
 
 %environment
