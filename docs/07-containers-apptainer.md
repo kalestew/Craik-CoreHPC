@@ -62,6 +62,41 @@ variables are inherited by the build, so `apt`, `pip`, `conda` inside
 login node kills heavy processes, so compile large code in a sandbox in an
 interactive job instead (Option C).
 
+### What "modest" is, in numbers
+
+Building here is not a workaround, it is the only option: `%post` needs
+the network and the login node is the only node that has it (doc 02). So
+the question is never *whether* to build here, only whether a given recipe
+is small enough. The budget, read off the user slice 2026-09-18:
+
+| Limit | Value | What happens at it |
+|---|---|---|
+| `cpu.max` | `400000 100000` = **4 CPUs** | hard ceiling; a parallel build just thrashes |
+| `memory.high` | **8 GiB** | *soft*: kernel throttles and reclaims — the build crawls |
+| `memory.max` | **16 GiB** | hard: OOM kill |
+| `pids.max` | 8192 | |
+
+The rule that follows: **a `%post` that only fetches is fine at any size;
+a `%post` that computes is not.** `apt-get` of prebuilt debs, `pip` of
+prebuilt wheels, `curl`, `git clone` are all I/O against a 4-CPU cap, and
+the only real CPU burst is the squashfs compression at the end, which is
+bounded by image size. Measured on this cluster: foldseek 86 s, mmseqs2
+120 s, pymol 267 s, ProteinMPNN (3.37 GB) a few minutes. None came near a
+kill.
+
+Two things genuinely do push against the 8 GiB soft limit, and both are
+solvers rather than compilers:
+
+- **`conda install`** — the classic depsolver is the heaviest thing most
+  recipes ever run. Force the C++ solver with `CONDA_SOLVER=libmamba`
+  (or call `mamba`); it is both faster and dramatically lighter.
+- **`pip` backtracking** — an unsatisfiable or under-pinned requirement set
+  makes pip download and unpack candidate after candidate. Pin exactly, and
+  prefer `--no-deps` plus explicit dependencies over letting pip explore.
+
+Anything that runs `make -j` belongs in Option C, and `-j` should be at
+most 4 even there if you stay on the login node.
+
 ```bash
 cd $CHPC_LAB/containers/defs      # keep .def files with the images
 apptainer build ../mytool_1.0.sif mytool_1.0.def

@@ -108,6 +108,26 @@ git.ucsf.edu, GitHub, Hugging Face, Docker Hub, Apptainer/Singularity
 registries and Python package indexes. Compute nodes (including the POD)
 have no internet. Bastions have no access at all.
 
+**"No internet" on a compute node does not mean "no proxy", and the
+difference changes the error you get.** Compute nodes *do* get proxy
+variables — pointing at a *different* host, `chpc-computeproxy-vm1:3128`,
+not the login node's `chpc-proxy-vm1:3128` — and that proxy is up and
+answering. It simply refuses the destinations we want. So a fetch from a
+job does not hang and does not time out; it fails immediately with
+
+```
+curl: (7) CONNECT tunnel failed, response 403
+```
+
+and plain http returns a bare `403` from the proxy rather than from the
+site. Measured on ccpu1-01, 2026-09-18: pypi.org, github.com,
+registry-1.docker.io, dl.fbaipublicfiles.com and files.ipd.uw.edu are all
+403. This reads like an authentication problem and is not one — there is
+no token that opens it. Fetch on the login node and stage to scratch or
+FAC. Do not set `http_proxy` by hand in a job hoping to reach the login
+node's proxy either: `chpc-proxy-vm1` resolves from a compute node but
+does not accept connections from one.
+
 The proxy is configured through `http_proxy`/`https_proxy` variables set
 in the login profile (`chpc-proxy-vm1:3128`). They exist in interactive
 logins and `bash -l`, but not in `ssh chpc 'command'` one-liners or

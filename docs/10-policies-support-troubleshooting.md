@@ -67,8 +67,9 @@ FAC beforehand. Emergency outages are announced on Slack/email.
 | Job killed at exactly the time limit | add `--time`, checkpoint, or use `community` (336 h) |
 | `OUT_OF_MEMORY` in `sacct` | raise `--mem`; check `MaxRSS` |
 | `module: command not found` in a job | script does not start with `#!/bin/bash` or purges the profile; use `bash -l` or `source /etc/profile.d/lmod.sh` |
-| `pip`/`conda`/`apptainer pull` hangs in a job | compute nodes have no internet; do it on the login node |
+| `pip`/`conda`/`apptainer pull` fails in a job with `CONNECT tunnel failed, response 403` (or a bare `403` over plain http) | compute nodes reach a proxy that denies these hosts — it is not a credentials problem and no token opens it; fetch on the login node and stage to scratch (doc 02) |
 | Process killed on the login node | it was resource-intensive; run it in `salloc` |
+| Something on the login node crawls without being killed | the user slice has a *soft* memory limit (`memory.high`, 8 GiB) below the hard one (`memory.max`, 16 GiB); between the two the kernel throttles and reclaims instead of killing, so the symptom is slowness, not death |
 | Container: `CUDA driver version is insufficient` | image built against a newer CUDA than the node driver supports; use an older base image |
 | Container cannot see `/mnt/scratch` or `/mnt/fac` | add `--bind /mnt/scratch,/mnt/fac` (see doc 07) |
 | GPU not visible in container | forgot `--nv` |

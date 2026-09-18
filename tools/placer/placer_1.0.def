@@ -60,7 +60,18 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     # openbabel has no usable PyPI wheel (it is a C++ library with python
     # bindings); conda-forge is the supported route and this base is a conda
     # image, so use it rather than fighting a source build.
-    conda install -y -c conda-forge openbabel=3.1.1
+    #
+    # libmamba, not the classic solver. This is the single heaviest step in
+    # any recipe here, and the login node's user slice has a SOFT memory
+    # limit of 8 GiB under its 16 GiB hard one -- between the two the kernel
+    # throttles and reclaims rather than killing, so a classic conda solve
+    # against conda-forge does not fail, it just crawls for tens of minutes
+    # and looks like a hang. The C++ solver is a fraction of the footprint
+    # and is the default in modern conda anyway; naming it means the build
+    # does not depend on which conda the base image happens to ship.
+    conda install -y -n base -c conda-forge conda-libmamba-solver || true
+    conda install -y --solver=libmamba -c conda-forge openbabel=3.1.1 \
+        || conda install -y -c conda-forge openbabel=3.1.1
     conda clean -afy
 
     # Validate the environment against the real code. The checkout does not
