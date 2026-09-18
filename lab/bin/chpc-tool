@@ -73,6 +73,27 @@ _image_path() {
 _prefix()  { printf '%s' "${PREFIX:-}"; }
 _refdata() { printf '%s/%s' "$CHPC_REFDATA" "${1:-${NAME:-}}"; }
 
+# Put this tool's registry variables into the environment, in BOTH forms.
+#
+# The plain form is what native/conda/module kinds need, and what anything the
+# job script shells out to will read. The APPTAINERENV_ form is the only one
+# that reaches a container when the image's own %environment sets that name --
+# see the note in cmd_export. Doing both is not redundancy: they cover
+# different halves of the registry, and which half a given tool needs is not
+# knowable from tool.conf.
+_export_tool_vars() {
+  type tool_exports >/dev/null 2>&1 || return 0
+  # set -f: a value is a path and must not be globbed.
+  set -f; _ifs=$IFS; IFS='
+'
+  for _l in $(tool_exports); do
+    case "$_l" in
+      [A-Za-z_]*=*) eval "export $_l"; eval "export APPTAINERENV_$_l" ;;
+    esac
+  done
+  IFS=$_ifs; set +f
+}
+
 _load() {
   _t="$1"
   _conf="$TOOLS/$_t/tool.conf"
@@ -171,8 +192,19 @@ cmd_export() {
       # win over whatever is already in the environment and a stray exported
       # variable cannot redirect a tool path. Only the run-size knobs use the
       # ${NAME:-default} form, and they are not emitted here.
+      #
+      # APPTAINERENV_ is not belt and braces, it is the only thing that works.
+      # Measured on Apptainer 1.5.2 (2026-09-18): a plain host export LOSES to
+      # a name the image's own %environment sets, even when the image writes
+      # it defensively as ${VAR:-default} -- the default still wins. Only
+      # APPTAINERENV_<NAME> or --env overrides it. A host variable the image
+      # never mentions does pass through, which is why this was invisible
+      # until chai1, whose image sets CHAI_DOWNLOADS_DIR as a /tmp fallback:
+      # the registry pointed at FAC, the container used /tmp, and the only
+      # symptom was weights quietly landing in the wrong place.
       if type tool_exports >/dev/null 2>&1; then
         tool_exports | sed 's/^\([A-Za-z_][A-Za-z0-9_]*=\)/export \1/'
+        tool_exports | sed 's/^\([A-Za-z_][A-Za-z0-9_]*=\)/export APPTAINERENV_\1/'
       fi )
   done
 }
@@ -199,15 +231,8 @@ cmd_exec() {
   # and inside a container they only do if they are in the environment.
   # Without this, `chpc-tool exec boltz -- boltz predict ...` would work after
   # sourcing site.conf and silently try to download from a compute node
-  # without it. set -f because a value is a path and must not be globbed.
-  if type tool_exports >/dev/null 2>&1; then
-    set -f; _ifs=$IFS; IFS='
-'
-    for _l in $(tool_exports); do
-      case "$_l" in [A-Za-z_]*=*) eval "export $_l" ;; esac
-    done
-    IFS=$_ifs; set +f
-  fi
+  # without it.
+  _export_tool_vars
   case "$KIND" in
     container)
       _sif=$(_image_path)
@@ -387,14 +412,7 @@ cmd_test() {
       _load "$_t"
       _ts="$TOOLDIR/test.sh"
       [ -f "$_ts" ] || die "$NAME: no test.sh in $TOOLDIR (required for STATUS=verified)"
-      if type tool_exports >/dev/null 2>&1; then
-        set -f; _ifs=$IFS; IFS='
-'
-        for _l in $(tool_exports); do
-          case "$_l" in [A-Za-z_]*=*) eval "export $_l" ;; esac
-        done
-        IFS=$_ifs; set +f
-      fi
+      _export_tool_vars
       TOOL="$NAME"; CHPC_TOOL="$_self"; export TOOL CHPC_TOOL TOOLDIR
       _wd=$(mktemp -d "${TMPDIR:-/tmp}/chpc-test-$NAME.XXXXXX")
       # A tool that writes into the current directory -- and RFdiffusion,

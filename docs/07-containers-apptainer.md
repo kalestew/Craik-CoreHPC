@@ -177,6 +177,35 @@ Sandboxes are directories with many small files; keep them on scratch and
 delete them once frozen. Always regenerate the `.def` so the build is
 reproducible; a sif from a sandbox is a snapshot, not a recipe.
 
+## A plain `export` does not always reach the container
+
+Apptainer passes the host environment in, so this usually works and everyone
+assumes it always does. It does not. If the image's own `%environment` sets
+the same name, **the image wins** — and it wins even when the image was
+written defensively as `${VAR:-default}`, because at the point that line runs
+the host value is not in scope. Measured on Apptainer 1.5.2, 2026-09-18:
+
+| How you pass it | Inside the container |
+|---|---|
+| `export VAR=/host` | `/tmp/default` — **silently lost** |
+| `export APPTAINERENV_VAR=/host` | `/host` |
+| `apptainer exec --env VAR=/host` | `/host` |
+| `export VAR=/host`, name unset in image | `/host` |
+
+The last row is why this is so easy to miss: most variables *do* pass through,
+so the mechanism looks reliable until you meet a tool whose image sets a
+fallback for the very name you are trying to override.
+
+It cost us 1.3 GB. `chai1`'s image sets `CHAI_DOWNLOADS_DIR` to
+`/tmp/chai-downloads` as a last-resort fallback; the registry pointed it at
+the FAC share; the container used `/tmp` anyway. Nothing errored — the weights
+just landed somewhere per-node that gets wiped, which on a compute node with
+no internet means every job re-downloads and then fails.
+
+`chpc-tool` now emits and exports both forms for everything in
+`tool_exports`, so a registry value overrides an image default. If you call
+`apptainer` directly, prefix by hand or use `--env`.
+
 ## The commonest way a recipe passes `%post` and fails anyway
 
 A `.sif` is a **read-only** squashfs, but `%post` runs against a writable
