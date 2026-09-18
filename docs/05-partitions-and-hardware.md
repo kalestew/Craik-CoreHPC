@@ -89,18 +89,41 @@ torch 2.14.0+cu132   arch list ['sm_75','sm_80','sm_86','sm_90','sm_100','sm_120
 and completes a forward pass with finite output. So cu13.2 images really are
 unrestricted here, and only the cu121 ones need a `--gres` model name.
 
-**Check the image, not the cluster.** `torch.cuda.get_arch_list()` reports
-which architectures a build carries kernels for, and it is a property of the
-*build*, not of the device you happen to be on — so it answers "can this image
-run on Blackwell?" from any node, including a CPU one, in seconds:
+**Check the image, not the cluster.** Which architectures a build carries
+kernels for is a property of the *build*, not of the device you are on, so it
+can be read from any node — including the login node — in seconds, instead of
+queueing for a Blackwell allocation to find out the expensive way.
 
-```bash
-chpc-tool exec <tool> -- python -c "import torch; print(torch.cuda.get_arch_list())"
+**Do not use `torch.cuda.get_arch_list()` for this.** On torch 2.6 it is
+
+```python
+def get_arch_list():
+    if not is_available():
+        return []      # <-- a CPU node gets this
 ```
 
-`sm_120` in the list means the image is safe on every `gpu` node. Absent, it
-needs `--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`. That beats
-waiting in the queue for a Blackwell allocation to find out the expensive way.
+so off a GPU it returns `[]`, which reads as "carries no kernels at all" and
+is indistinguishable from a genuinely CPU-only build. torch 2.14 dropped that
+early return, so the same command is trustworthy there and misleading here —
+the worst kind of check. Measured 2026-09-18: `esm` (torch 2.14) answered
+correctly on the login node; `chai1` (torch 2.6) answered `[]` on the same
+node while actually carrying seven architectures.
+
+Ask the C extension directly, which has no such guard:
+
+```bash
+chpc-tool exec <tool> -- python -c \
+  "import torch; print(torch._C._cuda_getArchFlags())"
+```
+
+| Image | torch | Arch flags | Safe on Blackwell? |
+|---|---|---|---|
+| `esm`, `proteinmpnn`, `ligandmpnn` | 2.14 / cu132 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
+| `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
+| `rfdiffusion`, `placer` | 2.3.1 / cu121 | (cu121, so no `sm_120`) | **no** |
+
+`sm_120` present means the image is safe on every `gpu` node. Absent, it needs
+`--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`.
 
 ## Per-user limits (live QoS, which differ from the wiki table)
 
