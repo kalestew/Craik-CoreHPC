@@ -9,8 +9,12 @@
 # one real work uses; loading it too would only re-test torch.
 set -eu
 
-"$CHPC_TOOL" exec esm -- python - > esm.log 2>&1 <<'PY' || {
-    echo "esm test exited non-zero:"; tail -25 esm.log; exit 1; }
+# `if !` rather than `cmd <<'PY' || { ... }`. A heredoc body starts on the line
+# AFTER the one carrying the <<, so the `{ ... }` continuation would be eaten as
+# the first line of python and the brace would never close -- which the shell
+# reports as "syntax error: unexpected end of file" pointing at the last line of
+# the file, nowhere near the actual mistake.
+if ! "$CHPC_TOOL" exec esm -- python - > esm.log 2>&1 <<'PY'
 import os, sys, torch, esm
 
 # If this is reaching the network, the image is wrong: the whole point of
@@ -49,6 +53,9 @@ assert -4.0 < avg < 0.0, f"implausible mean log-likelihood {avg}"
 
 print(f"ok: logits {tuple(logits.shape)}, repr {tuple(rep.shape)}, mean logP {avg:.3f}")
 PY
+then
+    echo "esm test exited non-zero:"; tail -25 esm.log; exit 1
+fi
 
 grep -q '^ok:' esm.log || { echo "no ok line:"; tail -25 esm.log; exit 1; }
 tail -1 esm.log

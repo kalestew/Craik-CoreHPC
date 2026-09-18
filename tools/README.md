@@ -127,7 +127,7 @@ nowhere to put them, so `IgGase_eng` grew a `pipelines/slurm/containers/` that w
 going to hold the same files. Two homes for one recipe is how the lab ends up with two
 slightly different RFdiffusion images. This directory is that one home.
 
-## Two traps worth knowing before you write an entry
+## Four traps worth knowing before you write an entry
 
 **`ENTRY` is prepended for a flag, not for a script path.** `chpc-tool exec`
 prepends `ENTRY` when it is given no command at all, or when the first argument
@@ -153,3 +153,34 @@ foldseek's prefilter scores a combined amino-acid + 3Di k-mer, so a pure helix
 (one 3Di state) or a poly-alanine chain (one residue type) fails to match
 **itself** and looks exactly like a broken tool. Anything doing structural or
 profile search has the same sensitivity.
+
+**A heredoc body starts on the line after the `<<`, which breaks the obvious
+way to write "run this python and report failure".** This does not work:
+
+```sh
+"$CHPC_TOOL" exec esm -- python - > esm.log 2>&1 <<'PY' || {
+    echo "failed"; tail -25 esm.log; exit 1; }      # eaten as python
+import torch
+PY
+```
+
+The `{ … }` continuation is consumed as the first line of the heredoc, so the
+brace never closes and the shell reports `syntax error: unexpected end of file`
+pointing at the **last line of the file** — nowhere near the mistake. Use `if !`
+instead, which ends the command line at the `<<`:
+
+```sh
+if ! "$CHPC_TOOL" exec esm -- python - > esm.log 2>&1 <<'PY'
+import torch
+PY
+then
+    echo "failed"; tail -25 esm.log; exit 1
+fi
+```
+
+**Quote anything with a space or a shell metacharacter.** A `tool.conf` is
+sourced, so `UPSTREAM_REF=v3.3.0 (tarball)` is a syntax error, and before the
+check in `_load` it surfaced as a bare `line 8: syntax error near unexpected
+token '('` from inside an `eval` in a job script. `chpc-tool` now names the
+tool and says how to quote it, but the cheap habit is
+`sh -n tools/*/tool.conf tools/*/test.sh` before you commit.
