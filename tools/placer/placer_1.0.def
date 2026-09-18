@@ -54,7 +54,19 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 
     # DGL is not on PyPI for CUDA builds; it has its own per-torch wheel index.
     pip install --no-cache-dir dgl==2.4.0 -f https://data.dgl.ai/wheels/torch-2.3/cu121/repo.html
-    pip install --no-cache-dir e3nn==0.5.4
+    # e3nn 0.5.4 -- the version PLACER's lockfile names -- DOES NOT EXIST on
+    # PyPI. The index goes 0.5.3 (2024-10-31) straight to 0.5.5 (2025-02-02);
+    # it is not yanked, it was never published there. It does exist on
+    # conda-forge, which is where that lockfile came from.
+    #
+    # Using conda to get the exact 0.5.4 would be more faithful and is the
+    # wrong trade here: `conda install e3nn` resolves pytorch as a dependency
+    # from conda-forge and can replace the cu121 torch this entire stack is
+    # pinned to, which is a far worse failure than a patch-version drift.
+    # 0.5.5 is the immediate successor, and the only e3nn surface either
+    # consumer touches is o3.spherical_harmonics, unchanged across 0.5.x.
+    # The import check below is what actually confirms it.
+    pip install --no-cache-dir e3nn==0.5.5
     pip install --no-cache-dir "se3-transformer @ git+https://github.com/NVIDIA/DeepLearningExamples.git#subdirectory=DGLPyTorch/DrugDiscovery/SE3Transformer"
 
     # openbabel has no usable PyPI wheel (it is a C++ library with python
