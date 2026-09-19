@@ -123,9 +123,35 @@ chpc-tool exec <tool> -- python -c \
 | `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion3` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion`, `placer` | 2.3.1 / cu121 | `sm_50 … sm_86 sm_90` | **no** |
+| `colabfold` | jax / cu12.2 | — (upstream image, cuda 12.2 predates `sm_120`) | **no** |
 
 `sm_120` present means the image is safe on every `gpu` node. Absent, it needs
 `--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`.
+
+The `#SBATCH` line is the real fix, because it decides where the job lands.
+But it only protects jobs that go through a wrapper, and the failure it
+prevents — `no kernel image is available for execution on the device`, arriving
+whenever the scheduler happens to pick a Blackwell node — reads like a broken
+install rather than a placement problem. So the registry carries the same fact
+declaratively: a tool.conf sets `GPU_MAX_CC` to the highest compute capability
+its image has kernels for, and `chpc-tool` asks `nvidia-smi` before launching
+anything:
+
+```
+rfdiffusion cannot run on this GPU.
+  device compute capability : 12.0  (NVIDIA RTX PRO 6000 ...)
+  image supports up to      : 9.0
+```
+
+It costs one `nvidia-smi` call, needs no torch, and stays silent when there is
+no GPU or no declared limit — so it cannot affect a tool that has not opted in.
+Declared today by: `chai1`, `colabfold`, `placer`, `rfdiffusion`,
+`rfdiffusion3`. It is a backstop for interactive use and copied commands, not
+a replacement for the header.
+
+Measure it with `torch._C._cuda_getArchFlags()`, **not**
+`torch.cuda.get_arch_list()` — the latter returns `[]` on torch 2.6 when no GPU
+is visible, which is exactly the situation you are in on the login node.
 
 ## Per-user limits (live QoS, which differ from the wiki table)
 
