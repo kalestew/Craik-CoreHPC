@@ -7,8 +7,10 @@ From: python:3.12-slim
 # boltz 2.2.1 pins `numpy<2.0` and `python<3.13` and the current pytorch images
 # ship 3.13. Letting pip resolve torch inside a 3.12 base is the only
 # combination that satisfies all three. The torch wheel it pulls from PyPI
-# bundles its own CUDA runtime; NVIDIA drivers are backward compatible, so a
-# cu12.x wheel runs fine on this cluster's 595.71.05 / CUDA 13.2 driver.
+# bundles its own CUDA runtime. Measured in the built image: torch
+# 2.14.0+cu130, whose arch flags are sm_75..sm_100 plus sm_120 -- so unlike
+# chai1, rfdiffusion and placer, this one runs on EVERY gpu node and takes a
+# bare --gres=gpu:1.
 #
 # Build:  chpc-tool build boltz
 
@@ -28,7 +30,16 @@ From: python:3.12-slim
     apt-get install -y --no-install-recommends git ca-certificates
     rm -rf /var/lib/apt/lists/*
 
-    pip install --no-cache-dir boltz==2.2.1
+    # boltz[cuda], not bare boltz. The cuda extra is
+    #   cuequivariance_ops_cu12  cuequivariance_ops_torch_cu12  cuequivariance_torch
+    # and boltz turns those kernels ON BY DEFAULT -- main.py:1321 is
+    # `use_kernels=not no_kernels`. Without the extra, every GPU run dies
+    # partway through the first batch with
+    #   ModuleNotFoundError: No module named 'cuequivariance_torch'
+    # from boltz/model/layers/triangular_mult.py, which is not caught and
+    # not fallen back from. A plain `pip install boltz` therefore produces an
+    # image that imports cleanly, passes --help, and cannot predict anything.
+    pip install --no-cache-dir "boltz[cuda]==2.2.1"
 
     # Assert the three constraints that made this base necessary, so a future
     # bump that quietly breaks one fails here and not in a two-day GPU job.
@@ -37,6 +48,15 @@ import numpy, sys, torch
 assert sys.version_info[:2] == (3, 12), sys.version
 assert numpy.__version__.startswith("1."), numpy.__version__
 print("python", sys.version.split()[0], "numpy", numpy.__version__, "torch", torch.__version__)
+
+# The cuda extra ships cu12 wheels while this torch is cu13. Importing here
+# is the check that matters: if the pairing does not work, fail the build
+# rather than a GPU job. If it ever does break, `boltz predict --no_kernels`
+# is the documented escape hatch and only costs speed.
+import cuequivariance_torch
+print("cuequivariance_torch", getattr(cuequivariance_torch, "__version__", "?"))
+from boltz.model.layers.triangular_mult import kernel_triangular_mult   # noqa: F401
+print("triangular_mult kernel path imports")
 PY
     command -v boltz
 

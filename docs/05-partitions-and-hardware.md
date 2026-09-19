@@ -119,6 +119,7 @@ chpc-tool exec <tool> -- python -c \
 | Image | torch | Arch flags | Safe on Blackwell? |
 |---|---|---|---|
 | `esm`, `proteinmpnn`, `ligandmpnn` | 2.14 / cu132 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
+| `boltz` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
 | `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion3` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion`, `placer` | 2.3.1 / cu121 | (cu121, so no `sm_120`) | **no** |
