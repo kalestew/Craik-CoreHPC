@@ -245,6 +245,36 @@ Two habits that avoid the class entirely:
   baked into the image. `CHPC_REFDATA` exists for exactly this, and a share
   path compiled into a recipe makes that recipe wrong for the next lab.
 
+## `%post` writing to `/tmp` is writing to the build machine
+
+Apptainer binds the **host's** `/tmp` into `%post`. So a recipe that stages
+something in `/tmp` is not putting it in the image — it is putting it on the
+login node, where it stays after the build ends.
+
+The first build works, because `/tmp/<thing>` does not exist yet. Then the
+build fails for an unrelated reason, leaves its scratch behind, and every
+rebuild after that dies on something that looks nothing like a bind:
+
+```
+git clone https://github.com/baker-laboratory/PLACER /tmp/PLACER
+fatal: destination path '/tmp/PLACER' already exists and is not an empty
+directory
+```
+
+`tools/placer` hit exactly this. Nothing in the recipe or the error mentions
+`/tmp` being shared, and the obvious reading — "git is confused" or "the
+previous build did not clean up after itself *inside the image*" — sends you
+looking in the wrong filesystem. Worse, a recipe that *succeeds* this way has
+silently depended on host state, so it builds on your machine and not on a
+colleague's.
+
+Stage build-time scratch somewhere that is genuinely inside the image —
+`/opt/<tool>-selfcheck` is the convention here — and `rm -rf` it first so the
+step is idempotent regardless. Note this cuts the opposite way from
+`NUMBA_CACHE_DIR` above: `/tmp` is right for a **runtime** cache, precisely
+*because* it is the host's (local NVMe, per-node), and wrong for **build**
+scratch for exactly the same reason.
+
 ## Nothing in a pinned-torch image goes through a conda solve
 
 The pytorch base images are conda images, so `conda install` is right there
