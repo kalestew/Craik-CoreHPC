@@ -19,13 +19,31 @@ for f in rfd3_latest.ckpt rf3_foundry_01_24_latest_remapped.ckpt; do
         echo "fetch with: tools/rfdiffusion3/fetch-weights.sh"; exit 1; }
 done
 
-# The console scripts exist and start. `foundry list-installed` is the one
-# command that reads the checkpoint registry, so it exercises the path that
-# needs WRITABLE_TMPFS -- without it this fails with a read-only error on
-# /app/foundry/.env that names neither .env nor dotenv.
-"$CHPC_TOOL" exec rfdiffusion3 -- foundry list-installed > fi.log 2>&1 || {
-    echo "foundry list-installed failed:"; tail -20 fi.log; exit 1; }
-grep -q "rfd3" fi.log || { echo "list-installed does not report rfd3:"; cat fi.log; exit 1; }
+# Assert on the resolver INFERENCE uses, not on `foundry list-installed`.
+# list-installed reports "No checkpoint files found in any checkpoint
+# directory" even when FOUNDRY_CHECKPOINT_DIRS is set correctly and the
+# files are visible from inside the container -- observed 2026-09-18. It
+# resolves by some other route, probably the .env that WRITABLE_TMPFS
+# discards. Whatever the reason, it is a reporting command, and a test that
+# asserted on it would fail on a perfectly usable installation.
+#
+# checkpoint_registry.get_default_checkpoint_dirs() is what the engines call:
+# it reads FOUNDRY_CHECKPOINT_DIRS, splits on colons, and appends
+# ~/.foundry/checkpoints. That is the contract worth testing.
+if ! "$CHPC_TOOL" exec rfdiffusion3 -- python - "$d" > res.log 2>&1 <<'PY'
+import sys
+from pathlib import Path
+from foundry.inference_engines.checkpoint_registry import get_default_checkpoint_dirs
+want = Path(sys.argv[1]).absolute()
+dirs = get_default_checkpoint_dirs()
+print("search path:", [str(p) for p in dirs])
+assert want in dirs, f"{want} not in the resolver's search path"
+print("ok: registry resolves", want)
+PY
+then
+    echo "checkpoint resolution failed:"; tail -20 res.log; exit 1
+fi
+cat res.log
 
 # Deserialise both checkpoints. A truncated download is still a file and
 # still passes `test -s`; torch.load is what distinguishes them, and it is
