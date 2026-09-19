@@ -54,13 +54,24 @@ from pathlib import Path
 d = Path(sys.argv[1])
 for name in ("rfd3_latest.ckpt", "rf3_foundry_01_24_latest_remapped.ckpt"):
     obj = torch.load(d / name, map_location="cpu", weights_only=False)
-    # A checkpoint is a dict with tensors somewhere in it; assert we got
-    # something with real parameters rather than an HTML error page that
-    # happened to unpickle.
     assert isinstance(obj, dict), (name, type(obj))
-    sd = obj.get("state_dict", obj.get("model_state_dict", obj))
+    # foundry's checkpoints put the weights under 'model', not 'state_dict'
+    # or 'model_state_dict'. Measured: the top level is
+    #   model (OrderedDict, 1616 keys) / optimizer / scheduler_cfg /
+    #   global_step / current_epoch / train_cfg
+    # so a chain that only tried the two conventional names fell through to
+    # the top-level dict, whose values are an OrderedDict and some ints --
+    # none with .numel(), giving a parameter count of exactly 0. Try the
+    # names, then verify the one chosen actually holds tensors.
+    sd = None
+    for key in ("model", "state_dict", "model_state_dict"):
+        if isinstance(obj.get(key), dict):
+            sd = obj[key]
+            break
+    assert sd is not None, (name, "no weights dict among", list(obj)[:8])
+    # Not every entry is a tensor: 'model.use_rmsnorm' is a bool.
     n = sum(v.numel() for v in sd.values() if hasattr(v, "numel"))
-    assert n > 1e7, (name, n)
+    assert n > 1e7, (name, "parameter count", n)
     print(f"ok {name}: {len(sd)} entries, {n:,} parameters")
 PY
 then
