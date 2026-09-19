@@ -4,7 +4,7 @@
 |---|---|
 | Built | 2026-09-19, kanderson6, CoreHPC login node (747 s) |
 | Image | `boltz_2.sif`, 4.08 GB — no weights |
-| Verified | 2026-09-19 on an H100 NVL (cc 9.0) — see below |
+| Verified | 2026-09-19 on an H100 NVL (cc 9.0) **and** an RTX PRO 6000 (cc 12.0) |
 | Recipe | [`boltz_2.def`](boltz_2.def) |
 | Upstream | `boltz[cuda]==2.2.1` (PyPI) |
 | Weights | 5.0 GB on FAC, via [`fetch-weights.sh`](fetch-weights.sh) |
@@ -59,6 +59,12 @@ PASS boltz
 
 The bare-`pip install boltz` image passed `%post`, `%test` and `--help` and
 failed *here*. Nothing cheaper than a real fold would have caught it.
+
+Repeated on a Blackwell node (job 1899088, `ggpu1-19`, compute capability
+12.0) with the identical result. That is what makes the "any `gpu` node"
+row above a measurement rather than an inference from arch flags — boltz is
+the only GPU tool in the registry that has actually been run on Blackwell,
+and the only one that does not declare a `GPU_MAX_CC`.
 
 The image adds ~700 MB over the non-`[cuda]` build (3.37 → 4.08 GB); that is
 the three `cuequivariance` wheels.
