@@ -133,16 +133,33 @@ throttled and antisocial. Try:
 # default is the system directories, which on this cluster hold an older g++
 # than the one scons detects. Prepending the detected compiler's own directory
 # is what keeps detection and execution on the same gcc.
+#
+# Wno-error: Rosetta compiles with -Werror plus a hand-maintained list of
+# -Wno-error= exemptions (array-bounds, stringop-overread, restrict,
+# dangling-reference). That list tracks the compilers upstream tests against,
+# and gcc 14 raises warnings that are not on it. The first was
+#   VectorOption_T_.hh:1111: 'frag_files...state_' may be used uninitialized
+#                                            [-Werror=maybe-uninitialized]
+# reached by inlining at -O3 from loops_main.cc:100 -- the textbook
+# false-positive shape for that warning.
+#
+# Exempting them one at a time is a losing game: that failure came 1332 object
+# files into a build of roughly ten thousand, so each new warning costs another
+# multi-minute compile to discover. Warnings-as-errors is a policy for people
+# DEVELOPING Rosetta. For a downstream build of a tagged release with a
+# compiler newer than upstream tests against, it only converts "upstream tested
+# with an older gcc" into "you cannot build this". The warnings are still
+# printed; they are just not fatal.
 settings = {
     "site" : {
         "prepends" : { "program_path" : [ "$CXX_DIR" ] },
-        "appends"  : {},
+        "appends"  : { "flags" : { "compile" : [ "Wno-error" ] } },
         "overrides": {},
         "removes"  : {},
     }
 }
 SITEEOF
-  _say "site.settings: program_path prepends $CXX_DIR"
+  _say "site.settings: program_path prepends $CXX_DIR; -Wno-error appended"
 
   # Preflight the exact combination that failed, so a compiler too old for the
   # flags Rosetta will choose is caught in a second rather than in an hour.
