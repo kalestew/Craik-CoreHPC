@@ -111,7 +111,7 @@ Values with spaces or shell metacharacters must be quoted:
   UPSTREAM_REF=\"v3.3.0 release tarball\"    not    UPSTREAM_REF=v3.3.0 (release tarball)
 $(sh -n "$_conf" 2>&1 | sed 's/^/  /')"
   for _fld in $_FIELDS; do eval "$_fld="; done
-  unset -f tool_exports tool_doctor >/dev/null 2>&1 || true
+  unset -f tool_exports tool_doctor tool_precheck >/dev/null 2>&1 || true
   TOOLDIR="$TOOLS/$_t"
   # shellcheck disable=SC1090
   . "$_conf"
@@ -366,6 +366,19 @@ _doctor_one() {
     _drow "$NAME" "----" "planned -- described only, nothing built yet"
     return 2
   fi
+  # A tool whose location depends on something the CALLER has to supply cannot
+  # be checked until they supply it, and guessing produces a confident FAIL
+  # about a path nobody meant. python-bio is the case: its PREFIX contains
+  # $CHPC_PYENV, so with none set, doctor looked for a generic `bio` env that
+  # was never supposed to exist and reported the registry's only breakage.
+  # A false FAIL is worse than no row -- it is the thing that teaches people to
+  # skim past doctor's output. Returning 2 puts it in "not checked", where
+  # planned tools already live, and the message says what to pass.
+  if type tool_precheck >/dev/null 2>&1; then
+    _st=0; _out=$(tool_precheck 2>&1) || _st=$?
+    if [ "$_st" -eq 2 ]; then _drow "$NAME" "----" "${_out:-not checked}"; return 2; fi
+    if [ "$_st" -ne 0 ]; then _drow "$NAME" "FAIL" "${_out:-tool_precheck failed}"; return 1; fi
+  fi
   case "$KIND" in
     container)
       _sif=$(_image_path)
@@ -404,10 +417,37 @@ _doctor_one() {
   return 0
 }
 
+# The copy of chpc.env published on the share is what jobs and interactive
+# shells actually source; the one in this checkout is what the registry was
+# written against. Nothing keeps them in step, and when the share's copy lags,
+# the symptom is a registry variable that is simply empty -- so a path resolves
+# to /software or /data and the error names the tool rather than the env file.
+# This is a warning, not a failure: a student's checkout is often newer than
+# the share on purpose, and doctor's job is to say so, not to refuse.
+_check_shared_env() {
+  _repo_env="$SELF_DIR/../chpc.env"
+  _fac_env="${CHPC_LAB:-}/chpc.env"
+  [ -f "$_repo_env" ] || return 0
+  [ -n "${CHPC_LAB:-}" ] && [ -f "$_fac_env" ] || return 0
+  cmp -s "$_repo_env" "$_fac_env" && return 0
+  echo "note: $_fac_env differs from this checkout's lab/chpc.env"
+  # Name the consequence, not just the fact. A variable the share's copy never
+  # sets is the case that actually breaks things.
+  for _v in CHPC_SOFTWARE CHPC_REFDATA CHPC_LICENSES CHPC_TOOLS CHPC_CONTAINERS; do
+    if grep -q "^export $_v=" "$_repo_env" 2>/dev/null \
+       && ! grep -q "^export $_v=" "$_fac_env" 2>/dev/null; then
+      echo "      the share's copy does not set \$$_v -- publish it with:"
+      echo "        cp corehpc/lab/chpc.env \"\$CHPC_LAB/chpc.env\""
+      break
+    fi
+  done
+}
+
 cmd_doctor() {
   if [ $# -eq 0 ]; then set -- $(_all_tools); fi
   _ok=0; _skip=0; _bad=0
   echo "tool registry: $TOOLS"
+  _check_shared_env
   if [ "$CHPC_ON_CLUSTER" != "1" ]; then
     echo "not on a CoreHPC node: the paths below are where things WOULD be, and"
     echo "\$USER here (${USER:-?}) is not necessarily your campus username -- source"

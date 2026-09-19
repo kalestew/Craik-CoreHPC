@@ -99,12 +99,24 @@ tool_exports() {            # optional: the variables a project's site.conf want
 tool_doctor() {             # optional: a check beyond "does the file exist"
   :                         # return 0 ok, 1 broken; print one line either way
 }
+
+tool_precheck() {           # optional: runs BEFORE doctor looks at any path
+  :                         # return 0 carry on, 2 "not checked", 1 broken
+}
 ```
 
-Both functions are optional. `tool_exports` is a shell function rather than a
+All three functions are optional. `tool_exports` is a shell function rather than a
 declarative mapping because the interesting cases are not one-to-one: FoldX exports a
 path to a *binary*, Rosetta exports three variables including a build-triple suffix,
 and PLACER exports a checkout path that is needed whatever the runtime.
+
+`tool_precheck` exists for entries whose location depends on something the *caller*
+supplies. `python-bio`'s `PREFIX` contains `$CHPC_PYENV`, so with none set, doctor
+looked for a generic `bio` env that nothing was ever asked to create, and reported
+the registry's only `FAIL`. Returning 2 puts the row in "not checked", next to the
+planned tools, with a message naming what to pass. The rule it encodes: **a false
+FAIL costs more than a missing row**, because it is what teaches people to skim past
+doctor's output — and then a real one goes unread.
 
 Helpers available inside both functions: `_image_path` (resolves `IMAGE` against
 `$CHPC_CONTAINERS`), `_prefix` (expands `PREFIX`), `_refdata <tool>`
