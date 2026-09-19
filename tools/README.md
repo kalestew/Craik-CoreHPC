@@ -142,7 +142,7 @@ nowhere to put them, so `IgGase_eng` grew a `pipelines/slurm/containers/` that w
 going to hold the same files. Two homes for one recipe is how the lab ends up with two
 slightly different RFdiffusion images. This directory is that one home.
 
-## Four traps worth knowing before you write an entry
+## Five traps worth knowing before you write an entry
 
 **`ENTRY` is prepended for a flag, not for a script path.** `chpc-tool exec`
 prepends `ENTRY` when it is given no command at all, or when the first argument
@@ -213,3 +213,27 @@ check in `_load` it surfaced as a bare `line 8: syntax error near unexpected
 token '('` from inside an `eval` in a job script. `chpc-tool` now names the
 tool and says how to quote it, but the cheap habit is
 `sh -n tools/*/tool.conf tools/*/test.sh` before you commit.
+
+**Assert the property you care about, not the import.** The expensive failures
+in this registry all share one shape: the natural check passes while the thing
+is broken.
+
+| Recipe | `import` says | Actually |
+|---|---|---|
+| placer, after `conda install openbabel` | `import torch` ok | torch had been replaced with a **CPU** build |
+| placer, missing `libXext` | `import openbabel` ok, version prints | **no format registered** — every `read` returns an empty molecule |
+| boltz, without the `[cuda]` extra | `import boltz` ok, `--help` ok | dies mid-batch on the first real prediction |
+| rosetta, binaries only | binary runs, prints usage | linked to libraries on **scratch**, which is purged |
+
+So write the assertion against the property, and prefer one that a wrong
+answer cannot satisfy:
+
+```python
+assert torch.version.cuda == "12.1"          # not: import torch
+assert c.SetInFormat("pdb")                  # not: import openbabel
+```
+
+Caring is not a mechanism — the placer recipe already carried a comment
+warning that conda could replace its torch, three paragraphs above the line
+that did it. Put the rule in an `assert`, in `%post` *and* in `%test`, because
+those two run against different filesystems (doc 07).
