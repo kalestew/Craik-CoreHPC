@@ -64,11 +64,14 @@ n_ca=$(grep -c ' CA ' "$cif" || true)
 # fails a perfectly good structure. In chai's _atom_site layout the Cartesian
 # columns are fields 11-13:
 #   ATOM 1 N N . MET 1 1 ? A -22.294 4.872 -1.149 1.000 1 A MET 82.550 1
-if awk '/^ATOM/ { for (i = 11; i <= 13; i++)
-                    if ($i !~ /^-?([0-9]+\.?[0-9]*|\.[0-9]+)$/) { print; bad = 1 } }
-        END { exit !bad }' "$cif" | head -3
-then
-    echo "non-numeric coordinates in $cif (shown above)"; exit 1
+# Capture the output; do NOT write `if awk ... | head -3; then`. In a
+# pipeline the `if` tests the LAST command's status, which is head's, and
+# head always succeeds -- so that form reports a failure on every run,
+# including a perfect one. It did exactly that here before this fix.
+bad=$(awk '/^ATOM/ { for (i = 11; i <= 13; i++)
+                       if ($i !~ /^-?([0-9]+\.?[0-9]*|\.[0-9]+)$/) print }' "$cif" | head -3)
+if [ -n "$bad" ]; then
+    echo "non-numeric coordinates in $cif:"; echo "$bad"; exit 1
 fi
 
 # A folded peptide is not a point cloud at the origin: demand real spread.

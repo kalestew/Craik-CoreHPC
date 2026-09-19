@@ -10,15 +10,24 @@
 set -eu
 sh "$TOOLDIR/../_template/make_test_pdb.sh" 40 A > t.pdb
 
-# Discover the checkpoint rather than hardcoding a filename. Upstream renames
-# these between releases (the version and noise level are both in the name),
-# and the .def already guarantees at least eight non-empty .pt files exist --
-# so the useful assertion here is "a ligandmpnn checkpoint is among them",
-# not "this exact string is".
+# Discover the checkpoint, but the glob must be `ligandmpnn_v_*`, NOT
+# `ligandmpnn_*`. The model_params directory also holds
+# ligandmpnn_sc_v_32_002_16.pt, which is the SIDE-CHAIN PACKING network --
+# a different architecture belonging to --checkpoint_path_sc. It sorts first
+# alphabetically, so `ligandmpnn_*.pt | head -1` selects it, and run.py then
+# loads side-chain weights into the sequence-design model and dies with
+#
+#   RuntimeError: Error(s) in loading state_dict for ProteinMPNN:
+#     Unexpected key(s): W_v_sc, W_torsions, features.W_XY_project_down1 ...
+#
+# which reads as a corrupt download rather than the wrong file. Prefer
+# upstream's default (0.10 A noise) and fall back to any sequence-design
+# checkpoint.
 ckpt=$("$CHPC_TOOL" exec ligandmpnn -- sh -c \
-    'ls -1 /opt/LigandMPNN/model_params/ligandmpnn_*.pt 2>/dev/null | head -1' | tr -d '\r')
+    'ls -1 /opt/LigandMPNN/model_params/ligandmpnn_v_32_010_25.pt 2>/dev/null \
+     || ls -1 /opt/LigandMPNN/model_params/ligandmpnn_v_*.pt 2>/dev/null | head -1' | tr -d '\r')
 [ -n "$ckpt" ] || {
-    echo "no ligandmpnn_*.pt in /opt/LigandMPNN/model_params -- get_model_params.sh"
+    echo "no ligandmpnn_v_*.pt in /opt/LigandMPNN/model_params -- get_model_params.sh"
     echo "fetched the ProteinMPNN set but not the LigandMPNN one"
     "$CHPC_TOOL" exec ligandmpnn -- ls -1 /opt/LigandMPNN/model_params/ || true
     exit 1; }

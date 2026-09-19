@@ -62,11 +62,13 @@ n_ca=$(grep -c '^ATOM.* CA ' "$pdb" || true)
 #
 # `if`, not `grep … && { … }`: under set -e the && form returns the failed
 # grep's status, which would fail the test exactly when the file is clean.
-if awk '/^ATOM/ { x = substr($0,31,8); y = substr($0,39,8); z = substr($0,47,8)
-                  if (x " " y " " z ~ /[Nn][Aa][Nn]|[Ii][Nn][Ff]|\*/) { print; bad = 1 } }
-        END { exit !bad }' "$pdb" | head -3
-then
-    echo "non-finite coordinates in $pdb (shown above)"; exit 1
+# Capture, do not pipe inside `if`: a pipeline's status is the LAST
+# command's, so `if awk ... | head` always sees head's 0 and reports failure
+# on a clean file.
+bad=$(awk '/^ATOM/ { x = substr($0,31,8); y = substr($0,39,8); z = substr($0,47,8)
+                     if (x " " y " " z ~ /[Nn][Aa][Nn]|[Ii][Nn][Ff]|\*/) print }' "$pdb" | head -3)
+if [ -n "$bad" ]; then
+    echo "non-finite coordinates in $pdb:"; echo "$bad"; exit 1
 fi
 
 # Consecutive CA-CA distance is ~3.8 A in any real backbone. This is the
