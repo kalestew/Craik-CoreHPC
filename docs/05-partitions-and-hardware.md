@@ -122,7 +122,7 @@ chpc-tool exec <tool> -- python -c \
 | `boltz` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
 | `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion3` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
-| `rfdiffusion`, `placer` | 2.3.1 / cu121 | (cu121, so no `sm_120`) | **no** |
+| `rfdiffusion`, `placer` | 2.3.1 / cu121 | `sm_50 … sm_86 sm_90` | **no** |
 
 `sm_120` present means the image is safe on every `gpu` node. Absent, it needs
 `--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`.
