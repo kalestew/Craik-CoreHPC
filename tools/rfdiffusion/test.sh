@@ -15,11 +15,16 @@ test -s "$RFDIFFUSION_MODELS/Base_ckpt.pt" || {
     echo "no Base_ckpt.pt under $RFDIFFUSION_MODELS"
     echo "fetch with: tools/rfdiffusion/fetch-weights.sh"; exit 1; }
 
-# diffuser.T=5 rather than the default 50. The point is that the whole path
+# diffuser.T=15 rather than the default 50. The point is that the whole path
 # runs -- hydra config, checkpoint load, the SE3Transformer forward, PDB
-# output -- not that the backbone is any good. Five steps does all of that in
-# well under a minute; fifty would make this a several-minute test that proves
-# exactly the same things.
+# output -- not that the backbone is any good.
+#
+# 15 is the FLOOR, not a preference. diffusion.py:28 is
+#   assert T >= 15, "With discrete time and T < 15, the schedule is badly
+#                     approximated"
+# so a smaller value fails inside Diffuser.__init__ -- after the checkpoint
+# has loaded, which makes it look like a model problem rather than an
+# out-of-range argument.
 #
 # schedule_directory_path is NOT optional. RFdiffusion defaults it to a
 # schedules/ directory inside the installed package, which it mkdirs and
@@ -35,7 +40,7 @@ if ! "$CHPC_TOOL" exec rfdiffusion -- python \
         "inference.output_prefix=out/t" \
         "inference.num_designs=1" \
         "contigmap.contigs=[20-20]" \
-        "diffuser.T=5" > rfd.log 2>&1
+        "diffuser.T=15" > rfd.log 2>&1
 then
     echo "run_inference.py exited non-zero:"
     if grep -q "no kernel image is available" rfd.log; then

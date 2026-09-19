@@ -60,7 +60,7 @@ fi
 : "${CHPC_ON_CLUSTER:=0}"
 
 # --- loading an entry ---------------------------------------------------------
-_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS"
+_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC"
 
 # Helpers a tool.conf may call from tool_exports / tool_doctor.
 _image_path() {
@@ -252,6 +252,32 @@ cmd_exec() {
       # on the share. Do not reach for this to make a tool write DATA into its
       # image; that belongs on FAC (doc 07).
       [ "${WRITABLE_TMPFS:-0}" = "1" ] && _args="$_args --writable-tmpfs"
+      # GPU_MAX_CC: refuse a device the image has no kernels for, BEFORE the
+      # job spends minutes loading weights to find out.
+      #
+      # A CUDA binary carries kernels only for the architectures it was
+      # compiled for, and the gpu partition here is three of them (doc 05).
+      # Land a cu121 image on a Blackwell node and it dies with
+      #   CUDA error: no kernel image is available for execution on the device
+      # which reads as a broken installation, is really a scheduling
+      # accident, and is intermittent -- the same script passes or fails on
+      # what happened to be free. nvidia-smi answers in milliseconds and
+      # needs no torch, so the check is close to free.
+      #
+      # Compares as a decimal: 12.0 > 9.0. Silent when there is no GPU, no
+      # nvidia-smi (the login node has none) or no GPU_MAX_CC, so it can
+      # never block a tool that did not declare a limit.
+      if [ "$GPU" = "1" ] && [ -n "${GPU_MAX_CC:-}" ] && command -v nvidia-smi >/dev/null 2>&1; then
+        _cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+        if [ -n "$_cc" ] && awk -v a="$_cc" -v b="$GPU_MAX_CC" 'BEGIN{exit !(a+0 > b+0)}'; then
+          die "$NAME cannot run on this GPU.
+  device compute capability : $_cc  ($(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1))
+  image supports up to      : $GPU_MAX_CC
+This is the sm_120 problem in doc 05, not a broken image. Ask for the right
+model instead of a bare --gres=gpu:1:
+  #SBATCH --gres=gpu:nvidia_l40s:1        # or nvidia_h100_nvl"
+        fi
+      fi
       # shellcheck disable=SC2086
       exec apptainer $_args ${CHPC_TOOL_BIND:+--bind "$CHPC_TOOL_BIND"} "$_sif" "$@" ;;
     native)
