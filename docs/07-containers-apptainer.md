@@ -245,6 +245,58 @@ Two habits that avoid the class entirely:
   baked into the image. `CHPC_REFDATA` exists for exactly this, and a share
   path compiled into a recipe makes that recipe wrong for the next lab.
 
+## Nothing in a pinned-torch image goes through a conda solve
+
+The pytorch base images are conda images, so `conda install` is right there
+and looks like the supported way to add a C++ dependency. It is not, and the
+failure is not the one you would brace for.
+
+`tools/placer` needed openbabel, which genuinely has no official PyPI wheel.
+One `conda install -c conda-forge openbabel=3.1.1`, with conda-forge at top
+priority, did this:
+
+```
+pytorch   2.3.1-py3.10_cuda12.1_cudnn8.9.2_0 --> 2.0.1-py3.10_cpu_0
+pytorch-mutex                       1.0-cuda --> 1.0-cpu
+mkl                                 2023.1.0 --> 2025.0.0
+numpy                                 1.26.4 --> 2.2.5
+```
+
+The solver is not adding a package, it is re-solving the whole environment,
+and `pytorch-mutex` lets it satisfy the constraints with a **CPU build**.
+
+It surfaced as `libtorch_cpu.so: undefined symbol: iJIT_NotifyEvent`, which is
+the mkl-2025/torch mismatch and reads like a packaging bug — so the tempting
+fix is to pin mkl. That fix is wrong twice over. The symbol was a symptom, and
+had mkl stayed compatible the build would have **succeeded** and shipped a
+CUDA image whose torch had no CUDA. The crash was the lucky outcome.
+
+So:
+
+- Prefer a pip wheel, even an unofficial repackaging of the upstream source,
+  over a conda solve in an image whose torch is pinned. `openbabel-wheel` is
+  openbabel's own 3.1.1 built for manylinux; it installs in seconds where the
+  solve took an hour, and cannot touch torch.
+- If conda is genuinely unavoidable, install into a **separate prefix** and
+  reach it by `PYTHONPATH`, so the solver has no opportunity to rewrite the
+  environment torch lives in.
+- Either way, **assert it afterwards.** Care is not a mechanism:
+
+  ```python
+  assert torch.version.cuda == "12.1", f"not a cu121 torch: cuda={torch.version.cuda}"
+  ```
+
+  A CPU build reports `torch.version.cuda is None`, so this fails the build on
+  exactly the substitution above. Every recipe here that pins a torch now
+  carries it.
+
+The reason this is written up rather than filed as one tool's bug: the placer
+recipe *already contained the warning*. Three paragraphs above the offending
+line, a comment explains that installing e3nn through conda "can replace the
+cu121 torch this entire stack is pinned to". The reasoning was correct and was
+applied to one package. A rule that lives in a comment next to one install
+line is not a rule.
+
 ## Running containers
 
 ```bash
