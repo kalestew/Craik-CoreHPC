@@ -47,9 +47,14 @@ reproducible.
 
 Valid names, from `foundry list-available`: `rfd3` `rfd3na` `rf3`
 `proteinmpnn` `ligandmpnn` `solublempnn` `rf3_preprint_921`
-`rf3_preprint_124` `all`. **There is no `base-models` target**, despite being
-the obvious guess — this entry's `tool_doctor` used to recommend exactly
-that.
+`rf3_preprint_124` `all`.
+
+`base-models` is valid too — it is what upstream's README recommends — but
+it appears in **neither** `foundry install --help` nor `list-available`, so
+the CLI gives no sign it exists. `download_checkpoints.py:175` expands it to
+`rfd3 rfd3na proteinmpnn ligandmpnn rf3`. I initially concluded from the CLI
+that it was not a real target; it is, and the documentation was right where
+the tool's own help was silent.
 
 ## Traps
 

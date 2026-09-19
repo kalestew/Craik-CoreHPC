@@ -18,7 +18,13 @@
 #   rfd3  rfd3na  rf3  proteinmpnn  ligandmpnn  solublempnn
 #   rf3_preprint_921  rf3_preprint_124  all
 #
-# There is NO "base-models" target, despite it being an obvious guess.
+# `base-models` is ALSO valid, and is the one upstream's README recommends,
+# even though neither `foundry install --help` nor `list-available` mentions
+# it. download_checkpoints.py:175 expands it to
+#   rfd3 rfd3na proteinmpnn ligandmpnn rf3
+# We do not use it: it includes foundry's ProteinMPNN and LigandMPNN, which
+# this registry already carries as separate entries at their own pinned
+# commits.
 #
 # BSD-3-Clause, covering code and weights, so nothing here is licensed and
 # nothing needs chpc-assets.
