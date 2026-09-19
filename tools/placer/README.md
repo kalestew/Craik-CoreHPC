@@ -2,8 +2,9 @@
 
 | | |
 |---|---|
-| Built | 2026-09-19, kanderson6, CoreHPC login node |
-| Image | `placer_1.0.sif` — an environment, **no code and no weights** |
+| Built | 2026-09-19, kanderson6, CoreHPC login node (1412 s) |
+| Verified | 2026-09-19 on an L40S (cc 8.9) — see below |
+| Image | `placer_1.0.sif`, 4.17 GB — an environment, **no code and no weights** |
 | Recipe | [`placer_1.0.def`](placer_1.0.def) |
 | Upstream | `baker-laboratory/PLACER` @ `7dc5563` |
 | Code + weights | on FAC at `$CHPC_LAB/data/placer` (`PLACER_DIR`) |
@@ -106,8 +107,30 @@ Measured with both libraries present: `3rgk.pdb` → 1232 atoms, 150 residues.
 PLACER only uses `from openbabel import openbabel`, never `pybel`, so pybel's
 separate import-time format enumeration does not matter here.
 
+## What the test proves
+
+`chpc-tool test placer` repacks upstream's own `4dtz` ligand pocket, three
+samples, on an L40S:
+
+```
+ok: 3 models in 4dtz_selftest_model.pdb, coordinates differ between samples,
+    3 score rows
+```
+
+The second clause is the one that matters. A count of three is satisfied by
+one structure written three times, which is exactly the degeneracy PLACER
+exists to remove — so the test also asserts that the coordinates differ.
+
 ## Traps
 
+- **`%post` cloned to `/tmp`, which is the build machine's.** The
+  environment check clones PLACER, imports through it and deletes it. It used
+  `/tmp`, and apptainer binds the *host's* `/tmp` into `%post` — so the clone
+  landed on the login node and survived. The first build failed for an
+  unrelated reason, left it there, and every rebuild then died on
+  `fatal: destination path '/tmp/PLACER' already exists`, which looks like a
+  git problem in the wrong filesystem. It stages in `/opt/placer-selfcheck`
+  now. General case in [`docs/07`](../../docs/07-containers-apptainer.md).
 - **PLACER's multi-model output must be split before scoring.**
   `catalytic_geometry.measure()` reads model 0, so handing it the ensemble
   scores sample 1 *n* times and reports a preorganisation fraction of exactly
