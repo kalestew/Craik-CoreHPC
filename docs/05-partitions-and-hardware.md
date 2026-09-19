@@ -149,6 +149,22 @@ Declared today by: `chai1`, `colabfold`, `placer`, `rfdiffusion`,
 `rfdiffusion3`. It is a backstop for interactive use and copied commands, not
 a replacement for the header.
 
+Verified on an L40S (`ggpu1-06`, compute capability 8.9), job 1899113, with
+three copies of one known-good image differing only in `GPU_MAX_CC`:
+
+| `GPU_MAX_CC` | device 8.9 | outcome |
+|---|---|---|
+| unset | — | ran — a tool that has not opted in is unaffected |
+| `9.0` | 8.9 ≤ 9.0 | ran |
+| `8.0` | 8.9 > 8.0 | **refused**, before launching anything |
+
+An L40S rather than a Blackwell node on purpose: all seven `ggpu1-[13-19]`
+had both GPUs allocated for thirteen hours straight, and the comparison is
+the part that can be wrong. Lowering the declared ceiling below the *present*
+device exercises the same branch that fires when the device is above a real
+ceiling. What this does not show is that an RTX PRO 6000 reports `12.0` —
+that is the hardware fact in the table above, not something the guard decides.
+
 Measure it with `torch._C._cuda_getArchFlags()`, **not**
 `torch.cuda.get_arch_list()` — the latter returns `[]` on torch 2.6 when no GPU
 is visible, which is exactly the situation you are in on the login node.
