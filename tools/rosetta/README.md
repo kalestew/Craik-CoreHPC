@@ -2,6 +2,7 @@
 
 | | |
 |---|---|
+| Verified | 2026-09-19 on CoreHPC — `scons exit 0`, 11m24s on 32 cores, 0 errors / 91 warnings |
 | Kind | `native` — built from source, not containerised |
 | Upstream | `RosettaCommons/rosetta` @ `v2026.38-dev62288` (`06b084e5`) |
 | Apps built | `rosetta_scripts`, `cartesian_ddg` — and nothing else |
@@ -126,8 +127,51 @@ Rosetta; for a downstream build of a tagged release with a newer compiler it
 only converts "upstream tested with an older gcc" into "you cannot build
 this". The warnings are still printed, just not fatal.
 
+## The binaries are 62 KB, and that is the third trap
+
+`rosetta_scripts` is 62 KB and `cartesian_ddg` 216 KB, because Rosetta links
+them against ~39 shared libraries. scons bakes an RPATH of
+
+```
+<build>/src/...:<build>/external/...:$ORIGIN:$ORIGIN/../lib
+```
+
+so a freshly installed copy **works** — by reaching back into the build tree
+on **scratch**, which is purged. The install would keep working for weeks and
+then start failing with `error while loading shared libraries`, pointing at a
+directory nobody remembers creating.
+
+No `patchelf` is needed, and none is installed on this cluster: that RPATH
+already ends in `$ORIGIN/../lib`, so `install` puts the libraries in
+`$PREFIX/lib` and they resolve relative to the binary. The scratch entries
+simply stop matching once they are gone.
+
+`install` then asserts it, by listing every library the binary currently
+resolves out of `/mnt/scratch` and checking each one also exists in
+`$PREFIX/lib`. That is the check that would have caught this at install time
+rather than after a purge.
+
+## What the test proves
+
+`chpc-tool test rosetta` scores six residues of real backbone (3rgk 1–6) with
+`ref2015` through `rosetta_scripts`, then runs one `cartesian_ddg` mutation:
+
+```
+ok: rosetta_scripts total_score=2.723, cartesian_ddg wrote 2 rows to mut.ddg
+```
+
+Both, because they fail differently — `rosetta_scripts` exercises the XML
+parser and the scorefunction, `cartesian_ddg` the minimizer and the mutation
+machinery, and it is `cartesian_ddg` whose output the ddG cascade reads.
+
 ## Traps at run time
 
+- **A mutfile needs a per-block count line**, not just `total N`. The format is
+  `total <N>`, then for each block a line giving that block's mutation count,
+  then its mutations. Omitting it — which looks redundant for a single
+  mutation — gets you `ERROR: Assertion 'num_mutations>0' failed` at
+  `cartesian_ddg.cc:188` and a developer backtrace, which says nothing about
+  the file being one line short.
 - **`cartesian_ddg` ignores `-out:path:all`** for its own `.ddg` table and its
   dumped PDBs, and writes them to the current working directory. Stage scripts
   `cd` into their output directory first. Before that, ddG results landed in

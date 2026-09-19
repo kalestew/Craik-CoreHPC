@@ -201,6 +201,31 @@ do_install() {
     _say "installed $app.$SUFFIX"
   done
 
+  # The shared libraries, and this is not optional. Rosetta links the apps
+  # against ~39 .so files and the binaries are tiny -- rosetta_scripts is 62 KB.
+  # scons bakes an RPATH of
+  #   <build>/src/...:<build>/external/...:$ORIGIN:$ORIGIN/../lib
+  # so a freshly installed copy WORKS, by reaching back into the build tree on
+  # scratch. Scratch is purged. The binaries would then start failing with
+  # "error while loading shared libraries", months later, pointing at a
+  # directory nobody remembers.
+  #
+  # No patchelf needed, and none is installed here: that RPATH already ends in
+  # $ORIGIN/../lib, so putting the libraries in $PREFIX/lib makes them resolve
+  # relative to the binary. The scratch entries simply stop matching once they
+  # are gone.
+  _bld="$SRC/source/build/src/release/linux"
+  _ext="$SRC/source/build/external/release/linux"
+  mkdir -p "$PREFIX/lib"
+  _n=0
+  for _d in "$_bld" "$_ext"; do
+    for _so in $(find "$_d" -name '*.so*' -type f 2>/dev/null); do
+      cp -f "$_so" "$PREFIX/lib/" && _n=$((_n+1))
+    done
+  done
+  [ "$_n" -gt 0 ] || _die "no .so files found under $SRC/source/build -- did the link step run?"
+  _say "installed $_n shared libraries into $PREFIX/lib"
+
   # The database is read at runtime and must outlive scratch. rsync rather than
   # cp so a re-install is cheap and interruptible.
   _say "syncing database (3 GB, once)"
@@ -220,12 +245,28 @@ do_install() {
 
   _say "verifying the installed binaries actually run"
   for app in rosetta_scripts cartesian_ddg; do
-    "$PREFIX/bin/$app.$SUFFIX" -database "$PREFIX/database" -help >/dev/null 2>&1
-    # Rosetta exits non-zero on -help; what matters is that it loaded the
-    # database and got far enough to print usage, not the status code.
-    "$PREFIX/bin/$app.$SUFFIX" -database "$PREFIX/database" -help 2>&1 \
-      | grep -q . || _die "$app produced no output -- broken install"
-    _say "  $app runs"
+    _bin="$PREFIX/bin/$app.$SUFFIX"
+    # Capture, do NOT pipe. `... -help | grep -q .` looks equivalent and is
+    # not: grep -q exits at the first line, the binary takes SIGPIPE, and
+    # under `set -o pipefail` the pipeline reports 141 even though grep
+    # matched. That reported a perfectly good cartesian_ddg (17699 lines of
+    # usage) as "produced no output -- broken install".
+    _out=$("$_bin" -database "$PREFIX/database" -help 2>&1)
+    [ -n "$_out" ] || _die "$app produced no output -- broken install"
+
+    # The check that matters: every library this binary currently resolves out
+    # of the scratch build tree must also exist in $PREFIX/lib. Without it the
+    # install looks fine today and breaks whenever scratch is purged, which is
+    # the whole reason for copying anything.
+    _missing=$(ldd "$_bin" 2>/dev/null \
+                 | awk '/=> \/mnt\/scratch/ {print $1}' \
+                 | while read -r _so; do
+                     [ -e "$PREFIX/lib/$_so" ] || echo "$_so"
+                   done)
+    [ -z "$_missing" ] || _die "$app still depends on the build tree for:
+$(echo "$_missing" | sed 's/^/  /')
+These would vanish with the next scratch purge. Check $PREFIX/lib."
+    _say "  $app runs, and every library it needs is in $PREFIX/lib"
   done
   _say "done: ROSETTA_BIN=$PREFIX/bin ROSETTA_SUFFIX=$SUFFIX"
 }
