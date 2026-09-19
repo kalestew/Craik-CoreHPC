@@ -2,8 +2,9 @@
 
 | | |
 |---|---|
-| Built | 2026-09-19, kanderson6, CoreHPC login node (844 s for the first build) |
-| Image | `boltz_2.sif`, 3.37 GB — no weights |
+| Built | 2026-09-19, kanderson6, CoreHPC login node (747 s) |
+| Image | `boltz_2.sif`, 4.08 GB — no weights |
+| Verified | 2026-09-19 on an H100 NVL (cc 9.0) — see below |
 | Recipe | [`boltz_2.def`](boltz_2.def) |
 | Upstream | `boltz[cuda]==2.2.1` (PyPI) |
 | Weights | 5.0 GB on FAC, via [`fetch-weights.sh`](fetch-weights.sh) |
@@ -48,6 +49,19 @@ the build rather than a job.
 `chpc-tool test boltz`: folds a 31-residue peptide with `msa: empty`,
 asserting 31 CA atoms, finite coordinates, and a CA radius of gyration above
 3 Å — the check that separates "wrote a PDB" from "ran the diffusion module".
+
+Measured, job 1899084 on an H100 NVL:
+
+```
+ok: 31 CA atoms in in_model_0.pdb, CA spread 12.92 A
+PASS boltz
+```
+
+The bare-`pip install boltz` image passed `%post`, `%test` and `--help` and
+failed *here*. Nothing cheaper than a real fold would have caught it.
+
+The image adds ~700 MB over the non-`[cuda]` build (3.37 → 4.08 GB); that is
+the three `cuequivariance` wheels.
 
 ## Traps
 
