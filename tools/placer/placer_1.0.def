@@ -15,6 +15,10 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
 # so "just bump torch" is not available, and the SE3Transformer PLACER imports
 # is a DGL program.
 #
+# Nothing here goes through conda, deliberately: every dependency is a pip
+# wheel pinned against that torch. See the openbabel block in %post for what
+# a single conda install did to this stack.
+#
 # HARDWARE LIMIT: cu121 has no sm_120 kernels, so this cannot run on the RTX
 # Pro 6000 (Blackwell) nodes ggpu1-[13-19]. Fine on L40S (sm_89) and H100/H200
 # (sm_90). Jobs must say --gres=gpu:nvidia_l40s:1 rather than --gres=gpu:1,
@@ -37,7 +41,14 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     set -eux
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends git ca-certificates
+    # libxrender1 AND libxext6 are for openbabel, not for graphics -- see the
+    # openbabel block below. BOTH are needed and libxrender1 does not imply
+    # libxext6: libxrender1 pulls libX11/libxcb/libXau/libXdmcp, but libXext is
+    # its own package, so installing only libxrender1 moves the error from
+    # "libXrender.so.1: cannot open shared object file" to the identical
+    # message about libXext.so.6 and nothing else changes. About 2 MB total.
+    apt-get install -y --no-install-recommends git ca-certificates \
+        libxrender1 libxext6
     rm -rf /var/lib/apt/lists/*
 
     python -c "import sys; assert sys.version_info[:2] == (3,10), sys.version"
@@ -69,41 +80,81 @@ From: pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime
     pip install --no-cache-dir e3nn==0.5.5
     pip install --no-cache-dir "se3-transformer @ git+https://github.com/NVIDIA/DeepLearningExamples.git#subdirectory=DGLPyTorch/DrugDiscovery/SE3Transformer"
 
-    # openbabel has no usable PyPI wheel (it is a C++ library with python
-    # bindings); conda-forge is the supported route and this base is a conda
-    # image, so use it rather than fighting a source build.
+    # openbabel, via pip -- NOT conda. An earlier revision of this recipe did
+    #     conda install -c conda-forge openbabel=3.1.1
+    # and that is exactly the mistake the e3nn comment above warns about. The
+    # solve does not merely add openbabel; with conda-forge at top priority it
+    # rewrites the base environment underneath torch:
     #
-    # libmamba, not the classic solver. This is the single heaviest step in
-    # any recipe here, and the login node's user slice has a SOFT memory
-    # limit of 8 GiB under its 16 GiB hard one -- between the two the kernel
-    # throttles and reclaims rather than killing, so a classic conda solve
-    # against conda-forge does not fail, it just crawls for tens of minutes
-    # and looks like a hang. The C++ solver is a fraction of the footprint
-    # and is the default in modern conda anyway; naming it means the build
-    # does not depend on which conda the base image happens to ship.
-    conda install -y -n base -c conda-forge conda-libmamba-solver || true
-    conda install -y --solver=libmamba -c conda-forge openbabel=3.1.1 \
-        || conda install -y -c conda-forge openbabel=3.1.1
-    conda clean -afy
+    #   pytorch   2.3.1-py3.10_cuda12.1_cudnn8.9.2_0 --> 2.0.1-py3.10_cpu_0
+    #   pytorch-mutex                       1.0-cuda --> 1.0-cpu
+    #   mkl                                 2023.1.0 --> 2025.0.0
+    #   numpy                                 1.26.4 --> 2.2.5
+    #
+    # A CPU-only torch 2.0.1 in a CUDA image. It surfaced as
+    #   libtorch_cpu.so: undefined symbol: iJIT_NotifyEvent
+    # which is the mkl 2025 / torch mismatch and reads like a packaging bug --
+    # but the symbol was the symptom. Had mkl happened to stay compatible, the
+    # build would have SUCCEEDED and shipped an image whose GPU silently did
+    # not exist. The crash was the lucky outcome, which is why the assertion
+    # at the end of this section is not optional.
+    #
+    # openbabel-wheel is a manylinux build of openbabel's own 3.1.1 source. It
+    # needs two system libraries: every format plugin links libXrender and
+    # libXext, and if either is missing EVERY plugin fails to load
+    # independently -- so no format registers at all and
+    # OBConversion.SetInFormat('pdb') just returns False. openbabel still
+    # imports and OBReleaseVersion() still answers; it simply reads nothing.
+    # Hence libxrender1 and libxext6 in the apt line above.
+    pip install --no-cache-dir openbabel-wheel==3.1.1.23
+
+    # The check that the conda route needed and did not have. A CPU-only build
+    # reports torch.version.cuda is None, so this fails loudly on exactly the
+    # substitution described above rather than shipping it.
+    python - <<'PY'
+import torch, dgl, e3nn
+assert torch.__version__.startswith("2.3.1"), f"torch moved: {torch.__version__}"
+assert torch.version.cuda == "12.1", f"not a cu121 torch: cuda={torch.version.cuda}"
+import numpy
+assert numpy.__version__.startswith("1."), f"numpy moved: {numpy.__version__}"
+from openbabel import openbabel
+c = openbabel.OBConversion()
+for fmt in ("pdb", "mol2", "sdf", "smi"):
+    assert c.SetInFormat(fmt), f"openbabel format {fmt} did not register -- missing libXrender/libXext?"
+print("torch", torch.__version__, "cuda", torch.version.cuda,
+      "| dgl", dgl.__version__, "| e3nn", e3nn.__version__,
+      "| openbabel", openbabel.OBReleaseVersion())
+PY
 
     # Validate the environment against the real code. The checkout does not
     # ship in this image, so clone it, import through it, and throw it away --
     # otherwise the first thing to discover a broken dgl/e3nn/torch triple
     # would be a six-hour array job.
-    git clone https://github.com/baker-laboratory/PLACER /tmp/PLACER
-    git -C /tmp/PLACER checkout --detach 7dc5563300e7143582d85636bdd413d4c7688e9a
-    cd /tmp/PLACER
-    python -c "
+    #
+    # NOT /tmp. Apptainer binds the HOST's /tmp into %post, so a recipe that
+    # clones to /tmp is not writing into the image at all -- it is writing onto
+    # the build machine, where it survives. The first failed build of this
+    # recipe left /tmp/PLACER on the login node, and every rebuild after it
+    # died on
+    #   fatal: destination path '/tmp/PLACER' already exists and is not an
+    #   empty directory
+    # which looks like a git problem and is really a bind. /opt is inside the
+    # image, so this is private to the build and cannot collide with anything.
+    _CHK=/opt/placer-selfcheck
+    rm -rf "$_CHK"
+    git clone https://github.com/baker-laboratory/PLACER "$_CHK"
+    git -C "$_CHK" checkout --detach 7dc5563300e7143582d85636bdd413d4c7688e9a
+    cd "$_CHK"
+    PYTHONPATH="$_CHK" python -c "
 import torch, dgl, e3nn
 print('torch', torch.__version__, 'dgl', dgl.__version__, 'e3nn', e3nn.__version__)
 from openbabel import openbabel
-import sys; sys.path.insert(0, '/tmp/PLACER')
 import PLACER
 print('PLACER imports')
 "
-    test -s /tmp/PLACER/weights/PLACER_model_1.pt
+    test -s "$_CHK/weights/PLACER_model_1.pt"
     cd /
-    rm -rf /tmp/PLACER
+    rm -rf "$_CHK"
 
 %environment
     export LC_ALL=C.UTF-8
@@ -113,7 +164,23 @@ print('PLACER imports')
 
 %test
     set -eu
-    python -c "import torch, dgl, e3nn; from openbabel import openbabel; print('env ok', torch.__version__, dgl.__version__)"
+    # Re-asserted against the BUILT image, not just the sandbox. openbabel
+    # resolves its plugin directory at runtime through BABEL_LIBDIR, which the
+    # wheel's __init__ sets from its own install path -- so a squashfs layout
+    # change, or a stripped image, would break format registration here while
+    # %post still passed. `import openbabel` succeeding proves nothing; only
+    # SetInFormat does.
+    python - <<'PY'
+import torch, dgl, e3nn
+assert torch.version.cuda == "12.1", f"not a cu121 torch: cuda={torch.version.cuda}"
+from openbabel import openbabel
+c = openbabel.OBConversion()
+missing = [f for f in ("pdb", "mol2", "sdf", "smi") if not c.SetInFormat(f)]
+assert not missing, f"openbabel formats did not register: {missing}"
+print("env ok:", torch.__version__, "cu" + torch.version.cuda,
+      "| dgl", dgl.__version__, "| e3nn", e3nn.__version__,
+      "| openbabel", openbabel.OBReleaseVersion())
+PY
 
 %runscript
     exec "$@"

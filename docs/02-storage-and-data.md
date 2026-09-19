@@ -7,7 +7,7 @@
 | `/home/remote/<user>` (`$HOME`) | VAST home | 20 GiB hard, 19 GiB soft | fast | kept | dotfiles, scripts, small configs. NOT conda envs, caches, data |
 | `/mnt/scratch/user/<user>` | VAST user scratch | 50 TiB hard per user | fastest shared (InfiniBand) | volatile: purge >30 days, wiped at quarterly maintenance | active job I/O, conda envs, container cache, checkpoints |
 | `/mnt/scratch/group/CX500146_DS1` | VAST group scratch | shared | fastest shared | volatile, same purge | shared inputs/outputs of running projects, staged lab containers |
-| `/mnt/fac/CX500146_DS1` | our FAC share (NFS 4.2, autofs) | 5.0 TB (0.5 GB used 2026-09-17); ~$52/TB/yr | slow (capacity tier) | persistent, lab-owned, snapshots under `.qsnaps/` | long-term data, final results, canonical copies of containers/envs/scripts |
+| `/mnt/fac/CX500146_DS1` | our FAC share (NFS 4.2, autofs) | 5.0 TB (55 GB used 2026-09-19); ~$52/TB/yr | slow (capacity tier) | persistent, lab-owned, snapshots under `.qsnaps/` | long-term data, final results, canonical copies of containers/envs/scripts |
 | `/tmp` on a compute node | local NVMe | cpu ~2 TB, gpu ~6 TB, large_gpu 6–12 TB, pod ~12 TB, community ~1 TB SAS SSD | fastest | gone when the job ends | scratch inside a job, tight-loop I/O |
 
 Notes:
@@ -35,7 +35,24 @@ Notes:
 - FAC costs ~$52/TB/yr plus setup. A recharge for scratch data kept >30 days
   (~$428/TiB/yr) is planned. Home cannot be expanded for free.
 - Quotas are soft/hard with a 7-day grace period. Check with `userquota`
-  (`/usr/local/bin/userquota`) on the login node; units are TiB/GiB.
+  (`/usr/local/bin/userquota`) on the login node; units are TiB/GiB. Note it
+  reports `/scratch` and `/home` only — **not** the FAC share.
+
+- **`df` on `/mnt/fac` does not describe our share, and reading it as though
+  it does is alarming and wrong.** It reports
+
+  ```
+  fac-ha.fac.corehpc.ucsf.edu:/export   49G   23G   24G  50%
+  ```
+
+  while `du -sh /mnt/fac/CX500146_DS1` says **55 GB** — more than the whole
+  filesystem is supposed to hold. The export carries roughly 400 lab shares
+  (`ls /mnt/fac` lists them all), and those `df` figures belong to something
+  other than our data; the share itself is provisioned at 5 TB. Someone
+  checking "have we room for another container image" will find `df` first,
+  conclude the share is half full with 24 GB left, and either panic or, worse,
+  believe the 24 GB. Use `du -sh /mnt/fac/$FAC_SHARE` for what we are using,
+  and the 5 TB figure in the table above for what we have.
 - Do not touch file timestamps to dodge the purge; the AUP says accounts can
   be suspended for it.
 - CoreHPC does not back anything up. Backup is the lab's problem (FAC).
