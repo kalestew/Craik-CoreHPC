@@ -162,8 +162,36 @@ An L40S rather than a Blackwell node on purpose: all seven `ggpu1-[13-19]`
 had both GPUs allocated for thirteen hours straight, and the comparison is
 the part that can be wrong. Lowering the declared ceiling below the *present*
 device exercises the same branch that fires when the device is above a real
-ceiling. What this does not show is that an RTX PRO 6000 reports `12.0` —
-that is the hardware fact in the table above, not something the guard decides.
+ceiling.
+
+A Blackwell node did eventually free up, and confirms the remaining half —
+that an RTX PRO 6000 really does report `12.0`, and that a tool with no
+declared ceiling is untouched on the same machine (job 1894942, `ggpu1-19`):
+
+```
+node: ggpu1-19
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 12.0
+
+chai1 (GPU_MAX_CC=9.0):
+  chpc-tool: chai1 cannot run on this GPU.
+    device compute capability : 12.0  (NVIDIA RTX PRO 6000 Blackwell Server Edition)
+    image supports up to      : 9.0
+esm   (no GPU_MAX_CC):  esm ran, arch ok
+```
+
+The harness that ran this printed `[exit 0 -- guard did NOT fire]` underneath
+that refusal, and was wrong: it asked
+
+```sh
+if "$T" exec chai1 -- python -c '...' 2>&1 | tail -8; then
+```
+
+which tests **`tail`'s** exit status, not `chpc-tool`'s. A pipeline's status
+is its last command's. Worth repeating here because this family — that, and
+`| grep -q` returning 141 under `set -o pipefail` when the producer takes
+SIGPIPE — accounted for three separate false verdicts while building this
+catalogue, every one of them in checking code rather than in the thing being
+checked. Capture into a variable and test that.
 
 Measure it with `torch._C._cuda_getArchFlags()`, **not**
 `torch.cuda.get_arch_list()` — the latter returns `[]` on torch 2.6 when no GPU
