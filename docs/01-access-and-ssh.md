@@ -6,8 +6,13 @@
   UCSF affiliate account sponsored by the PI; start that HR process early.
 - Duo/MFA enrolled on a personal device
   (<https://it.ucsf.edu/how-to/enrolling-your-first-device-duo>).
-- UCSF VPN, or the on-campus `UCSFwpa` Wi-Fi. CoreHPC recommends VPN even on
-  campus. The bastions are unreachable from anywhere else.
+- UCSF VPN. CoreHPC's wiki says the on-campus `UCSFwpa` Wi-Fi also works and
+  merely recommends VPN; treat the VPN as required until you have checked
+  otherwise from the subnet you are on (verified 2026-09-21 from `UCSFwpa`,
+  client address `10.63.130.229`: port 22 on both bastions, `10.98.128.32` and
+  `10.98.128.33`, does not connect, and `traceroute` dies after three
+  campus-core hops; with the tunnel up both answer `SSH-2.0-OpenSSH_9.9`
+  immediately). The bastions are unreachable from anywhere else.
 - The lab must have a FAC capacity-storage share before onboarding
   (<https://tiny.ucsf.edu/getfac>). CoreHPC will not onboard a user without it.
 - Your PI requests the account at <https://tiny.ucsf.edu/Gethpc>. Each
@@ -84,6 +89,44 @@ scp file.txt chpc:/mnt/scratch/user/$USER/
 rsync -avP data/ chpc:/mnt/scratch/group/CX500146_DS1/data/
 ssh chpc 'squeue -u $USER'
 ```
+
+### GlobalProtect will not connect while on `UCSFwpa`
+
+Symptom: the VPN client sits at `Disconnected` on campus Wi-Fi but connects
+normally from `UCSFguest`. It is not internal-host-detection suppressing the
+tunnel — there is no tunnel to suppress.
+
+**The cause is a stale cached portal config, not the Wi-Fi as such.** Portal
+login is what hands the client its gateway list. When that login fails the
+client falls back to whatever list it cached last, and on 2026-09-21 that
+cached list named exactly one gateway, `gp-ucsf-mb.ucsf.edu`
+(`64.54.0.228:443`), which did not answer. The portal itself,
+`gp-ucsf.ucsf.edu` (`64.54.0.227:443`), *was* reachable from `UCSFwpa` — only
+the pre-login failed:
+
+```
+Failed to pre-login to the portal gp-ucsf.ucsf.edu
+portal status is Using cached portal config
+Gateway gp-ucsf-mb: The network connection is unreachable or the gateway is unresponsive.
+<status>Disconnected</status>   <tunnel>no</tunnel>
+```
+
+A successful portal login the same hour, from `UCSFguest`, returned a
+different and working gateway — `gp-ucsf-prn.ucsf.edu` (Parnassus) — and the
+IPSec tunnel came straight up. So `gp-ucsf-mb` looks retired or down, and the
+client had been pinned to it by the cache. Both entries in the portal dropdown
+resolve to the cached gateway, so switching portals does not help.
+
+Consequence worth knowing: this failure is **not** evidence that `UCSFwpa`
+cannot carry the VPN, and it is consistent with CoreHPC having worked from
+`UCSFwpa` before. Whether a client holding the fresh `gp-ucsf-prn` list
+connects from `UCSFwpa` is untested — check it next time you are on that
+network rather than assuming either way.
+
+Workaround: join `UCSFguest`, connect GlobalProtect (this refreshes the cached
+config), then prime the SSH master. Logs worth reading when this recurs:
+`/Library/Logs/PaloAltoNetworks/GlobalProtect/pan_gp_event.log` and
+`~/Library/Logs/PaloAltoNetworks/GlobalProtect/PanGPA.log`.
 
 ### Stale sockets after a VPN drop
 
