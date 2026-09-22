@@ -9,9 +9,31 @@
 # reads its banner, because an expired FoldX is still present, still
 # executable, and only says so when it runs.
 #
-# molecules/ is a directory and so cannot be a row here; copy it alongside the
-# binary if your build ships one.
+# Newer builds ship a molecules/ directory of modified-residue definitions
+# INSTEAD of rotabase.txt: the rotamer data is compiled into the binary. The
+# rows below are the 2027-01-31 Linux build. If your download ships
+# rotabase.txt instead, drop the molecules rows and use a single
+#   rotabase.txt <TAB> - <TAB> $CHPC_SOFTWARE/foldx5.1 <TAB> 644
+# row; tool.conf only warns when rotabase.txt is absent, it does not fail.
 #
-# columns, tab separated:  filename / sha256 / dest / mode / note
-foldx5.1_20261231	-	$CHPC_SOFTWARE/foldx5.1	755	the dated binary -- rename this row to match your download
-rotabase.txt	-	$CHPC_SOFTWARE/foldx5.1	644	rotamer library; only some builds ship it separately
+# chpc-assets installs FILES, never directories, so each molecule is its own
+# row and the destination carries the subdirectory. The molecules are all
+# modified nucleotides and none of them is used by protein ddG -- they are
+# here so the install matches what the vendor shipped, not because a stage
+# needs them.
+foldx_20270131	5309d81c3f08b8405d172153aaf9792a244c06f98387c9d57a104302a9cef2cf	$CHPC_SOFTWARE/foldx5.1	755	the dated binary; this one expires 2027-01-31
+6HA.json	df003d6375e4d3192eb3ce2f06a48652cdef9ee7a6f9bc33e70e02ef7ab3fc6e	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+6HC.json	f47656c7258b4b497ef5b5e922671907f001a00235f6c37c4c3d15f1acdc4015	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+6HG.json	1f39de3bd20fcf6de8993f9ce29281fa02ef22a2f8b43d03beaec00a8e39127a	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+6HT.json	9c79982d6d3979e6d90dbc8e81bb8918bda05cfbbb11ff229e0f8e4e27b634c2	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+AMe.json	3a2389dc912f0c849a092901fbd499ce2ecad70206978e53a24fbc588dbcd33d	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+CMe.json	8ae201ad88648609c2bbf6e4cf447bf7e9a8bdc116806016ffce4475b110c2ae	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+DU.json	2f7589a49b67567306188ef1a3afa610e7cb7f54226c9f6fd5b4883fcd3b71fd	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+GMe.json	23d050c7306b6e6c2ed3a99d731f61843e9faab584e8eff8911f00aad75ab5ec	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+RA.json	88fde97b29fdccbb72b79705b260f290f1188eb21bf337243056b1ac21878ad4	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+RC.json	1f83934bc1095eb93c16d7dc73521e4a6007cee0b3ac7e36b5dacf545da63cdf	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+RG.json	9b4249e5e50811b0a7bacdbc4acfbc0f9b952acb6f98bce0fe4bc94b0c2a9b53	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+RU.json	766f8b819b02df41ffe3b264751d4ec07df959df2e85baeaefc8bf2e4ceda782	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+TTP.json	78e4f58e23d0ec893f6ed6c626f17b6ab5388681c2726cfb40a4db8d32b34593	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+U.json	145afed8547d4e5c7e1249e4139e698d9c017b766ee882511d914d59c9f7d5cf	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
+UMe.json	a2375fc6a1f40c04efa7a460200393d1a9c1d52f7e5bf5c4303fdb775089a110	$CHPC_SOFTWARE/foldx5.1/molecules	644	modified-residue definition
