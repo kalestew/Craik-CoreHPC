@@ -117,11 +117,31 @@ IPSec tunnel came straight up. So `gp-ucsf-mb` looks retired or down, and the
 client had been pinned to it by the cache. Both entries in the portal dropdown
 resolve to the cached gateway, so switching portals does not help.
 
-Consequence worth knowing: this failure is **not** evidence that `UCSFwpa`
-cannot carry the VPN, and it is consistent with CoreHPC having worked from
-`UCSFwpa` before. Whether a client holding the fresh `gp-ucsf-prn` list
-connects from `UCSFwpa` is untested — check it next time you are on that
-network rather than assuming either way.
+**Tested later the same day, with the fresh list: `UCSFwpa` still cannot get
+there.** From `10.63.130.229`, VPN off, the two portal/gateway addresses behave
+differently and neither is usable:
+
+| address | `nc -z` | real TLS handshake |
+|---|---|---|
+| `64.54.0.227` (`gp-ucsf-prn`) | OPEN | **fails** |
+| `64.54.0.228` (`gp-ucsf`, `gp-ucsf-mb`) | fails | fails |
+
+So the stale cache was a real second problem, but it was never the only one.
+`gp-ucsf.ucsf.edu` is a CNAME to `gp-ucsf.lbdn.ucsf.edu` and moves between the
+two addresses, which is why the portal looked reachable in the morning and did
+not in the evening — the name had changed address, not the network.
+
+**`nc -z` lies here, and it lied both times.** `64.54.0.227:443` completes a TCP
+handshake and then no TLS session — something in path answers the SYN with
+nothing behind it. A control (`ucsf.edu:443`) agrees between `nc` and `curl`, so
+the tool is fine and the result is real. Test a gateway with `openssl s_client`
+or `curl`, never with a port check: a port check reported this one open while
+GlobalProtect's own pre-login was failing against it.
+
+Whether this is all of `UCSFwpa` or one subnet is still unknown, and CoreHPC has
+been reached from `UCSFwpa` on this account before. The evidence above is what to
+hand CoreHPC or IT when asking; the working answer meanwhile is `UCSFguest` plus
+the VPN.
 
 Workaround: join `UCSFguest`, connect GlobalProtect (this refreshes the cached
 config), then prime the SSH master. Logs worth reading when this recurs:
