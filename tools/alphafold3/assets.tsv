@@ -1,0 +1,12 @@
+# AlphaFold 3 model parameters -- obtained by request from Google DeepMind
+# under their Model Parameters Terms of Use. Non-commercial.
+#
+# These are the MODEL PARAMETERS only, ~1 GB. They are NOT the genetic
+# databases, which are hundreds of GB, are fetched with upstream's
+# fetch_databases.sh, and are not listed here because nobody should try to
+# install them through a manifest. See README.md.
+#
+# The parameters bar commercial use of the OUTPUTS, not merely of the weights.
+# For a therapeutic programme that restriction outlives the run, so record
+# where any AF3-derived structure ends up.
+af3.bin.zst	7172ecf90a455b7cf05ec43d7fb6189cdcf824b92af3519e25fd95b4d5c48814	$CHPC_REFDATA/alphafold3	644	model parameters, zstd-compressed, 1020545872 bytes
