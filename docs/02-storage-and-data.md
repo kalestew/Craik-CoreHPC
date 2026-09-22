@@ -115,6 +115,14 @@ sbatch -p cpu -c 2 --mem 4G -t 12:00:00 --wrap 'rsync -a /mnt/fac/CX500146_DS1/b
 - FAC shares are also mounted elsewhere (lab workstations, per the FAC team),
   so the FAC share itself can be the transfer medium for lab data.
 
+**There is no FAC Globus collection.** The two CoreHPC collections are User
+Home and User Scratch, so a Globus transfer intended for a lab share lands in
+scratch and then needs an `rsync` into FAC — and it must not be aimed at Home,
+which is the 20 GiB quota. Weights, containers and reference databases belong
+on FAC precisely because scratch is purged, so Globus is the first leg of that
+trip and never the whole of it. When the data is already on a workstation that
+mounts the share, copying it there directly skips Globus altogether.
+
 Approved data-transfer paths per the AUP are Globus, the FAC share, and Open
 OnDemand. Do not set up other tunnels for data egress.
 
@@ -144,6 +152,30 @@ no token that opens it. Fetch on the login node and stage to scratch or
 FAC. Do not set `http_proxy` by hand in a job hoping to reach the login
 node's proxy either: `chpc-proxy-vm1` resolves from a compute node but
 does not accept connections from one.
+
+**What the login node reaches is broader than the list above**, and the way to
+tell a proxy refusal from a real answer is the CONNECT itself: a blocked
+destination returns 403 with no `200 Connection established`, whereas any other
+status — including 400 and 404 — means the tunnel opened and you are reading
+the origin. Measured on `chpc-ucsf-login-vm1`, 2026-09-21:
+
+| destination | result |
+|---|---|
+| `huggingface.co`, `github.com`, `pypi.org` | 200 |
+| `zenodo.org`, `ftp.ebi.ac.uk` | 200 |
+| `files.ipd.uw.edu` | 404 from the origin — reachable |
+| `storage.googleapis.com` | 400 from the origin — reachable |
+| `registry-1.docker.io` | 404 from the origin — reachable; the API is under `/v2/` |
+| `dl.fbaipublicfiles.com` | **refused**: CONNECT sent, no tunnel established |
+
+So a 400 or a 404 here is good news and a 403 is not. Check with `curl -sv` and
+look for the `Connection established` line rather than trusting the status code
+on its own. `files.ipd.uw.edu` is worth singling out because RFdiffusion and
+PLACER weights come from there and therefore need no Globus;
+`dl.fbaipublicfiles.com`, the ESM/fairseq host, is genuinely refused and does.
+
+Run a long fetch under `tmux` on the login node. Downloads are sanctioned there
+(32 cores, 125 GB, no ulimits) but a dropped SSH session still kills one.
 
 The proxy is configured through `http_proxy`/`https_proxy` variables set
 in the login profile (`chpc-proxy-vm1:3128`). They exist in interactive
