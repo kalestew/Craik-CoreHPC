@@ -33,6 +33,15 @@ while [ -L "$_self" ]; do
   case $_self in /*) ;; *) _self="$_d/$_self" ;; esac
 done
 SELF_DIR=$(cd "$(dirname "$_self")" && pwd -P)
+# ABSOLUTE from here on. The symlink loop above only rewrites _self when there
+# is a symlink to follow, so `corehpc/lab/bin/chpc-tool test boltz` left it
+# relative -- and `test` exports it as $CHPC_TOOL and then cd's the test script
+# into a scratch directory, where a relative path resolves to nothing. Every
+# test.sh that calls "$CHPC_TOOL" exec then died on
+#   corehpc/lab/bin/chpc-tool: No such file or directory
+# and was reported as the TOOL failing. SELF_DIR was already absolute; _self
+# was not, and it is the one that gets exported.
+_self="$SELF_DIR/$(basename "$_self")"
 
 # --- the registry ------------------------------------------------------------
 # Two layouts: corehpc/lab/bin/chpc-tool -> ../../tools, and a copy published at
