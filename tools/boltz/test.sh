@@ -68,3 +68,56 @@ awk -v s="$spread" 'BEGIN { exit !(s > 3.0) }' \
     || { echo "CA radius of gyration $spread A is too small to be a fold"; exit 1; }
 
 echo "ok: $n_ca CA atoms in $(basename "$pdb"), CA spread ${spread} A"
+
+# --- second case: big enough to reach the cuequivariance kernels -------------
+# The 31-mer above does NOT exercise them, and that is how this test came to
+# pass while every real job failed. Boltz turns the kernels on by default and
+# they are Triton, which JIT-compiles them at first use and so needs a C
+# compiler inside the image; this image is python:3.12-slim and has none.
+#
+# Measured 2026-09-22 on an L40S: 31 aa and 71 aa predict fine with kernels on,
+# 142 aa does not, and neither does anything larger. One chain or two makes no
+# difference -- 2 x 71 fails and 1 x 142 fails, both at 142 total tokens -- so
+# the boundary is total token count and lies between 71 and 142. 213 aa is
+# comfortably past it without being slow.
+#
+# If the kernels cannot build, boltz exits non-zero with
+#   RuntimeError: Failed to find C compiler.
+# and writes nothing, so the existing failure path catches it. `--no_kernels`
+# is the supported escape hatch and costs speed only.
+U="SYESQAELTQKTAADIEAELRAEAEKHEAEGTPEEGERFRAEAEERIAAIRAAADEAIAEYEAKAAAERAA"
+BIG="${U}${U}${U}"
+cat > big.yaml <<EOF
+version: 1
+sequences:
+  - protein:
+      id: A
+      sequence: $BIG
+      msa: empty
+EOF
+
+if ! "$CHPC_TOOL" exec boltz -- boltz predict big.yaml \
+        --cache "$BOLTZ_CACHE" \
+        --out_dir out_big \
+        --accelerator gpu --devices 1 \
+        --recycling_steps 1 --sampling_steps 20 --diffusion_samples 1 \
+        --output_format pdb --seed 37 \
+        --override > boltz_big.log 2>&1
+then
+    echo "boltz predict exited non-zero on the ${#BIG}-residue case."
+    if grep -q "Failed to find C compiler" boltz_big.log; then
+        echo "  CAUSE: no C compiler in the image, so Triton cannot build the"
+        echo "  cuequivariance kernels. Every prediction above ~128 tokens"
+        echo "  fails this way. Either rebuild the image with gcc, or pass"
+        echo "  --no_kernels, which costs speed only."
+    fi
+    tail -20 boltz_big.log; exit 1
+fi
+
+bigpdb=$(find out_big -name '*.pdb' -type f 2>/dev/null | head -1)
+[ -n "$bigpdb" ] || { echo "no .pdb from the ${#BIG}-residue case"; tail -20 boltz_big.log; exit 1; }
+n_big=$(grep -c '^ATOM.* CA ' "$bigpdb" || true)
+[ "$n_big" -eq "${#BIG}" ] \
+    || { echo "expected ${#BIG} CA atoms, got $n_big"; exit 1; }
+
+echo "ok: kernel path exercised, $n_big CA atoms in $(basename "$bigpdb")"
