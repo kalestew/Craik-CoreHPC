@@ -12,13 +12,15 @@
 | GPU | no |
 | Expires | **2027-01-31** |
 
-## The payload is not in git, and must not be
+## The payload lives on the share, not in git
 
-FoldX is proprietary and its academic licence is a per-user registration that
-does not permit redistribution. Committing the binary — LFS or not — would
-hand it to everyone with repo access, including people who never registered,
-and git history is permanent. So this directory carries the manifest and the
-share carries the bytes, which is the arrangement `chpc-assets` exists for:
+The lab is licensed to distribute FoldX internally and the GitLab server is
+private, so this is a practical choice rather than a legal one. The binary is
+88 MB and **expires on a date encoded in its own filename**: one copy on the
+share is one thing to replace next January, whereas a committed one sits in
+every clone and in history permanently, still expiring. So this directory
+carries the manifest and the share carries the bytes, which is the arrangement
+`chpc-assets` exists for:
 
 ```bash
 chpc-assets list foldx                       # the shopping list
@@ -27,8 +29,14 @@ chpc-tool doctor foldx                       # run it, read the banner
 ```
 
 A lab member with share access needs none of this — `FOLDX_BINARY` already
-resolves for them. Someone without it gets an exact list and registers their
-own copy at the URL above.
+resolves for them. Someone outside the share gets an exact list: ask the lab
+for the licensed copy, or register your own at the URL above.
+
+**Renewal is one command.** When the 2027-01-31 copy lapses, download the new
+build, edit the first row of `assets.tsv` to its filename, set the sha256 to
+`-`, then `chpc-assets install foldx --from <dir> --record` and commit the
+manifest it writes back. Everyone on the share picks it up with no action,
+because `tool_exports` finds the binary by glob rather than by name.
 
 ## It lapses silently, so the check runs the binary
 

@@ -8,10 +8,19 @@
 #   chpc-assets record  <tool> --dest D <f>.. hash files already in place, append rows
 #   chpc-assets hash    <file>...             sha256 in the manifest's format
 #
-# None of this content is ever committed. Licences generally forbid
-# redistribution, and weights are far too large; what git carries is the
-# manifest -- filename, sha256, destination, mode -- so that a lab member with
-# share access runs one command, and one without gets an exact shopping list.
+# The payload stays out of git and lives on the FAC share. Internal
+# distribution is permitted for what the lab licenses and the GitLab server is
+# private, so this is a practical choice and not a legal one: the payloads are
+# large, several expire on a date encoded in their own filename, and one copy
+# on a share is one thing to renew rather than one per clone and one more in
+# history forever. What git carries is the manifest -- filename, sha256,
+# destination, mode -- so that a lab member with share access runs one command,
+# and one without gets an exact shopping list.
+#
+# Per-tool terms still differ, and they live in each entry's LICENSE field and
+# README rather than here. Some payloads restrict the OUTPUTS rather than the
+# file -- AF3's parameters are the example -- which no storage decision
+# addresses either way.
 #
 # The manifest is corehpc/tools/<tool>/assets.tsv, tab-separated:
 #
