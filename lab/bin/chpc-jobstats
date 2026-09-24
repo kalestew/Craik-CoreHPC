@@ -1,0 +1,251 @@
+#!/usr/bin/env bash
+# chpc-jobstats -- read a finished job's own accounting and say what it should
+# have asked for.
+#
+#   chpc-jobstats <jobid>            one job, or a whole array by its array id
+#   chpc-jobstats <jobid> --tasks    also list every array task
+#   chpc-jobstats --mine [--days N]  every job this user ran recently
+#
+# Why this exists. A Slurm request is a guess made before the first run and
+# almost never revisited, and nothing in the scheduler complains about a job
+# that asks for eight cores and uses one: it runs, it succeeds, it is simply
+# billed for eight. The numbers that would tell you are in sacct, but the two
+# that matter are not columns you can read off -- CPU efficiency is TotalCPU
+# over Elapsed x NCPUS, and it needs the .batch step's MaxRSS, which is a
+# different row from the one carrying the job's state.
+#
+# So the failure mode is silence, and it compounds: on the array that prompted
+# this, cpus-per-task=2 against a single-threaded binary doubled the cost of
+# every task, and a throttle set to a number nobody could source held the array
+# to 2% of its entitlement for eleven hours.
+#
+# What it does NOT do is guess at parallelism. A CPU efficiency near 1/N does
+# not mean "ask for 1 core" if the program can use N -- it means the program
+# did not use them THIS time. The output says which of the two it cannot tell
+# apart, because that distinction is the whole decision and it belongs to
+# whoever knows the tool.
+#
+# Keep this bash-3.2 clean: no associative arrays, no mapfile. See
+# ../../tools/README.md.
+set -euo pipefail
+
+die() { printf 'chpc-jobstats: %s\n' "$*" >&2; exit 1; }
+
+# --help is answered BEFORE the sacct check, because a Mac is exactly where
+# someone reads it and exactly where sacct is absent.
+for _a in "$@"; do
+  case "$_a" in
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  esac
+done
+
+command -v sacct >/dev/null 2>&1 || die "sacct not on PATH -- run this on a login node"
+
+JOBID=""; TASKS=0; MINE=0; DAYS=7
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h|--help) ;;                    # handled above, before the sacct check
+    --tasks)   TASKS=1 ;;
+    --mine)    MINE=1 ;;
+    --days)    shift; DAYS="${1:-7}" ;;
+    --days=*)  DAYS="${1#--days=}" ;;
+    -*)        die "unknown option $1" ;;
+    *)         JOBID="$1" ;;
+  esac
+  shift
+done
+
+# to_sec <[[D-]HH:]MM:SS[.frac]> -> seconds. sacct writes Elapsed and TotalCPU
+# in different shapes of the same format and TotalCPU carries hundredths, so
+# this has to take both. An unparsable value returns empty, never 0: a zero
+# would read as a real measurement of no CPU time and quietly score the job at
+# 0% efficiency, which is exactly the sort of confident wrong answer this tool
+# exists to avoid.
+to_sec() {
+  printf '%s' "${1:-}" | awk '
+    { s = $0
+      sub(/\.[0-9]+$/, "", s)
+      d = 0
+      if (s ~ /-/) { split(s, a, "-"); d = a[1]; s = a[2] }
+      n = split(s, p, ":")
+      if (n == 3)      { print d*86400 + p[1]*3600 + p[2]*60 + p[3] }
+      else if (n == 2) { print d*86400 + p[1]*60 + p[2] }
+      else if (n == 1 && s ~ /^[0-9]+$/) { print d*86400 + s }
+    }'
+}
+
+# to_mb <MaxRSS as sacct prints it> -> megabytes. The suffix depends on the
+# site's --units default, so accept all of them rather than assume one.
+to_mb() {
+  printf '%s' "${1:-}" | awk '
+    /^[0-9.]+[KMGTkmgt]?$/ {
+      v = $0 + 0
+      u = toupper(substr($0, length($0), 1))
+      if (u == "K") v /= 1024
+      else if (u == "G") v *= 1024
+      else if (u == "T") v *= 1048576
+      else if (u !~ /[MG]/) v /= 1048576      # bare bytes
+      printf "%.1f", v
+    }'
+}
+
+FMT='JobID,JobName,State,Elapsed,TotalCPU,NCPUS,ReqMem,MaxRSS,Partition,QOS'
+
+if [ "$MINE" = 1 ]; then
+  [ -z "$JOBID" ] || die "--mine takes no job id"
+  RAW="$(sacct -u "$USER" -S "now-${DAYS}days" --format="$FMT" -P --noheader 2>/dev/null)"
+  [ -n "$RAW" ] || die "no jobs for $USER in the last $DAYS day(s)"
+else
+  [ -n "$JOBID" ] || die "give a job id, or --mine. See --help."
+  RAW="$(sacct -j "$JOBID" --format="$FMT" -P --noheader 2>/dev/null)"
+  [ -n "$RAW" ] || die "sacct knows nothing about job $JOBID"
+fi
+
+# mktemp, not /tmp/.name.$$: /tmp is shared on this cluster and a predictable
+# name in it is someone else's to create first.
+STATS="$(mktemp "${TMPDIR:-/tmp}/chpc-jobstats.XXXXXX")"
+trap 'rm -f "$STATS"' EXIT
+
+# sacct emits one row per job plus .batch/.extern steps. The job row carries
+# State and NCPUS; the .batch row is the only one carrying MaxRSS. Join them
+# on the job id, which is what makes this different from reading sacct output
+# by eye and is where doing it by hand goes wrong.
+printf '%s\n' "$RAW" | awk -F'|' -v tasks="$TASKS" -v mine="$MINE" '
+function base(id,   p) { sub(/\.(batch|extern|[0-9]+)$/, "", id); return id }
+function arrayjob(id,  p) { if (id ~ /_/) { split(id, p, "_"); return p[1] } return id }
+{
+  id = $1
+  if (id ~ /\.extern$/) next
+  if (id ~ /\.batch$/) { rss[base(id)] = $8; next }
+  n = ++order[0]
+  jid[n]=id; name[n]=$2; state[n]=$3; el[n]=$4; cpu[n]=$5
+  ncpus[n]=$6; reqmem[n]=$7; part[n]=$9; qos[n]=$10
+}
+END {
+  for (i = 1; i <= order[0]; i++) {
+    a = arrayjob(jid[i])
+    grp[a] = grp[a] ? grp[a] : i
+    cnt[a]++
+    gname[a] = name[i]; gncpus[a] = ncpus[i]; greq[a] = reqmem[i]
+    gpart[a] = part[i]; gqos[a] = qos[i]
+    print jid[i] "|" name[i] "|" state[i] "|" el[i] "|" cpu[i] "|" ncpus[i] \
+          "|" reqmem[i] "|" rss[jid[i]] "|" part[i] "|" qos[i] "|" a
+  }
+}' > "$STATS" 2>/dev/null || true
+
+[ -s "$STATS" ] || die "no job rows parsed out of sacct for ${JOBID:-$USER}"
+
+# --- aggregate per array job ------------------------------------------------
+printf '%-22s %-14s %6s %8s %8s %7s %8s %9s\n' \
+  JOB NAME TASKS CORES 'CPU-EFF' 'MEM-USED' 'MEM-REQ' 'MEM-EFF'
+
+ARRAYS="$(cut -d'|' -f11 "$STATS" | sort -u)"
+for A in $ARRAYS; do
+  NTASK=0; SKIPPED=0; SUM_EFF=0; N_EFF=0; MAXRSS=0; NAME=""; NC=0; RQ=""; PART=""; QOS=""
+  WORST=1000000; BEST=0
+  while IFS='|' read -r id nm st el cpu nc rq rss pt qo aj; do
+    [ "$aj" = "$A" ] || continue
+    NTASK=$((NTASK + 1))
+    [ -n "$nm" ] && NAME="$nm"
+    # Only a task that RAN TO COMPLETION has accounting worth sizing from. A
+    # RUNNING task's TotalCPU is sampled on a poll interval and lags its
+    # Elapsed, so it scores low for no reason; a PENDING one reports NCPUS=0.
+    # Averaging those in is how a tool like this produces a confident wrong
+    # answer -- on the array that prompted it, mixing 20 running tasks into 61
+    # finished ones moved CPU efficiency from 0.50 to 0.37 and the core count
+    # to zero.
+    case "$st" in
+      COMPLETED) ;;
+      *) SKIPPED=$((SKIPPED + 1)); continue ;;
+    esac
+    [ -n "$rq" ] && RQ="$rq"; [ -n "$pt" ] && PART="$pt"; [ -n "$qo" ] && QOS="$qo"
+    # Cores from the widest finished task, not the last one read.
+    [ -n "$nc" ] && [ "$nc" -gt "$NC" ] 2>/dev/null && NC="$nc"
+    es="$(to_sec "$el")"; cs="$(to_sec "$cpu")"
+    if [ -n "$es" ] && [ -n "$cs" ] && [ "$es" -gt 0 ] 2>/dev/null && [ -n "$nc" ] && [ "$nc" -gt 0 ] 2>/dev/null; then
+      EFF="$(awk -v c="$cs" -v e="$es" -v n="$nc" 'BEGIN{ printf "%.4f", c/(e*n) }')"
+      SUM_EFF="$(awk -v a="$SUM_EFF" -v b="$EFF" 'BEGIN{ printf "%.6f", a+b }')"
+      N_EFF=$((N_EFF + 1))
+      WORST="$(awk -v w="$WORST" -v x="$EFF" 'BEGIN{ print (x<w)?x:w }')"
+      BEST="$(awk -v w="$BEST" -v x="$EFF" 'BEGIN{ print (x>w)?x:w }')"
+    fi
+    mb="$(to_mb "$rss")"
+    [ -n "$mb" ] && MAXRSS="$(awk -v a="$MAXRSS" -v b="$mb" 'BEGIN{ print (b>a)?b:a }')"
+  done < "$STATS"
+
+  if [ "$N_EFF" -eq 0 ]; then
+    printf '%-22s %-14s %6d %8s %8s %8s   %7s   %9s\n' \
+      "$A" "$NAME" "$NTASK" "?" "?" "?" "?" "?"
+    printf '\n  no COMPLETED task yet (%d of %d still running, pending or failed).\n' \
+      "$SKIPPED" "$NTASK"
+    printf '  Sizing needs a task that finished: re-run this when some have.\n\n'
+    continue
+  fi
+  AVG="$(awk -v s="$SUM_EFF" -v n="$N_EFF" 'BEGIN{ printf "%.3f", s/n }')"
+  REQMB="$(awk -v r="$RQ" -v n="$NC" '
+    BEGIN{ v = r + 0
+           u = toupper(substr(r, length(r), 1))
+           pc = (r ~ /c$/)
+           if (u == "G" || r ~ /Gc?$/) v *= 1024
+           else if (r ~ /Tc?$/) v *= 1048576
+           if (pc) v *= n
+           printf "%.0f", v }')"
+  MEMEFF=""
+  [ "$REQMB" -gt 0 ] 2>/dev/null && \
+    MEMEFF="$(awk -v u="$MAXRSS" -v r="$REQMB" 'BEGIN{ printf "%.3f", u/r }')"
+
+  printf '%-22s %-14s %6d %8s %8s %8s M %7s M %9s\n' \
+    "$A" "$NAME" "$N_EFF" "$NC" "$AVG" "$MAXRSS" "$REQMB" "${MEMEFF:-?}"
+  [ "$SKIPPED" -gt 0 ] && printf '  (%d of %d task(s) not COMPLETED and not counted)\n' \
+    "$SKIPPED" "$NTASK"
+
+  # --- the recommendation ---------------------------------------------------
+  USED_CORES="$(awk -v e="$AVG" -v n="$NC" 'BEGIN{ printf "%.2f", e*n }')"
+  SUG_CORES="$(awk -v u="$USED_CORES" 'BEGIN{ c = int(u + 0.999); print (c < 1) ? 1 : c }')"
+  # 4x the high-water mark, floored at 1 G. A ddG task measured 426 M and a
+  # relax 676 M, so 1 G is under the floor for neither and the multiple is
+  # what absorbs a bigger input rather than a bigger run.
+  SUG_MEM="$(awk -v m="$MAXRSS" 'BEGIN{ g = m*4/1024; if (g < 1) g = 1; printf "%d", (g == int(g)) ? g : int(g)+1 }')"
+
+  echo
+  if [ "$NC" -gt "$SUG_CORES" ] 2>/dev/null; then
+    printf '  cores : asked %s, used %s on average (worst task %s, best %s of 1.00)\n' \
+      "$NC" "$USED_CORES" "$WORST" "$BEST"
+    printf '          -> --cpus-per-task=%s IF the program is single-threaded.\n' "$SUG_CORES"
+    printf '          This cannot tell "single-threaded" from "had nothing to do":\n'
+    printf '          check the program. Rosetta prints `extras: []` for a serial\n'
+    printf '          build; FoldX and cartesian_ddg have no threading at all.\n'
+  else
+    printf '  cores : asked %s, used %s on average. Nothing to reclaim.\n' "$NC" "$USED_CORES"
+  fi
+  if [ -n "$MEMEFF" ]; then
+    printf '  memory: high-water %s M of %s M requested -> --mem=%sG (4x the peak)\n' \
+      "$MAXRSS" "$REQMB" "$SUG_MEM"
+    printf '          Over-asking does not waste RAM, it caps how many of these fit\n'
+    printf '          per node, which is what binds an array before cores do.\n'
+  fi
+  if [ "$NTASK" -gt 1 ]; then
+    printf '  array : %s task(s) known to sacct at %s core(s) = %s cores unthrottled.\n' \
+      "$NTASK" "$SUG_CORES" "$(( NTASK * SUG_CORES ))"
+    printf '          sacct collapses a still-pending range into ONE row, so on a\n'
+    printf '          running array this undercounts: read the real size from\n'
+    printf '          `squeue -j <id> -o "%%i"` or the wrapper header.\n' 
+    printf '          Compare against your per-user cap:\n'
+    printf '            sacctmgr -nP show qos format=Name,MaxTRESPU%%40\n'
+    printf '            scontrol show partition <p> | tr " " "\\n" | grep QoS\n'
+    printf '          A %%N throttle is a CORE budget, not a task count.\n'
+  fi
+  echo
+done
+
+if [ "$TASKS" = 1 ]; then
+  printf '%-22s %-12s %10s %10s %6s %8s\n' TASK STATE ELAPSED TOTALCPU CORES 'CPU-EFF'
+  while IFS='|' read -r id nm st el cpu nc rq rss pt qo aj; do
+    es="$(to_sec "$el")"; cs="$(to_sec "$cpu")"
+    EFF="?"
+    if [ -n "$es" ] && [ -n "$cs" ] && [ "$es" -gt 0 ] 2>/dev/null; then
+      EFF="$(awk -v c="$cs" -v e="$es" -v n="$nc" 'BEGIN{ printf "%.3f", c/(e*n) }')"
+    fi
+    printf '%-22s %-12s %10s %10s %6s %8s\n' "$id" "$st" "$el" "$cpu" "$nc" "$EFF"
+  done < "$STATS"
+fi

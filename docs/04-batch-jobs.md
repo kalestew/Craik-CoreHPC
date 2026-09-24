@@ -139,3 +139,104 @@ Node state codes: `idle`, `mix` (partly allocated), `alloc`, `drain`/`drng`
 - Write logs to a `logs/` dir on scratch, not home.
 - Prefer containers or exported conda envs so a lab-mate can rerun it.
 - Clean up `/tmp` and intermediate scratch files at the end of the job.
+
+## Right-sizing a job you have already run
+
+`chpc-jobstats <jobid>` reads a finished job's own accounting and prints what
+it should have asked for. `--tasks` lists every array task, `--mine` sweeps
+the last week.
+
+The two numbers that matter are not sacct columns. CPU efficiency is
+`TotalCPU / (Elapsed x NCPUS)`, and the memory high-water lives on the
+`.batch` step, which is a different row from the one carrying the job's state.
+Computing them by hand is where this goes wrong, so the tool joins the rows
+and refuses to count a task that is not `COMPLETED` -- a RUNNING task's
+TotalCPU is sampled on a poll interval and lags its Elapsed, and a PENDING one
+reports `NCPUS=0`.
+
+Measured examples from the IgGase campaign, all four of them single-threaded
+programs that had been given 2-4 cores:
+
+| stage             | asked | used  | mem asked | mem high-water |
+|-------------------|-------|-------|-----------|----------------|
+| Rosetta cartesian_ddg | 2 | 0.99  | 8 G       | 778 M          |
+| Rosetta FastRelax | 4     | 0.99  | 16 G      | 676 M          |
+| FoldX BuildModel  | 2     | 0.99  | 8 G       | 143 M          |
+
+Read a DISTRIBUTION, never one task. Over 60 ddG tasks the median was 422 M
+and the max 778 M -- 1.8x apart -- so sizing memory off the first task that
+finished would have set a limit 2.6x over the real peak while looking like
+4.7x.
+
+Over-asking for memory does not waste RAM so much as cap how many tasks fit
+per node, which is what binds an array before cores do. Over-asking for cores
+is billed: `AllocTRES` on this cluster shows `billing=cpu`.
+
+### Arrays, throttles, and what a `%N` means
+
+`%N` is a CORE budget, not a task count. The per-user ceiling is the partition
+QoS, not your job's QoS:
+
+```
+sacct -j <id> --format=JobID,QOS,AllocTRES%40      # what your job ran under
+scontrol show partition cpu | tr ' ' '\n' | grep QoS
+sacctmgr -nP show qos format=Name,MaxTRESPU%40,MaxJobsPU
+```
+
+On `cpu` that is the `cpu` QoS at `cpu=2048,node=8` per user, while the job's
+own `hpc_core` QoS declares no limits at all. A throttle set to a number
+nobody can source is the common case and it is expensive: one array here sat
+at `%20` -- 40 of 2048 entitled cores, 2% -- for eleven hours on a partition
+with 10,000 idle cores, because `%20` had been copied from a template.
+
+Pick `throttle x cpus-per-task` as a fixed fraction of the entitlement and
+keep it the same across stages, so a stage that needs 8 cores a task gets a
+proportionally smaller `%N` instead of eight times the footprint.
+
+### Array or fork? The bookends decide, not the overhead
+
+Per-job scheduler overhead is not the reason to choose. Measured here: a task
+reaches its first line of real work about **2 seconds** after Slurm starts it,
+which is 0.1% of a 37-minute task. Packing work into fewer, fatter jobs to
+save that is optimising the wrong thing, and it costs you per-task restart and
+per-task failure isolation.
+
+What decides it is whether the work has serial bookends.
+
+- **Array** when each unit is independent end to end. Failures are isolated,
+  each task restarts on its own, and the scheduler backfills small jobs far
+  more easily than one large allocation.
+- **Fork inside one job** (`&` plus `wait`, one process per allocated core)
+  when a shared prologue must run before every unit and a shared epilogue
+  after all of them. An array would need a barrier between those, which means
+  a second job and a second dependency edge; a forking job gets it for free
+  because the bookends are the top and bottom of the script.
+
+Both patterns are in `templates/slurm/`. Neither helps a program that is
+genuinely multi-threaded -- check first, because efficiency near `1/N` cannot
+tell "single-threaded" from "had nothing to do this run". Rosetta prints
+`extras: []` in its banner for a serial build.
+
+### `community` is empty and almost nobody uses it
+
+Measured 2026-09-24: `cpu` had 720 jobs pending against 833 running, while
+`community` had **0 pending and 7,584 of 7,680 cores idle**. Same `hpc_core`
+association, `cmnt` QoS at `cpu=768,node=8`, and a 14-day limit against
+`cpu`'s 4-day.
+
+For serial or embarrassingly parallel CPU work this is usually the better
+queue. The caveat is hardware, not policy: `community` nodes are 96-core /
+256 G (`ccpu1-*`) where `cpu` nodes are 336-512 core / 1.5 T (`gcpu2-*`), and
+neither exposes a CPU model through `Features`, so per-core speed is not
+knowable from the scheduler. Before moving a long campaign, run the same task
+on both and compare `Elapsed`:
+
+```
+sbatch --partition=community --array=0-3 my.sbatch
+sbatch --partition=cpu       --array=0-3 my.sbatch
+chpc-jobstats <id1> --tasks; chpc-jobstats <id2> --tasks
+```
+
+A partition is one line in the header, so this is cheap to test and cheap to
+revert. Do not move a campaign mid-flight on the queue depth alone -- a slower
+core makes every task longer for as long as the campaign runs.
