@@ -1,0 +1,175 @@
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
+# IntelliFold v2 -- IntelliGen's weights on AlphaFold 3's JAX/XLA engine.
+#
+# NOT BUILT. This recipe has never been run; STATUS in tool.conf is `planned`.
+# Everything below that is a MEASUREMENT is marked as such; everything else is
+# an intention, including the base image tag -- confirm it exists before you
+# start a build, because a bad tag fails in the first ten seconds and a wrong
+# CUDA version fails a week later on one node class.
+#
+# Base choice, and it is the load-bearing decision in this file:
+#
+#   * -devel, not -base or -runtime. Upstream's install builds AlphaFold 3's
+#     vendored engine FROM SOURCE (`pip install ./third_party/alphafold3 &&
+#     build_data`), which needs a C/C++ toolchain, cmake and zlib. A -runtime
+#     base gets you a tidy `pip install` failure in %post, which is the good
+#     case; the bad case is a partial build that imports.
+#   * CUDA 12.8, because sm_120 (RTX PRO 6000 Blackwell) needs a CUDA >= 12.8
+#     toolchain and seven of this cluster's gpu nodes are Blackwell. That is
+#     an INFERENCE from the CUDA release notes, not a measurement -- which is
+#     exactly why tool.conf still says GPU_MAX_CC=UNMEASURED and why README.md
+#     asks for one fold per device class before anyone believes it.
+#   * ubuntu24.04, because it ships python3.12 and AF3 needs >= 3.11. Do not
+#     "simplify" this to 22.04; that is python3.10 and a deadsnakes PPA on a
+#     login node that cannot reach much.
+#
+# Build:  chpc-tool build intellifold    (login node only; /usr/bin/apptainer
+#                                         1.5.2, --fakeroot UNAVAILABLE, and
+#                                         `module load apptainer` does not
+#                                         exist on this cluster)
+
+%labels
+    Tool         intellifold
+    Version      2
+    Upstream     https://github.com/IntelliGen-AI/IntelliFold
+    UpstreamRef  intellifold (PyPI) -- pin the exact version at build time
+    Licence      Apache-2.0 (code and model parameters)
+    Base         nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # The toolchain is NOT optional and is NOT removed afterwards.
+    #
+    # Two separate reasons, and only the first is obvious:
+    #   1. the vendored AF3 engine is compiled here, in %post;
+    #   2. XLA compiles kernels at RUN time. It does that in-process with LLVM,
+    #      so it does not shell out to `cc` the way Triton does -- but it does
+    #      reach for ptxas/nvlink out of the CUDA toolkit, and AF3's own
+    #      performance notes document XLA compilation problems severe enough to
+    #      need XLA_FLAGS workarounds. Stripping a toolchain out of a JAX image
+    #      to save 400 MB, on a cluster where a failed job costs a day of queue,
+    #      is a bad trade.
+    #
+    # This is the C-compiler trap in its second form. Boltz's is the first:
+    # python:3.12-slim with no compiler, Triton JIT-compiling cuequivariance
+    # kernels at first use, and every prediction above ~128 tokens dying with
+    # `RuntimeError: Failed to find C compiler` from triton/runtime/build.py
+    # having written nothing (job array 1928395, five tasks, under a minute
+    # each). Same shape, different JIT.
+    apt-get install -y --no-install-recommends \
+        build-essential cmake git ca-certificates zlib1g-dev \
+        python3.12 python3.12-dev python3-pip
+    rm -rf /var/lib/apt/lists/*
+    ln -sf /usr/bin/python3.12 /usr/local/bin/python
+    python -m pip install --no-cache-dir --break-system-packages --upgrade pip
+
+    mkdir -p /opt
+    git clone --depth 1 https://github.com/IntelliGen-AI/IntelliFold /opt/intellifold
+    cd /opt/intellifold
+    # Record what was actually cloned, so UPSTREAM_REF in tool.conf can stop
+    # being a guess. An unpinned image whose provenance is "main, one day in
+    # September" is not reproducible and cannot be compared against later.
+    git rev-parse HEAD > /opt/intellifold/GIT_COMMIT
+    cat /opt/intellifold/GIT_COMMIT
+
+    # Upstream's own order. build_data compiles AF3's chemical component
+    # database INTO the package -- it must happen at build time, because it
+    # downloads, and a compute node has no internet.
+    python -m pip install --no-cache-dir --break-system-packages ./third_party/alphafold3
+    build_data
+    python -m pip install --no-cache-dir --break-system-packages intellifold
+
+    # Assert PROPERTIES, not imports (tools/README.md). The cautionary case in
+    # this registry is placer, where `import torch` passed while conda had
+    # swapped torch for a CPU build and nothing noticed until a GPU job ran at
+    # CPU speed.
+    python - <<'PY'
+import sys
+assert sys.version_info[:2] >= (3, 11), sys.version
+print("python", sys.version.split()[0])
+
+import jax, jaxlib
+print("jax", jax.__version__, "jaxlib", jaxlib.__version__)
+
+# A CUDA-capable jaxlib, not the CPU wheel. jax.devices() raises or returns
+# CPU on the login node, which has no GPU, so THAT is not the question to ask
+# here; the question is whether a cuda plugin is installed at all.
+import importlib.util
+assert importlib.util.find_spec("jax_cuda12_plugin") is not None \
+    or importlib.util.find_spec("jaxlib.cuda") is not None, \
+    "CPU-only jax -- this image cannot fold anything on a GPU"
+
+import alphafold3
+print("alphafold3 engine", getattr(alphafold3, "__version__", "?"))
+import intellifold
+print("intellifold", getattr(intellifold, "__version__", "?"))
+
+# The CCD that build_data produced. A missing one is invisible until the first
+# input with a ligand in it -- the same shape as boltz's mols.tar trap, and
+# this programme's inputs all have a ligand in them.
+from pathlib import Path
+root = Path(alphafold3.__file__).parent
+hits = list(root.rglob("*.bin")) + list(root.rglob("*ccd*"))
+assert hits, "build_data left no chemical component data under %s" % root
+print("ccd artefacts:", len(hits))
+PY
+    command -v intellifold
+    command -v cc || command -v gcc
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
+    # beside its own source refuses at IMPORT time inside one -- boltz hit
+    # exactly this with numba, before any weights or GPU (doc 07). /tmp is
+    # right on this cluster: apptainer binds the host's, every compute node has
+    # local NVMe there, and it is per-node so two jobs cannot collide.
+    export JAX_COMPILATION_CACHE_DIR="${JAX_COMPILATION_CACHE_DIR:-/tmp/jax-cache}"
+    export XLA_FLAGS="${XLA_FLAGS:---xla_gpu_enable_triton_gemm=false}"
+    # ^ AF3's own performance documentation recommends exactly this flag as the
+    #   workaround for XLA compilation-time problems. It is a default here, not
+    #   a mandate: the ${VAR:-...} form lets a caller override it, and a caller
+    #   who needs to will know why.
+    #
+    # INTELLIFOLD_MODEL_DIR is deliberately NOT set here. It has to point at
+    # this cluster's FAC share, which is a site fact and not a property of
+    # IntelliFold; the registry owns site facts and chpc-tool exports it from
+    # CHPC_REFDATA. Baking a share path into an image makes the image wrong for
+    # the next lab that builds from this recipe.
+
+%test
+    set -eu
+    # Against the BUILT, read-only image -- %post runs on a writable overlay,
+    # so an import that only fails on squashfs cannot be caught there (doc 07).
+    python -c "import intellifold, alphafold3, jax; print('intellifold ok, jax', jax.__version__)"
+    intellifold predict --help > /dev/null
+    sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
+      || { echo "no C compiler on PATH in the built image"; exit 1; }
+
+%runscript
+    exec intellifold "$@"
+
+%help
+    IntelliFold v2 -- Apache-2.0 on code AND weights, commercial use permitted,
+    running on AlphaFold 3's JAX/XLA engine.
+
+      chpc-tool exec intellifold -- intellifold predict in.json \
+        --model-dir="$INTELLIFOLD_MODEL_DIR" --output-dir=out -- --norun_data_pipeline
+
+    Everything after the bare `--` is passed through to AlphaFold 3.
+    --norun_data_pipeline is not optional on a compute node: the data pipeline
+    reaches the internet and compute nodes here have none. Supply
+    unpairedMsa / pairedMsa in the JSON instead, generated on the login node.
+
+    Weights live on FAC under INTELLIFOLD_MODEL_DIR, not inside the image and
+    not on scratch. Fetch them once from the login node with
+    tools/intellifold/fetch-weights.sh.
+
+    Input is an AlphaFold-3-style JSON. Whether bondedAtomPairs is honoured
+    here is UNQUALIFIED -- upstream's README does not mention it, and test.sh's
+    second case is what settles it.

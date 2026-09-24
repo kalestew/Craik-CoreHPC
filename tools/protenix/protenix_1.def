@@ -1,0 +1,163 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# Protenix v1 -- AlphaFold3-class structure prediction with covalent bonds.
+#
+# NOT BUILT. This recipe has never been run; STATUS in tool.conf is `planned`
+# and stays there until someone builds it on the login node and test.sh passes
+# on a compute node. Everything below that is a MEASUREMENT is marked as such,
+# and everything that is not is an intention.
+#
+# Base is python:3.12-slim and pip resolves torch, the same choice boltz_2.def
+# made and for the same reason: the torch wheel PyPI serves carries its own
+# CUDA runtime and, at the time boltz was built, arch flags through sm_120 --
+# which is what makes a bare --gres=gpu:1 safe. That is a property of whatever
+# wheel pip picks ON THE DAY, not of this file, so %post ends by printing the
+# arch flags and tool.conf's GPU_MAX_CC stays UNMEASURED until a human copies
+# the number across.
+#
+# Build:  chpc-tool build protenix        (login node only; --fakeroot is
+#                                          unavailable here and `module load
+#                                          apptainer` does not exist -- it is
+#                                          /usr/bin/apptainer, 1.5.2)
+
+%labels
+    Tool         protenix
+    Version      1
+    Upstream     https://github.com/bytedance/Protenix
+    UpstreamRef  protenix (PyPI) -- pin the exact version at build time
+    Licence      Apache-2.0 (code and v1 model parameters)
+    Base         python:3.12-slim
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+
+    # build-essential is NOT padding, and it is the difference between this
+    # image and boltz_2.sif.
+    #
+    # Boltz is built from this same base with only git and ca-certificates, and
+    # its cuequivariance kernels are Triton, which JIT-COMPILES at first use and
+    # therefore needs a C compiler INSIDE the image. Every prediction above
+    # ~128 total tokens dies four seconds in with
+    #     RuntimeError: Failed to find C compiler
+    # from triton/runtime/build.py, having written nothing. Independently
+    # confirmed outside this registry: job array 1928395 in a sibling project
+    # lost all five tasks in under a minute each to exactly that error.
+    #
+    # Upstream's README does not say whether Protenix pulls a Triton-backed or
+    # otherwise JIT-compiled kernel through its torch dependency chain, and we
+    # could not confirm it either way from the documentation. So this is
+    # insurance, not a diagnosis: ~200 MB of compiler against a failure mode
+    # that (a) costs a whole GPU job, (b) arrives mid-run rather than at import,
+    # and (c) is invisible to --help, to %test and to a small self-test. Boltz's
+    # escape hatch (--no_kernels) exists because someone had already paid for
+    # the discovery; Protenix has no documented equivalent, which is the second
+    # reason to bring the compiler rather than the flag.
+    apt-get install -y --no-install-recommends \
+        build-essential git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    # Pin at build time. An unpinned install makes the image unreproducible and
+    # makes UPSTREAM_REF in tool.conf a guess -- write the resolved version
+    # into tool.conf when this succeeds.
+    pip install --no-cache-dir --upgrade protenix
+
+    # Assert PROPERTIES, not imports (tools/README.md, "Assert the property you
+    # care about"). placer's recipe is the cautionary case: `import torch`
+    # passed while conda had swapped torch for a CPU build, and nothing noticed
+    # until a GPU job ran at CPU speed.
+    python - <<'PY'
+import sys, torch
+assert sys.version_info[:2] == (3, 12), sys.version
+
+# A CUDA build, not a CPU one. torch.cuda.is_available() is the WRONG check
+# here: the login node has no GPU, so it is False for a perfectly good image.
+# torch.version.cuda is a property of the WHEEL and answers the question we
+# actually have.
+assert torch.version.cuda is not None, "CPU-only torch -- this image cannot fold anything"
+print("python", sys.version.split()[0], "torch", torch.__version__, "cuda", torch.version.cuda)
+
+import protenix
+print("protenix", getattr(protenix, "__version__", "?"))
+
+# The arch flags ARE the GPU_MAX_CC measurement, and this is the cheapest
+# moment to take it. _cuda_getArchFlags reads the compiled-in list out of the
+# C extension and needs no GPU -- unlike torch.cuda.get_arch_list(), which
+# returns [] when no device is visible, which is exactly the login node.
+flags = torch._C._cuda_getArchFlags()
+print("arch flags:", flags)
+sm = [int(t[3:]) for t in (flags or "").split() if t.startswith("sm_") and t[3:].isdigit()]
+if sm:
+    top = max(sm)
+    print("GPU_MAX_CC candidate: %d.%d" % (top // 10, top % 10))
+    print("  -> copy that into tools/protenix/tool.conf, replacing UNMEASURED.")
+    if top >= 120:
+        print("  -> sm_120 present: safe on every gpu node, bare --gres=gpu:1 is fine.")
+    else:
+        print("  -> NO sm_120: needs --gres=gpu:nvidia_l40s:1 or an H100, never a bare --gres=gpu:1.")
+else:
+    print("NO sm_ arch flags -- this torch has no CUDA kernels at all. Do not publish.")
+    raise SystemExit(1)
+PY
+    command -v protenix
+    # The compiler has to be there at RUN time, not just at build time, which
+    # is the whole point of installing it. Assert it survived.
+    command -v cc || command -v gcc
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
+    # beside its own source refuses at IMPORT time inside one -- boltz hit this
+    # with numba, four seconds in, before any weights or GPU. Point the usual
+    # caches at the host's /tmp, which apptainer binds, is local NVMe on every
+    # compute node, and is per-node so two jobs cannot fight over one file.
+    # Overridable: a site whose /tmp is tiny or noexec will want them elsewhere.
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton-cache}"
+    export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/inductor-cache}"
+    # PROTENIX_ROOT_DIR is deliberately NOT set here. It has to point at this
+    # cluster's FAC share, which is a site fact and not a property of Protenix;
+    # the registry owns site facts and chpc-tool exports it from CHPC_REFDATA.
+    # Baking a share path into the image makes the image wrong for the next lab
+    # that builds from this recipe.
+
+%test
+    set -eu
+    # Against the BUILT, read-only image. %post runs on a writable overlay, so
+    # an import that only fails on squashfs cannot be caught there -- that is
+    # how boltz's numba failure got past a green build (doc 07).
+    python -c "import protenix, torch; print('protenix ok, torch', torch.__version__)"
+    protenix --help > /dev/null
+    # Prove the compiler is reachable from the runtime environment too, not
+    # merely present on some PATH that %post happened to have.
+    sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
+      || { echo "no C compiler on PATH in the built image"; exit 1; }
+
+%runscript
+    exec protenix "$@"
+
+%help
+    Protenix v1 -- AlphaFold3-class structure prediction, pinned at v1 because
+    the v2 WEIGHTS carry no open-source licence and restrict the outputs.
+
+      chpc-tool exec protenix -- protenix pred -i in.json -o out -n <v1-model>
+
+    Weights and the chemical component dictionary live on FAC under
+    PROTENIX_ROOT_DIR, not inside the image and not on scratch. Fetch them once
+    from the LOGIN node with tools/protenix/fetch-weights.sh: compute nodes have
+    no internet, so a job that has to download is a job that hangs until it
+    times out.
+
+    Covalent bonds: a top-level covalent_bonds list of
+      {entity1, copy1, position1, atom1, entity2, copy2, position2, atom2}
+    where entityN is the 1-BASED POSITION IN THE sequences LIST, not a chain id.
+    Reorder that list and every bond moves without a word. A SMILES ligand's
+    atom is either a 0-based index into the SMILES string or an
+    element-plus-ordinal name (C3, N2) whose ordinal is 1-based.
+
+    MSAs: pairedMsaPath / unpairedMsaPath, absolute paths. Generate them on the
+    login node; a compute node cannot reach any MSA server.

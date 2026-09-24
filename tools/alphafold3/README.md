@@ -31,11 +31,40 @@ the time of writing, so the databases fit, but they are not a small decision.
 Three findings, all recorded in this lab's own planning documents, and none of
 them a matter of opinion:
 
-**AF3 forbids arbitrary covalent bonds.** It cannot build a
-tetrahedral-intermediate or acyl-enzyme state. PLACER was chosen over it for
-precisely this — `--bonds` takes an arbitrary covalent bond, `--residue_json`
-a custom tetrahedral residue. If the question involves covalent chemistry, AF3
-is the wrong tool and no amount of database is going to fix that.
+**AF3 forbids covalent bonds between or within polymer entities.** It cannot
+build a tetrahedral-intermediate or acyl-enzyme state. PLACER was chosen over it
+for precisely this — `--bonds` takes an arbitrary covalent bond, `--residue_json`
+a custom tetrahedral residue.
+
+This paragraph used to say "arbitrary covalent bonds" and stop there, which is
+how it was first written, for the cathepsin G work where every bond of interest
+was enzyme-to-substrate. Copied into a project whose bond is a peptide cysteine
+to a small molecule, it says the opposite of the truth and steers you off the
+one tool family that handles that case cleanly. Upstream `docs/input.md` is
+narrow and explicit: *"Defining covalent bonds between or within polymer
+entities is not currently supported."* Ligand-to-polymer bonds are supported,
+through `bondedAtomPairs`, addressed as `[entity_id, residue_id, atom_name]`.
+
+**A `smiles` ligand cannot carry a bond, and the fix is `userCCD`.** Upstream:
+*"This also explains why SMILES ligands don't support bonds: there is no atom
+name that could be used to define the bond. This shortcoming can be addressed by
+using the user-provided CCD format."* So there are two routes to a bonded custom
+ligand, not one:
+
+| Route | How | When |
+|---|---|---|
+| Registered CCD | `ligand.ccdCodes: ["MOV"]` | the adduct is in the wwPDB CCD |
+| `userCCD` | top-level `userCCD` (or `userCCDPath`) mmCIF string, referenced by `ligand.ccdCodes: ["LIG-1"]` | anything else, including anything you have only as SMILES |
+
+A `userCCD` block needs `_chem_comp` identity fields, `_chem_comp_atom` with
+`type_symbol`, `charge` and ideal coordinates, and `_chem_comp_bond` with
+`value_order` and the aromatic flag. Upstream names no converter, so generating
+one from SMILES is ours to write and to test.
+
+Prefer `userCCD` over the registered code when both exist. The atom names in a
+`userCCD` are **assigned by whoever writes the block**, which is the whole
+problem solved at the root: the bond endpoint stops being a name inherited from
+a registry that a second vocabulary happens to reuse.
 
 **Co-folding models barely respond to point mutations.** Mutating *every*
 binding-site residue to glycine left more than half of AF3's correct poses

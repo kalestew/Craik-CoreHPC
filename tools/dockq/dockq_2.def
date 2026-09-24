@@ -1,0 +1,110 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# DockQ v2 -- quality measure for predicted multimers, nucleic acids and
+# small-molecule complexes.
+#
+# NOT BUILT. This recipe has never been run; STATUS in tool.conf is `planned`.
+#
+# CPU-only and small. No CUDA base, no --nv, no weights: DockQ is arithmetic
+# over two structure files, and every other choice here follows from that.
+# python:3.12-slim rather than a CUDA image keeps it around 200 MB instead of
+# several GB, which matters because this is the one tool in the covalent family
+# that will be invoked thousands of times per campaign rather than dozens.
+#
+# The C-compiler trap DOES NOT APPLY, and the reason is worth stating rather
+# than leaving to inference. It bites tools whose GPU kernels are JIT-compiled
+# at first use -- boltz's cuequivariance/Triton kernels, DeepSpeed's op
+# builder. DockQ has no GPU kernels at all and no JIT path that was found, so
+# no compiler is installed. `%post` checks what it got anyway and prints it, so
+# that if a future DockQ grows a numba or Cython fast path, the build log says
+# so instead of a job finding out. If that day comes, the fix is the same as
+# boltz's: a compiler in the image, or NUMBA_CACHE_DIR out of the read-only
+# squashfs.
+#
+# Build:  chpc-tool build dockq          (login node only; /usr/bin/apptainer
+#                                         1.5.2, --fakeroot UNAVAILABLE, and
+#                                         `module load apptainer` does not
+#                                         exist on this cluster)
+
+%labels
+    Tool         dockq
+    Version      2
+    Upstream     https://github.com/bjornwallner/DockQ
+    UpstreamRef  DockQ (PyPI) -- pin the exact version at build time
+    Licence      MIT
+    Base         python:3.12-slim
+    Citation     Mirabello and Wallner, Bioinformatics 2024, 10.1093/bioinformatics/btae586
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir --upgrade DockQ
+
+    python - <<'PY'
+import sys
+assert sys.version_info[:2] >= (3, 10), sys.version
+print("python", sys.version.split()[0])
+
+import DockQ
+print("DockQ", getattr(DockQ, "__version__", "?"))
+
+# Report the JIT situation rather than assume it. Today DockQ is numpy and
+# Biopython; if a version grows a numba fast path, a .sif is a read-only
+# squashfs and numba refuses at IMPORT time inside one unless NUMBA_CACHE_DIR
+# points somewhere writable -- which is how boltz's image failed four seconds
+# in, before any input. Printing it costs nothing and turns a future surprise
+# into a line in a build log.
+import importlib.util
+for mod in ("numba", "cython", "triton"):
+    print("%-8s %s" % (mod, "present -- see the comment in %post" if importlib.util.find_spec(mod) else "absent"))
+for mod in ("numpy", "Bio"):
+    spec = importlib.util.find_spec(mod)
+    print("%-8s %s" % (mod, "present" if spec else "ABSENT"))
+PY
+    command -v DockQ
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # Set defensively and cheaply: if a future DockQ acquires a numba path,
+    # this is the difference between it working inside a read-only squashfs
+    # and refusing at import (doc 07). /tmp is bound by apptainer, is local
+    # NVMe on every compute node, and is per-node so concurrent array tasks
+    # cannot collide over one cache file.
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
+
+%test
+    set -eu
+    # Against the BUILT, read-only image -- %post runs on a writable overlay,
+    # so an import that only fails on squashfs cannot be caught there (doc 07).
+    python -c "import DockQ; print('DockQ imports')"
+    DockQ --help > /dev/null
+
+%runscript
+    exec DockQ "$@"
+
+%help
+    DockQ v2 -- Mirabello and Wallner, Bioinformatics 2024.
+
+      chpc-tool exec dockq -- DockQ model.pdb native.pdb --mapping AB:AB --json out.json
+
+    PASS --mapping. Model chains and native chains are different alphabets,
+    and DockQ will search chain permutations and report the best one it finds.
+    A wrong mapping does not error; it produces a plausible number. In bulk
+    scoring that is indistinguishable from a result.
+
+    --small_molecule scores small-molecule poses. Nucleic-acid interfaces are
+    scored alongside protein ones.
+
+    CAPRI thresholds: <0.23 Incorrect, 0.23-0.49 Acceptable, 0.49-0.80 Medium,
+    >=0.80 High quality.
+
+    CPU only. Send it to the `cpu` partition, or `community_short`, which is
+    capped at 1 h and REQUIRES --qos=cmnt_short. It has no business queueing
+    behind the gpu partition's 8-GPU, 21-job per-user cap.

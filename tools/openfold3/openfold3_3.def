@@ -1,0 +1,179 @@
+Bootstrap: docker
+From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+
+# OpenFold3 (research preview) -- the OpenFold consortium's open AlphaFold 3.
+#
+# NOT BUILT. This recipe has never been run; STATUS in tool.conf is `planned`.
+# Everything below that is a MEASUREMENT is marked as such; everything else,
+# including the base image tag, is an intention. Confirm the tag exists before
+# starting a build.
+#
+# Two decisions in this file are load-bearing.
+#
+# 1. -devel, not -runtime, and a full toolchain that is NEVER purged.
+#
+#    Upstream advertises "kernel acceleration through cuEquivariance and
+#    DeepSpeed4Science kernels". Both of those compile at FIRST USE, on the
+#    compute node, in the middle of a job:
+#
+#      * cuEquivariance's triangle kernels are Triton. This registry has
+#        already paid for that lesson: boltz_2.sif is built from
+#        python:3.12-slim with no compiler, and every prediction above ~128
+#        total tokens dies four seconds in with
+#            RuntimeError: Failed to find C compiler
+#        from triton/runtime/build.py, having written nothing. The self-test
+#        passed the whole time, because a 31-mer never reaches the kernel path.
+#        Independently confirmed outside this registry: job array 1928395 in a
+#        sibling project lost all five tasks in under a minute each to exactly
+#        that error.
+#      * DeepSpeed4Science's evoformer attention goes through DeepSpeed's JIT
+#        op builder, which needs nvcc AND a C++ compiler AND ninja at run time,
+#        and fails the same way -- late, loudly, and with nothing written.
+#
+#    Boltz has a documented escape hatch (`--no_kernels`, costs speed only).
+#    OpenFold3 has no documented equivalent, which removes the argument for
+#    shipping without a compiler and recording the flag instead. So: the
+#    compiler is in the image, %post and %test both assert it, and
+#    tool_doctor probes the built image for cc and nvcc rather than trusting
+#    this comment.
+#
+# 2. CUDA 12.8, because sm_120 (the seven RTX PRO 6000 Blackwell nodes) needs
+#    a 12.8-or-newer toolchain. That is an INFERENCE from release notes, not a
+#    measurement, which is why tool.conf still says GPU_MAX_CC=UNMEASURED. And
+#    note that torch's arch flags are torch's: if the cuequivariance wheels are
+#    narrower, the real ceiling is lower and only a fold on a Blackwell node
+#    will say so.
+#
+# Build:  chpc-tool build openfold3      (login node only; /usr/bin/apptainer
+#                                         1.5.2, --fakeroot UNAVAILABLE, and
+#                                         `module load apptainer` does not
+#                                         exist on this cluster)
+
+%labels
+    Tool         openfold3
+    Version      3
+    Upstream     https://github.com/aqlaboratory/openfold-3
+    UpstreamRef  openfold3 (PyPI) -- pin the exact version at build time
+    Licence      Apache-2.0 (code and weights)
+    Base         nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
+    Maintainer   Craik Lab, UCSF
+    Status       research preview; covalent support UNQUALIFIED
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential ninja-build cmake git ca-certificates \
+        python3.12 python3.12-dev python3-pip
+    rm -rf /var/lib/apt/lists/*
+    ln -sf /usr/bin/python3.12 /usr/local/bin/python
+    python -m pip install --no-cache-dir --break-system-packages --upgrade pip
+
+    python -m pip install --no-cache-dir --break-system-packages openfold3
+    # setup_openfold is upstream's post-install step. It is run here, at build
+    # time, on the login node -- if it reaches the network for anything, a
+    # compute node cannot, and discovering that in a job is a wasted
+    # allocation. If it wants a destination argument, give it one that is NOT
+    # a share path: share paths are a site fact and belong in tool.conf.
+    setup_openfold || {
+        echo "setup_openfold failed. It is upstream's post-install step; if it"
+        echo "needs arguments or network access this is where to find out,"
+        echo "and NOT in a job on a node with no internet."
+        exit 1; }
+
+    # Assert PROPERTIES, not imports (tools/README.md). placer is the
+    # cautionary case here: `import torch` passed while conda had swapped torch
+    # for a CPU build, and nothing noticed until a GPU job ran at CPU speed.
+    python - <<'PY'
+import sys, torch
+assert sys.version_info[:2] >= (3, 11), sys.version
+assert torch.version.cuda is not None, "CPU-only torch -- this image cannot fold anything"
+print("python", sys.version.split()[0], "torch", torch.__version__, "cuda", torch.version.cuda)
+
+import openfold3
+print("openfold3", getattr(openfold3, "__version__", "?"))
+
+# The arch flags ARE the GPU_MAX_CC candidate, and this is the cheapest moment
+# to take the measurement. _cuda_getArchFlags reads the compiled-in list out of
+# the C extension and needs no GPU, unlike torch.cuda.get_arch_list(), which
+# returns [] when no device is visible -- exactly the login node.
+flags = torch._C._cuda_getArchFlags()
+print("torch arch flags:", flags)
+sm = [int(t[3:]) for t in (flags or "").split() if t.startswith("sm_") and t[3:].isdigit()]
+if not sm:
+    print("NO sm_ arch flags -- this torch has no CUDA kernels at all. Do not publish.")
+    raise SystemExit(1)
+top = max(sm)
+print("GPU_MAX_CC candidate (TORCH ONLY): %d.%d" % (top // 10, top % 10))
+print("  -> copy into tools/openfold3/tool.conf, replacing UNMEASURED, and then")
+print("     go and actually fold something on a Blackwell node, because the")
+print("     cuequivariance wheels may be narrower than torch is.")
+
+# The kernel stack, imported explicitly so that a broken pairing fails the
+# BUILD rather than a two-day GPU job. boltz's recipe does the same and it is
+# the reason its cu12-extra-on-cu13-torch combination is trusted.
+try:
+    import cuequivariance_torch
+    print("cuequivariance_torch", getattr(cuequivariance_torch, "__version__", "?"))
+except ImportError as e:
+    print("NOTE: cuequivariance_torch not installed (%s)." % e)
+    print("  Upstream advertises it as an acceleration path. If OpenFold3")
+    print("  enables it by DEFAULT the way boltz does, a missing wheel is a")
+    print("  mid-batch ModuleNotFoundError with no fallback. Check before you")
+    print("  publish, and record the answer in README.md.")
+PY
+    command -v run_openfold
+    command -v cc || command -v gcc
+    command -v nvcc
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
+    # beside its own source refuses at IMPORT time inside one -- boltz hit
+    # exactly this with numba, before any weights or GPU (doc 07). /tmp is
+    # right here: apptainer binds the host's, every compute node has local
+    # NVMe there, and it is per-node so two jobs cannot fight over one file.
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton-cache}"
+    export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-/tmp/torch-extensions}"
+    # ^ TORCH_EXTENSIONS_DIR is where DeepSpeed's JIT op builder writes what it
+    #   compiles. Its default is under $HOME, which on this cluster is small,
+    #   is shared, and is the last place two concurrent array tasks should both
+    #   be writing a build tree.
+    #
+    # OPENFOLD3_WEIGHTS and HF_HOME are deliberately NOT set here. They point
+    # at this cluster's FAC share, which is a site fact and not a property of
+    # OpenFold3; the registry owns site facts and chpc-tool exports them from
+    # CHPC_REFDATA. Baking a share path into an image makes the image wrong for
+    # the next lab that builds from this recipe.
+
+%test
+    set -eu
+    # Against the BUILT, read-only image. %post runs on a writable overlay, so
+    # an import that only fails on squashfs cannot be caught there (doc 07).
+    python -c "import openfold3, torch; print('openfold3 ok, torch', torch.__version__)"
+    run_openfold --help > /dev/null
+    sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
+      || { echo "no C compiler on PATH in the built image"; exit 1; }
+    command -v nvcc > /dev/null \
+      || { echo "no nvcc on PATH in the built image -- DeepSpeed's op builder needs it"; exit 1; }
+
+%runscript
+    exec run_openfold "$@"
+
+%help
+    OpenFold3 research preview -- Apache-2.0 on code and weights.
+
+      chpc-tool exec openfold3 -- run_openfold predict --query_json=in.json
+
+    COVALENT SUPPORT IS UNQUALIFIED. Upstream's documentation does not mention
+    bondedAtomPairs, covalent bonds, CCD codes, SMILES or ligand atom naming.
+    Do not write an input for this tool assuming AlphaFold 3's bond syntax
+    until `chpc-tool test openfold3` has folded a bonded complex and the
+    geometry has been checked. That test is the qualification; a container
+    that starts is not.
+
+    Weights live on FAC under OPENFOLD3_WEIGHTS, not inside the image and not
+    on scratch. Fetch once from the login node: compute nodes have no internet.
