@@ -16,4 +16,13 @@ source "$_CONDA_ROOT/etc/profile.d/conda.sh"
 conda activate myenv
 
 nvidia-smi --query-gpu=name,memory.total --format=csv
+
+# Utilisation trace. Compute nodes have no internet, so there is no Weights &
+# Biases or any other live dashboard -- poll locally and read it afterwards.
+# Tag with the job id, and background it so it does not block the payload.
+nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used,memory.total \
+  --format=csv -l 10 > "logs/gpustat_${SLURM_JOB_ID}.csv" &
+_gpustat=$!
+trap 'kill $_gpustat 2>/dev/null' EXIT
+
 srun -u python train.py

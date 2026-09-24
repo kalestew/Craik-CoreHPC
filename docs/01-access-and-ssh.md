@@ -85,10 +85,13 @@ If `ssh-copy-id` is unavailable:
 ```bash
 scripts/chpc-prime.sh          # = ssh chpc hostname; answers Duo, opens the master sockets
 ssh chpc                       # shell on login node
-scp file.txt chpc:/mnt/scratch/user/$USER/
-rsync -avP data/ chpc:/mnt/scratch/group/CX500146_DS1/data/
 ssh chpc 'squeue -u $USER'
 ```
+
+Data does **not** travel over this alias. The AUP's approved transfer paths are
+Globus, the FAC share and Open OnDemand (doc 02); `scp`/`rsync` through the
+bastion is not among them and the CoreHPC training stated it is not permitted.
+The master socket is for interactive shells and remote commands.
 
 ### GlobalProtect will not connect while on `UCSFwpa`
 

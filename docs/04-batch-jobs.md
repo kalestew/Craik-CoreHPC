@@ -86,8 +86,9 @@ srun ./mpi_program                    # use srun, not mpirun
 ```
 
 If the program was built with the NVIDIA HPC SDK MPI:
-`module load nvidia-hpc; module load nvhpc-hpcx` (the primer shows
-`module load nvidia/nvhpc/nvhpc-hpcx/25.5` as an alternative full path).
+`module load nvidia-hpc; module load nvhpc-hpcx` (defaults to 26.5). The
+primer's `nvhpc-hpcx/25.5` does **not** exist here -- the collection carries
+25.1 and 26.5 only, so copying that line fails. Check with `module spider`.
 Hybrid MPI+OpenMP: `--ntasks-per-node=8 --cpus-per-task=4` and
 `export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK`. Community nodes have no
 InfiniBand: do not run MPI there.
@@ -110,6 +111,7 @@ trap 'save_checkpoint; exit 0' SIGTERM
 | Node states | `sinfo` ; `sinfo -Nel` ; `sinfo -o "%P %n %e %m %a %c %C %G"` |
 | Live efficiency | `sstat -j <id> --format=JobID,MaxRSS,AveCPU` |
 | After completion | `sacct -j <id> --format=JobID,JobName,Partition,State,Elapsed,TotalCPU,MaxRSS,ReqMem,AllocTRES%40` |
+| Efficiency summary | `seff <id>` — one-screen CPU/memory utilisation vs request |
 | Cancel | `scancel <id>` ; `scancel -u $USER` ; `scancel --name=myjob` |
 | Hold / release | `scontrol hold <id>` ; `scontrol release <id>` |
 | Scheduler config | `scontrol show partition` ; `sacctmgr show qos` ; `sacctmgr show assoc user=$USER` |
@@ -135,6 +137,12 @@ Node state codes: `idle`, `mix` (partly allocated), `alloc`, `drain`/`drng`
 - Request what you need with a buffer; over-asking slows your start and
   hurts fair-share. Check `sacct ... MaxRSS,TotalCPU` afterwards and tune.
 - Use arrays, not loops of `sbatch`.
+- Fair-share charges you for what you consume, so *fewer, larger* jobs leave
+  you with more priority afterwards than many small ones doing the same work.
+  An array is one submission but N tasks, and the tasks are what fair-share
+  counts -- so throttle with `--array=1-N%k` and batch several units of work
+  per task rather than emitting one task per unit. The CoreHPC training made
+  this point explicitly on 2026-09-11.
 - Read inputs from scratch; stage big inputs from FAC once.
 - Write logs to a `logs/` dir on scratch, not home.
 - Prefer containers or exported conda envs so a lab-mate can rerun it.

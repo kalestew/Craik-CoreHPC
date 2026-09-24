@@ -137,7 +137,7 @@ bump the pin.
 | Doc | What it covers |
 |-----|----------------|
 | `docs/01-access-and-ssh.md` | Accounts, VPN, Duo, bastion + ProxyJump, passwordless SSH, ControlMaster, Open OnDemand, VS Code |
-| `docs/02-storage-and-data.md` | Home, scratch (user/group), FAC, local NVMe, quotas, purge policy, transfers (rsync, Globus), internet access |
+| `docs/02-storage-and-data.md` | Home, scratch (user/group), FAC, local NVMe, quotas, purge policy, approved transfer paths (Globus, FAC share, OnDemand), internet access |
 | `docs/03-interactive-jobs.md` | `salloc` / `srun --pty`, GPU shells, tmux/screen, attaching to a running job |
 | `docs/04-batch-jobs.md` | `sbatch` anatomy, resource requests, arrays, dependencies, GPUs, MPI, monitoring, cancelling, `sacct` |
 | `docs/05-partitions-and-hardware.md` | Every partition, node type, GPU, time limit and per-user limit |
@@ -146,8 +146,9 @@ bump the pin.
 | `docs/08-multi-gpu-and-pod.md` | Two-GPU jobs on the `gpu` partition, GPU arrays; POD kept as reference only (not available to us) |
 | `docs/09-sge-to-slurm.md` | Wynton (SGE) to SLURM translation table |
 | `docs/10-policies-support-troubleshooting.md` | Acceptable-use essentials, downtimes, support channels, common errors |
-| `docs/cluster-facts.md` | Live facts captured from the cluster by `scripts/chpc-discover.sh` (last: 2026-09-17) |
+| `docs/cluster-facts.md` | Live facts captured from the cluster by `scripts/chpc-discover.sh` (last: 2026-09-18) |
 | `docs/wiki-sources.md` | Index of the wiki pages this guide is built from |
+| `docs/training-2026-09.md` | The Sept 2026 CoreHPC training: what it confirmed, where it is wrong for UCSF, what it changed here |
 
 ## Repo layout
 

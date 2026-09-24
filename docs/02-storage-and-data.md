@@ -7,7 +7,7 @@
 | `/home/remote/<user>` (`$HOME`) | VAST home | 20 GiB hard, 19 GiB soft | fast | kept | dotfiles, scripts, small configs. NOT conda envs, caches, data |
 | `/mnt/scratch/user/<user>` | VAST user scratch | 50 TiB hard per user | fastest shared (InfiniBand) | volatile: purge >30 days, wiped at quarterly maintenance | active job I/O, conda envs, container cache, checkpoints |
 | `/mnt/scratch/group/CX500146_DS1` | VAST group scratch | shared | fastest shared | volatile, same purge | shared inputs/outputs of running projects, staged lab containers |
-| `/mnt/fac/CX500146_DS1` | our FAC share (NFS 4.2, autofs) | 5.0 TB (55 GB used 2026-09-19); ~$52/TB/yr | slow (capacity tier) | persistent, lab-owned, snapshots under `.qsnaps/` | long-term data, final results, canonical copies of containers/envs/scripts |
+| `/mnt/fac/CX500146_DS1` | our FAC share (NFS 4.2, autofs) | 5.0 TB (55 GB used 2026-09-19); ~$52/TB/yr | capacity tier: slower than scratch in bandwidth, **faster** in small-file fsync rate (see note below) | persistent, lab-owned, snapshots under `.qsnaps/` | long-term data, final results, canonical copies of containers/envs/scripts |
 | `/tmp` on a compute node | local NVMe | cpu ~2 TB, gpu ~6 TB, large_gpu 6–12 TB, pod ~12 TB, community ~1 TB SAS SSD | fastest | gone when the job ends | scratch inside a job, tight-loop I/O |
 
 Notes:
@@ -17,7 +17,10 @@ Notes:
 - Group scratch `/mnt/scratch/group/CX500146_DS1` exists and is writable by
   the `sec_fac_cx500146_ds1` group (all lab members with the share). Our
   FAC share is writable the same way (POSIX ACLs; new files are group rw).
-- `/mnt/fac` lists every share on campus, but only ours mounts on access.
+- `/mnt/fac` lists every share on campus and autofs mounts them on access —
+  387 `CX*` shares were mounted at capture, not just ours. Only ours is
+  *readable*; the rest deny at the ACL. Do not read a directory listing there
+  as a permission check.
 - FAC keeps snapshots: `/mnt/fac/CX500146_DS1/.qsnaps/` (managed by the FAC
   team; look there before asking for a restore).
 - **FAC ACL quirk (verified 2026-09-17):** the share root's inheritable NFSv4
@@ -55,6 +58,13 @@ Notes:
   and the 5 TB figure in the table above for what we have.
 - Do not touch file timestamps to dodge the purge; the AUP says accounts can
   be suspended for it.
+- **Which timestamp starts the 30 days is not documented and was not settled.**
+  Asked directly at the 2026-09-10 training, the presenter had not seen it
+  written down and Gladstone IT confirmed only the 30-day figure. That the AUP
+  bothers to forbid touching timestamps implies the trigger is `atime`/`mtime`
+  rather than creation, but that is an inference and not a statement from the
+  storage team. Plan for the pessimistic reading -- 30 days from arrival -- and
+  copy results to FAC in the job that produced them.
 - CoreHPC does not back anything up. Backup is the lab's problem (FAC).
 
 ## What goes where (lab convention)
@@ -100,9 +110,15 @@ sbatch -p cpu -c 2 --mem 4G -t 12:00:00 --wrap 'rsync -a /mnt/fac/CX500146_DS1/b
 
 ### Laptop to cluster
 
-- `scp` / `rsync` through the `chpc` SSH alias (see doc 01). Fine for GBs.
-  `scripts/chpc-stage.sh <local-path> <remote-path>` wraps rsync with the
-  right flags.
+**The AUP names three approved paths: Globus, the FAC share, and Open
+OnDemand.** `scp`/`rsync` over the SSH alias is not one of them, and the
+CoreHPC training on 2026-09-10/11 said so explicitly -- transferring files
+through the bastion "is not allowed ... mainly because of security reasons",
+and an attendee's `scp` to the UCSF bastion failed on the call. Treat it as
+unsanctioned wherever it still happens to succeed, and do not build a workflow
+on it. `scripts/chpc-stage.sh` predates that finding; see the warning in its
+header.
+
 - Globus web app for files under ~1 GB: log in at <https://www.globus.org/>
   with the "University of California San Francisco" org login, File Manager,
   search collections for `corehpc`: "UCSF CoreHPC - User Home" and
@@ -125,6 +141,29 @@ mounts the share, copying it there directly skips Globus altogether.
 
 Approved data-transfer paths per the AUP are Globus, the FAC share, and Open
 OnDemand. Do not set up other tunnels for data egress.
+
+### "Slow" is about bandwidth, not about every access pattern
+
+The tier table and the CoreHPC training both rank FAC below scratch, and for
+streaming large files that is right. For the opposite pattern -- many small
+files, each `fsync`'d and renamed -- it is measured backwards. Three runs on a
+compute node, 64 KiB writes with `fsync` + rename:
+
+| tier | files/s |
+|---|---|
+| node-local `/tmp` | 2985–3030 |
+| `/mnt/fac` | 1349–1352 |
+| `/mnt/scratch/group` | 235–241 |
+
+They are different appliances: scratch is NFSv3 on VAST, FAC is NFSv4.2 on
+`fac-ha`. So "stage off FAC before computing" is sound for a job that streams
+a large input, and wrong for one that writes a content-addressed store.
+
+Two caveats before anyone generalises this. It measures a *single writer's*
+throughput, while the trainers' concern is the aggregate metadata load many
+small files put on shared storage -- which this cannot see. And it used *group*
+scratch, where the guidance names *user* scratch. Confirm with UCSF CoreHPC
+support before putting a sustained small-file workload on FAC.
 
 ## Internet access
 
@@ -174,8 +213,14 @@ on its own. `files.ipd.uw.edu` is worth singling out because RFdiffusion and
 PLACER weights come from there and therefore need no Globus;
 `dl.fbaipublicfiles.com`, the ESM/fairseq host, is genuinely refused and does.
 
-Run a long fetch under `tmux` on the login node. Downloads are sanctioned there
-(32 cores, 125 GB, no ulimits) but a dropped SSH session still kills one.
+Run a long fetch under `tmux` on the login node. Downloads are sanctioned
+there, but the machine is far smaller than `nproc` and `free` suggest: your
+processes run in a user slice capped at **4 CPUs, 8 GiB soft / 16 GiB hard**
+(measured 2026-09-18, doc 07). `ulimit` shows none of this because the limits
+are cgroup limits. A dropped SSH session also still kills a fetch, so use
+`tmux`. Fetching at any size is fine; *computing* there is not, and the
+CoreHPC training was emphatic that heavy work on the login node degrades
+logins for everyone.
 
 The proxy is configured through `http_proxy`/`https_proxy` variables set
 in the login profile (`chpc-proxy-vm1:3128`). They exist in interactive

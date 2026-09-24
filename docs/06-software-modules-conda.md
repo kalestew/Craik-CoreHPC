@@ -19,7 +19,7 @@ Loaded by default at login (from the primer's listing): `gnu14/14.2.0`,
 
 Top-level collections in `/etc/modulefiles`: `CBI`, `RAD`, `Sali`,
 `nvidia-hpc`. These are nested: load one, then `module avail` again.
-Full lists are in `docs/cluster-facts.md` (captured 2026-09-17). Highlights:
+Full lists are in `docs/cluster-facts.md` (captured 2026-09-18). Highlights:
 
 - **CBI** (`/mnt/software/cbi`, the group that ran Wynton's CBI stack):
   `miniforge3` (25.11 to 26.3.2-3, default 26.3.2-3), `python/3.14.6`,

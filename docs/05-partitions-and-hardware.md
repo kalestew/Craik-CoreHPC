@@ -15,15 +15,15 @@ named lab accounts; both reject our jobs.
 
 | Partition | Max walltime | Nodes | CPUs/node | RAM/node | CPU | GPUs/node | Notes |
 |-----------|--------------|-------|-----------|----------|-----|-----------|-------|
-| `cpu` (default) | 96 h | gcpu2-[03-16] (14) | 336 | 1.5 TB | 2× AMD EPYC 9634 | none | all CPU work incl. MPI; InfiniBand; deep queue (≈1000 pending vs 250 running at capture) |
+| `cpu` (default) | 96 h | gcpu2-[03-16] (14) | 336 | 1.5 TB | 2× AMD EPYC 9634 | none | all CPU work incl. MPI; InfiniBand; deep queue (977 pending vs 100 running at capture) |
 | | | gcpu2-[17-48,55] (33) | 512 | 1.5 TB | 2× AMD EPYC 9745 | none | |
-| `gpu` | 96 h | ggpu1-[06-12] (7) | 64 | ~380 GB | AMD EPYC 9354P | 2× L40S (48 GB) | single/dual-GPU jobs |
-| | | ggpu1-[13-19] (7) | 128 | ~380 GB | AMD EPYC 9335 | 2× RTX PRO 6000 (96 GB) | |
-| | | ggpu4-[01-06] (6) | 64 | ~380 GB | AMD EPYC 9354P | 1× H100 NVL (94 GB) | |
-| `pod` | 96 h | gcpu3-[07-16] (8) | 208 | 2.0 TB | 2× Xeon Platinum 8470 | 8× H200 SXM (141 GB) | NVLink + NDR InfiniBand; ≥8-GPU jobs; by request; `--account=ucsf_pod --qos=pod` |
+| `gpu` | 96 h | ggpu1-[06-12] (7) | 64 | 386 GB | AMD EPYC 9354P | 2× L40S (48 GB) | single/dual-GPU jobs |
+| | | ggpu1-[13-19] (7) | 128 | 380 GB | AMD EPYC 9335 | 2× RTX PRO 6000 (96 GB) | |
+| | | ggpu4-[01-06] (6) | 64 | 386 GB | AMD EPYC 9354P | 1× H100 NVL (94 GB) | |
+| `pod` | 96 h | ggpu3-[09-16] (8) | 208 | 2.0 TB | 2× Xeon Platinum 8470 | 8× H200 SXM (141 GB) | NVLink + NDR InfiniBand; ≥8-GPU jobs; by request; `--account=ucsf_pod --qos=pod` |
 | `large_gpu` | 24 h | ggpu3-[17-29] (13) | 208+ | 2.0 TB | 2× Xeon Platinum 8580 | 8× H200 | not ours; NVLink within chassis only |
 | | | ggpu5-[01-03] | 256 | 1.5 TB | 2× AMD EPYC 9555 | 4× H200 NVL | |
-| `community` | 336 h (14 d) | ccpu1-[01-80] (80) | 96 | 256 GB | 2× Xeon Gold 6336Y | none | ours; no InfiniBand; HTC / long serial jobs; almost always idle (3 running at capture) |
+| `community` | 336 h (14 d) | ccpu1-[01-80] (80) | 96 | 256 GB | 2× Xeon Gold 6336Y | none | ours; no InfiniBand; HTC / long serial jobs; almost always idle (2 running at capture) |
 | `community_short` | 1 h | same nodes | | | | | ours; quick tests; 1 node per user |
 
 GRES names as SLURM reports them: `nvidia_l40s`, `nvidia_rtx_pro_6000`,
@@ -214,7 +214,8 @@ other partitions (they are also allowed for us).
 
 Scheduler defaults that matter: `DefaultTime=01:00:00` on every partition,
 `DefMemPerCPU` 4096 MB on `cpu`/`community` and 6144 MB on `gpu`,
-`DefCpuPerGPU=32` on `gpu`. Max array size 5000. Backfill scheduler with
+`DefCpuPerGPU=32` on `gpu` and `pod` but 25 on `large_gpu`. Max array size
+5000 (prose only -- `chpc-discover.sh` does not capture `MaxArraySize`). Backfill scheduler with
 multifactor priority.
 
 There is no compute recharge today and no hard allocation; priority is

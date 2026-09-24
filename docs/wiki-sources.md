@@ -24,6 +24,19 @@ signed-in browser. Wiki access requires a UCSF login. Page titles prefixed
 | 3. Worker Control | https://wiki.library.ucsf.edu/spaces/CHPC/pages/788597169/ | not used: AWS pipeline notes |
 | 3a Lossless paired FASTQ segmenting | https://wiki.library.ucsf.edu/spaces/CHPC/pages/788594847/ | not used: AWS pipeline notes |
 
+Training recordings (reviewed 2026-09-24, see `docs/training-2026-09.md`):
+
+| Source | Link | Used by |
+|--------|------|---------|
+| Introduction to CoreHPC (workshop wiki) | https://github.com/gladstone-institutes/Bioinformatics-Workshops/wiki/Introduction-to-CoreHPC | doc training-2026-09 |
+| Intro to CoreHPC, Part 1 slides | https://gladstone-institutes.github.io/Bioinformatics-Workshops/Intro_to_CoreHPC/Intro_to_CoreHPC_Part_1.html | docs 01, 02, 06, 07 |
+| Intro to CoreHPC, Part 2 slides | https://gladstone-institutes.github.io/Bioinformatics-Workshops/Intro_to_CoreHPC/Intro_to_CoreHPC_Part_2.html | docs 03, 04, 07 |
+| Containers on CoreHPC guide | https://gladstone-institutes.github.io/Bioinformatics-Workshops/Intro_to_CoreHPC/Containers_on_CoreHPC.html | doc 07 |
+
+Recordings themselves are Gladstone-hosted and Gladstone-led; UCSF specifics in
+them are deferred to the UCSF wiki above. See `docs/training-2026-09.md` for
+which of their claims survive contact with `docs/cluster-facts.md`.
+
 Other official links:
 
 - Support ticket (accounts, help): https://tiny.ucsf.edu/Gethpc
