@@ -17,6 +17,9 @@
 # Check the program is actually single-threaded before forking N of it. A CPU
 # efficiency near 1/N in `chpc-jobstats` cannot tell "single-threaded" from
 # "had nothing to do this run".
+# Create logs/ BEFORE submitting: Slurm opens --output before this script runs.
+#   mkdir -p logs
+#   sbatch fork.sbatch
 #SBATCH --job-name=fork_job
 #SBATCH --partition=cpu
 #SBATCH --nodes=1
@@ -26,7 +29,6 @@
 #SBATCH --time=04:00:00
 #SBATCH --output=logs/%x_%j.out
 set -euo pipefail
-mkdir -p logs
 
 WORKDIR="${WORKDIR:-$PWD/work}"
 N="${SLURM_CPUS_PER_TASK:-1}"

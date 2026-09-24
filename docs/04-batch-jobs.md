@@ -147,14 +147,17 @@ it should have asked for. `--tasks` lists every array task, `--mine` sweeps
 the last week.
 
 The two numbers that matter are not sacct columns. CPU efficiency is
-`TotalCPU / (Elapsed x NCPUS)`, and the memory high-water lives on the
-`.batch` step, which is a different row from the one carrying the job's state.
-Computing them by hand is where this goes wrong, so the tool joins the rows
-and refuses to count a task that is not `COMPLETED` -- a RUNNING task's
+`TotalCPU / (Elapsed x NCPUS)`, and memory is recorded on steps, separate from
+the allocation row carrying the job's state. The tool joins step memory to
+allocations without counting step CPU a second time and refuses to count a
+task that is not `COMPLETED` -- a RUNNING task's
 TotalCPU is sampled on a poll interval and lags its Elapsed, and a PENDING one
-reports `NCPUS=0`.
+reports `NCPUS=0`. `sacct --array` expands pending ranges so task counts stay
+accurate. Missing RSS, failed tasks, multiple nodes, numbered steps, or mixed
+core requests suppress sizing recommendations: MaxRSS is a per-task peak,
+not total memory across MPI ranks. See the [Slurm accounting definitions](https://slurm.schedmd.com/sacct.html).
 
-Measured examples from the IgGase campaign, all four of them single-threaded
+Measured examples from the IgGase campaign, all three of them single-threaded
 programs that had been given 2-4 cores:
 
 | stage             | asked | used  | mem asked | mem high-water |
@@ -174,8 +177,9 @@ is billed: `AllocTRES` on this cluster shows `billing=cpu`.
 
 ### Arrays, throttles, and what a `%N` means
 
-`%N` is a CORE budget, not a task count. The per-user ceiling is the partition
-QoS, not your job's QoS:
+`%N` limits simultaneous array tasks. For these one-task jobs,
+`N x cpus-per-task` gives the maximum core footprint of one array. Limits may
+come from both the partition QoS and the job QoS; inspect both:
 
 ```
 sacct -j <id> --format=JobID,QOS,AllocTRES%40      # what your job ran under
@@ -186,12 +190,15 @@ sacctmgr -nP show qos format=Name,MaxTRESPU%40,MaxJobsPU
 On `cpu` that is the `cpu` QoS at `cpu=2048,node=8` per user, while the job's
 own `hpc_core` QoS declares no limits at all. A throttle set to a number
 nobody can source is the common case and it is expensive: one array here sat
-at `%20` -- 40 of 2048 entitled cores, 2% -- for eleven hours on a partition
+at `%20` -- 40 of 2048 permitted cores, 2% -- for eleven hours on a partition
 with 10,000 idle cores, because `%20` had been copied from a template.
 
-Pick `throttle x cpus-per-task` as a fixed fraction of the entitlement and
+Pick `throttle x cpus-per-task` as a fixed fraction of the core cap and
 keep it the same across stages, so a stage that needs 8 cores a task gets a
-proportionally smaller `%N` instead of eight times the footprint.
+proportionally smaller `%N` instead of eight times the footprint. This does
+not reserve those cores or guarantee placement within eight nodes. Other jobs,
+other arrays and fragmentation can still cause QoS waits. See [Slurm array
+throttles](https://slurm.schedmd.com/job_array.html).
 
 ### Array or fork? The bookends decide, not the overhead
 
