@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# chpc-jobstats <jobid> [--tasks]      one job, or a whole array by its array id
+# chpc-jobstats --mine [--days N]      every job this user ran recently
+#
+# Read a finished job's own accounting and say what it should have asked for.
+# Recommends only where the accounting describes a single-node batch workload.
+# Never changes a job.
+#
+# Why this exists. A Slurm request is a guess made before the first run and
+# almost never revisited, and nothing in the scheduler complains about a job
+# that asks for eight cores and uses one: it runs, it succeeds, it is simply
+# billed for eight. The numbers that would tell you are in sacct, but the two
+# that matter are not columns you can read off. CPU efficiency is TotalCPU over
+# Elapsed x NCPUS, and memory is recorded on STEPS, a different row from the one
+# carrying the job's state. Computing them by hand is where this goes wrong.
+#
+# So the failure mode is silence, and it compounds. On the array that prompted
+# this, cpus-per-task=2 against a single-threaded binary doubled the cost of
+# every task, and a throttle nobody could source held the array to 2% of its
+# permitted cores for eleven hours.
+#
+# What it does NOT do is guess at parallelism. A CPU efficiency near 1/N does not
+# mean "ask for 1 core" if the program can use N -- it means the program did not
+# use them THIS time. The output says which of the two it cannot tell apart,
+# because that distinction is the whole decision and belongs to whoever knows
+# the tool. It also refuses to size from a task that is not COMPLETED: a RUNNING
+# task's TotalCPU is sampled on a poll interval and lags its Elapsed, and a
+# PENDING one reports NCPUS=0. Mixing 20 running tasks into 61 finished ones
+# moved this array's CPU efficiency from 0.50 to 0.37 and its core count to zero.
+#
+# Keep this bash-3.2 clean: no associative arrays, no mapfile. The Macs read it.
+set -euo pipefail
+die() { printf 'chpc-jobstats: %s\n' "$*" >&2; exit 1; }
+# --help is answered BEFORE the sacct check, because a Mac is exactly where
+# someone reads it and exactly where sacct is absent.
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) sed -n '2,30p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  esac
+done
+JOBID=""; TASKS=0; MINE=0; DAYS=7
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --tasks) TASKS=1 ;;
+    --mine) MINE=1 ;;
+    --days)
+      [ $# -ge 2 ] || die "--days needs a positive integer"
+      shift; DAYS="$1" ;;
+    --days=*) DAYS="${1#--days=}" ;;
+    -*) die "unknown option $1" ;;
+    *) [ -z "$JOBID" ] || die "give only one job id"; JOBID="$1" ;;
+  esac
+  shift
+done
+case "$DAYS" in ''|*[!0-9]*) die "--days needs a positive integer" ;; esac
+[ "$DAYS" -gt 0 ] || die "--days needs a positive integer"
+command -v sacct >/dev/null 2>&1 || die "sacct not on PATH -- run this on a login node"
+# State%30 because the column is 10 characters wide by default and truncates with
+# a trailing '+', so CONFIGURING arrives as CONFIGURIN+ and matches nothing.
+FMT='JobID%64,JobName%64,State%30,Elapsed,TotalCPU,NCPUS,ReqMem,MaxRSS,Partition,QOS,NNodes,NTasks'
+
+# `--array` is not accepted by every sacct build and this cluster's version has
+# not been confirmed from a login node. An unrecognised option makes sacct exit
+# non-zero, which under `set -euo pipefail` would take EVERY invocation of this
+# tool with it -- and the test harness cannot catch that, because its sacct stub
+# is a `cat` that accepts any argument. So probe, fall back, and say which
+# happened: without --array sacct collapses a still-pending array range into one
+# row, so a core estimate taken off a running array undercounts.
+EXPANDED=1
+sacct_rows() {
+  if ! RAW="$(sacct "$@" --array --format="$FMT" -P --noheader 2>/dev/null)"; then
+    EXPANDED=0
+    RAW="$(sacct "$@" --format="$FMT" -P --noheader)"
+  fi
+}
+
+if [ "$MINE" = 1 ]; then
+  [ -z "$JOBID" ] || die "--mine takes no job id"
+  sacct_rows -u "$USER" -S "now-${DAYS}days"
+else
+  [ -n "$JOBID" ] || die "give a job id, or --mine. See --help."
+  sacct_rows -j "$JOBID"
+fi
+[ -n "$RAW" ] || die "sacct returned no jobs"
+[ "$EXPANDED" = 1 ] || printf 'chpc-jobstats: this sacct does not take --array, so a still-pending array\n             range arrives as ONE row and task counts may undercount.\n' >&2
+HERE="$(cd "$(dirname "$0")" && pwd)"
+printf '%s\n' "$RAW" | awk -F'|' -v tasks="$TASKS" -f "$HERE/../lib/jobstats.awk"
