@@ -152,10 +152,23 @@ the allocation row carrying the job's state. The tool joins step memory to
 allocations without counting step CPU a second time and refuses to count a
 task that is not `COMPLETED` -- a RUNNING task's
 TotalCPU is sampled on a poll interval and lags its Elapsed, and a PENDING one
-reports `NCPUS=0`. `sacct --array` expands pending ranges so task counts stay
-accurate. Missing RSS, failed tasks, multiple nodes, numbered steps, or mixed
-core requests suppress sizing recommendations: MaxRSS is a per-task peak,
-not total memory across MPI ranks. See the [Slurm accounting definitions](https://slurm.schedmd.com/sacct.html).
+reports `NCPUS=0`.
+
+It asks for `--array` so a pending range is expanded rather than collapsed into
+one row, and falls back to a plain query if this `sacct` build does not take
+that option, saying so: without it a core estimate off a running array
+undercounts. Do not assume the flag is accepted, and do not let one go
+unverified into a tool that runs under `set -euo pipefail` -- an unrecognised
+option exits non-zero and takes the whole invocation with it, and a test
+harness whose `sacct` is a `cat` cannot catch it.
+
+Each recommendation is gated on its OWN accounting, because they are measurable
+independently. No MaxRSS withholds the memory suggestion alone; CPU efficiency
+still reports, and it is the number that showed these tools are single-threaded.
+A failed or timed-out task, more than one node, numbered `srun` steps or mixed
+core requests withhold both: a killed task's peak is unknown, one efficiency
+over differing core counts means nothing, and MaxRSS is a per-task peak rather
+than total memory across MPI ranks. See the [Slurm accounting definitions](https://slurm.schedmd.com/sacct.html).
 
 Measured examples from the IgGase campaign, all three of them single-threaded
 programs that had been given 2-4 cores:
