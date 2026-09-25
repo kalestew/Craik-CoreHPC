@@ -4,13 +4,18 @@
 #
 #   corehpc/tools/protenix/fetch-weights.sh [input.json] [model_name]
 #
-# NOT YET RUN. tools/protenix is STATUS=planned: there is no image, so this
-# script cannot have been executed, and it will fail at the first chpc-tool
-# exec until `chpc-tool build protenix` has succeeded. Two things in it are
-# UNCONFIRMED against a built image and are marked inline where they appear --
-# the environment variable names Protenix uses for its cache root, and the
-# minimal input JSON. Fix them here the first time this is run, and say in
-# README.md which one was wrong.
+# RUN 2026-09-25 against protenix_2.sif on the login node, and everything it
+# was unsure of held. The two things previously marked UNCONFIRMED -- the cache
+# root environment variable and the minimal input JSON -- were both correct:
+# protenix accepted the probe input, exited 0, and put its artefacts under
+# PROTENIX_ROOT_DIR. Neither needed fixing, which is worth saying explicitly
+# because "we never checked" and "we checked and it was fine" are different
+# states and only one of them is a reason to stop worrying.
+#
+# What the run DID settle is the `--use_template true` question below: both
+# template files download, and what lands is a 219,912-entry snapshot ending
+# 2024-05-22. See the note on the assertion for why that is not the same as a
+# complete release-date table, and what still needs a per-run overlay.
 #
 # Destination is whatever `chpc-tool export protenix` resolves
 # PROTENIX_ROOT_DIR to. It is deliberately not an argument: chpc-tool exec
@@ -80,9 +85,8 @@ echo "model: $model"
 # device, so the artefacts land and only the fold dies. Nothing below trusts
 # the exit status; the assertions are on the files.
 #
-# UNCONFIRMED: the input JSON below has not been validated against a built
-# image. Upstream's schema is docs/infer_json_format.md. If protenix rejects
-# it, that is what the log will say -- fix it here and record it in README.md.
+# CONFIRMED 2026-09-25 against protenix_2.sif: this input is accepted as
+# written and the run exits 0. Upstream's schema is docs/infer_json_format.md.
 inp="${1:-}"
 if [ -z "$inp" ]; then
   inp="$PWD/protenix-fetch-input.json"
@@ -171,6 +175,25 @@ echo "CCD: $nccd file(s) under $dest/common"
 # Separate assertions from the CCD count, because a count of one would pass
 # that check while templates stayed broken in the way that is hardest to see:
 # every hit dropped with a warning, the fold running untemplated, exit zero.
+# MEASURED 2026-09-25: both files arrive, and what arrives is a SNAPSHOT.
+# release_date_cache.json holds 219,912 entries dated 1976-05-19 to 2024-05-22
+# and obsolete_to_successor.json holds 4,344. Two consequences, and the second
+# is the one that bites:
+#
+#   * The cache is NOT confined to pre-cutoff structures -- 37,540 of its
+#     entries post-date protenix v1's 2021-09-30 template cutoff. The cutoff is
+#     a filter applied at inference, not a property of this file, so a template
+#     released between the two dates is present here and needs only
+#     PROTENIX_MAX_TEMPLATE_DATE to be admitted.
+#   * Anything released AFTER 2024-05-22 is absent, and absent reads as an
+#     ERROR `<pdbid> date unknown` that is checked BEFORE the cutoff, so no
+#     environment variable reaches it. Such an entry needs its date read from
+#     _pdbx_audit_revision_history in the deposited mmCIF and merged in through
+#     a per-run overlay root.
+#
+# This assertion therefore proves the file is THERE, and cannot prove it covers
+# the structures a given campaign templates on. Do not read a pass here as
+# "templates will resolve".
 for f in release_date_cache.json obsolete_to_successor.json; do
   if [ ! -s "$dest/common/$f" ]; then
     echo "missing $dest/common/$f" >&2

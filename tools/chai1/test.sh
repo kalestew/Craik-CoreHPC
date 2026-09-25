@@ -84,3 +84,135 @@ awk -v s="$spread" 'BEGIN{ exit !(s > 3.0) }' \
     || { echo "CA radius of gyration $spread A is too small to be a fold"; exit 1; }
 
 echo "ok: $n_ca CA records in $(basename "$cif"), CA spread ${spread} A"
+
+# --- case 2: the covalent case, and the NAME the bond landed on -------------
+#
+# Case 1 folds a bare peptide. It proves the image starts, the weights load and
+# the diffusion module runs, and it says NOTHING about the failure that got
+# every HA-ADAPT chai1 result quarantined: 1,726 structures in which the free
+# drug was folded while DECLARED bonded, the peptide cysteine attached to an
+# aromatic ring carbon at 1.68 A instead of to the warhead 13.59 A away. Both
+# distances are bond-plausible. ipTM moved 0.710 -> 0.698 between the wrong
+# structure and the right one, so no confidence score separates them.
+#
+# The root cause was a NAME read in the wrong vocabulary -- `C25` is the
+# warhead in CCD naming and an aromatic ring CH in SMILES order -- and Chai-1
+# is the tool most exposed to it, because it has no CCD input path at all and
+# its ligand atom names come from the RDKit version pinned inside THIS image.
+# So the assertion has to be made against this image, at qualification time,
+# or it is not an assertion about anything that will still be true after a
+# rebuild.
+#
+# FIXTURE CHEMISTRY, not the campaign's. The programme's hapten lives in the
+# data repo and must never appear in a tool registry (the consuming project's
+# invariant #5). One cysteine at position 6 and one Michael acceptor is the
+# same shape and costs a fraction of the time.
+echo
+echo "--- case 2: a declared covalent bond, and the atom it reached ---"
+
+sh "$TOOLDIR/../_template/check_covalent_bond.sh" > check_bond.py
+
+cat > cov.fasta <<'EOF'
+>protein|name=pep
+MKTAYCAKQRQISFV
+>ligand|name=lig
+C=CC(=O)NC
+EOF
+
+# COMMA-delimited, with a header. The .m8 template table next door is TAB
+# separated with no header -- the same tool, two delimiters, and getting this
+# one wrong yields a file chai parses into zero restraints and folds anyway.
+# Chains are assigned POSITIONALLY from the FASTA: entity 1 -> A, entity 2 -> B.
+# The atom follows an `@`, and residues are 1-indexed.
+#
+# `@C1` is the terminal CH2 of C=CC(=O)NC. Chai names a SMILES ligand's atoms
+# element-plus-1-based-ordinal in RDKit atom order, so the carbons of this
+# SMILES are C1 C2 C3 (backbone, in written order) and C4 (the N-methyl).
+cat > cov.restraints <<'EOF'
+chainA,res_idxA,chainB,res_idxB,connection_type,confidence,min_distance_angstrom,max_distance_angstrom,comment,restraint_id
+A,C6@SG,B,@C1,covalent,1.0,0.0,0.0,peptide-hapten,bond1
+EOF
+
+if ! "$CHPC_TOOL" exec chai1 -- chai-lab fold \
+        --constraint-path cov.restraints \
+        --num-trunk-recycles 1 --num-diffn-timesteps 40 \
+        --num-diffn-samples 1 --num-trunk-samples 1 --seed 37 \
+        cov.fasta out_cov > cov.log 2>&1
+then
+    echo "chai-lab fold exited non-zero on the COVALENT case while the plain"
+    echo "case passed, so the image and the weights are fine and the restraint"
+    echo "file is not. Read the log, then write what chai actually accepts into"
+    echo "tools/chai1/README.md -- that paragraph is worth more than this test."
+    tail -40 cov.log; exit 1
+fi
+
+covcif=$(ls -1 out_cov/*.cif 2>/dev/null | head -1 || true)
+[ -n "$covcif" ] || { echo "no .cif written by the covalent case"
+                      ls -R out_cov 2>/dev/null | head -20; tail -30 cov.log; exit 1; }
+
+# Geometry first, and by CONNECTIVITY rather than by name: exactly one ligand
+# heavy atom within bonding distance of the SG, it is a carbon, and its only
+# heavy neighbour inside the ligand is another carbon. That last clause is what
+# separates a terminal warhead CH2 from the N-methyl carbon without trusting
+# any label, so it stays true whatever this image decides to call things.
+if ! "$CHPC_TOOL" exec chai1 -- python check_bond.py "$covcif" \
+        --anchor SG --min 1.2 --max 2.1 > cov_check.log 2>&1
+then
+    echo "the covalent case produced a structure whose bond is WRONG:"
+    cat cov_check.log
+    echo
+    echo "Do not record this as verified and do not rank anything on it."
+    echo "A wrong attachment costs ~0.01 of ipTM; every confidence score"
+    echo "Chai-1 reports is blind to it."
+    exit 1
+fi
+cat cov_check.log
+
+# THEN the name, which is the half the geometry cannot cover. A bond that is
+# chemically sound but landed on a carbon this image calls something else means
+# the coordinator and the tool disagree about the vocabulary -- and a
+# coordinator that renders `@C1` while the image numbers its atoms differently
+# writes a restraint that silently addresses the wrong carbon.
+# check_bond.py prints: `ok: SG-<atom> <d> A (...)`. Chai suffixes every ligand
+# atom with its entity copy (`C1_1`), so strip that before comparing.
+bonded=$(sed -n 's/^ok: SG-\([^ ]*\) .*/\1/p' cov_check.log | head -1)
+bare=$(echo "$bonded" | sed 's/_[0-9][0-9]*$//')
+echo "chai-lab named the bonded atom: $bonded  (bare: $bare)"
+if [ "$bare" != "C1" ]; then
+    echo
+    echo "THE BOND IS SOUND AND THE NAME IS NOT. The restraint asked for C1 --"
+    echo "the terminal CH2 of C=CC(=O)NC in element-plus-ordinal RDKit order --"
+    echo "and the atom the bond reached is called '$bare' in this image."
+    echo "Chai-1's ligand atom names come from the RDKit pinned inside the"
+    echo "image, so a rebuild can renumber them. Every restraint this project"
+    echo "renders addresses atoms BY NAME, so until the vocabularies agree"
+    echo "again, a rendered bond may land on the wrong carbon and still fold,"
+    echo "still exit zero and still score well. That is the exact shape of the"
+    echo "defect behind the quarantined corpus."
+    exit 1
+fi
+
+# And the whole ligand's naming, printed rather than merely checked: the next
+# person to debug a vocabulary drift wants the list, not a boolean.
+"$CHPC_TOOL" exec chai1 -- python - "$covcif" <<'PY' || exit 1
+import sys
+from check_bond import parse, STANDARD, IONS
+atoms = parse(sys.argv[1])
+lig = [a for a in atoms
+       if a["resname"] not in STANDARD and a["resname"] not in IONS
+       and a["element"] not in ("H", "D")]
+names = [a["name"] for a in lig]
+print("ligand heavy atoms as this image names them: %s" % " ".join(names))
+bare = [n.rsplit("_", 1)[0] if n.rsplit("_", 1)[-1].isdigit() else n for n in names]
+want = {"C1", "C2", "C3", "C4", "O1", "N1"}
+got = set(bare)
+if got != want:
+    print("FAIL: expected %s, got %s" % (sorted(want), sorted(got)))
+    raise SystemExit(1)
+print("ok: the six heavy atoms carry the element-plus-ordinal names the "
+      "coordinator renders against")
+PY
+
+echo
+echo "ok: chai1 folds, folds the declared bond where it was declared, and"
+echo "    names the ligand atoms the way the restraint renderer assumes"

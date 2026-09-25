@@ -80,6 +80,23 @@ cat > plain.json <<'JSON'
 ]
 JSON
 
+# --use_msa false ON BOTH FOLDS, and it is not an optimisation -- it is the
+# difference between a test that finishes and one that never does.
+#
+# MEASURED 2026-09-25, SLURM 1986556: without it, protenix's default is to
+# SEARCH, which means reaching protenix-server.com through the site proxy. A
+# compute node has no route out, so every attempt fails with `[Errno 113] No
+# route to host` -- and the retry message is `Retrying... (1/5)` EVERY TIME.
+# The counter never advances: the 5 is a per-call budget inside a loop that
+# re-enters, so this is an infinite retry at one attempt every five seconds,
+# not five attempts. The job sat there for thirteen minutes producing nothing
+# but that line and would have burned the whole four-hour allocation.
+#
+# These three cases test the image, the weights, the bond geometry and the
+# template date gate. None of them is about alignment quality, and a real
+# campaign fold takes its MSA from the login-node stage as a precomputed
+# pairedMsaPath/unpairedMsaPath anyway -- never as a flag on the fold.
+#
 # `< /dev/null` on every protenix invocation, and it is not decoration.
 # protenix/data/tools/kalign.py Popens kalign WITHOUT setting stdin, and kalign
 # 3 reads stdin even when -i names a file -- so an inherited open pipe makes it
@@ -87,7 +104,8 @@ JSON
 # A tty gives EOF and sbatch gives /dev/null, so it only bites when something
 # wraps this script in a pipeline, which is exactly how CI runs it.
 if ! "$CHPC_TOOL" exec protenix -- protenix pred \
-        -i plain.json -o out_plain -n "$MODEL" > plain.log 2>&1 < /dev/null
+        -i plain.json -o out_plain -n "$MODEL" --use_msa false \
+        > plain.log 2>&1 < /dev/null
 then
     echo "protenix pred exited non-zero on the plain case."
     echo "triage, in the order these have actually bitten this registry:"
@@ -184,7 +202,8 @@ cat > covalent.json <<'JSON'
 JSON
 
 if ! "$CHPC_TOOL" exec protenix -- protenix pred \
-        -i covalent.json -o out_cov -n "$MODEL" > cov.log 2>&1 < /dev/null
+        -i covalent.json -o out_cov -n "$MODEL" --use_msa false \
+        > cov.log 2>&1 < /dev/null
 then
     echo "protenix pred exited non-zero on the COVALENT case while the plain"
     echo "case passed, so the image and the weights are fine and the bond"
