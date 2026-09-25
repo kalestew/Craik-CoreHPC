@@ -245,6 +245,98 @@ Two habits that avoid the class entirely:
   baked into the image. `CHPC_REFDATA` exists for exactly this, and a share
   path compiled into a recipe makes that recipe wrong for the next lab.
 
+## Three more ways a green build produces a broken image
+
+Added 2026-09-25 from building `tools/protenix`, `tools/intellifold` and
+`tools/openfold3`. Each cost a rebuild; none was visible in `%post`.
+
+### `pip install --upgrade pip` cannot work on an Ubuntu 24.04 base
+
+```
+ERROR: Cannot uninstall pip 24.0, RECORD file not found.
+       Hint: The package was installed by debian.
+```
+
+Noble marks its interpreter externally managed (PEP 668) and ships pip through
+dpkg with no `RECORD`, so pip cannot replace itself whatever flag it is given.
+`--break-system-packages` works for ordinary packages and cannot work for that
+one, which is the awkward part: the recipe looks consistent and fails on
+exactly one line, minutes into a build.
+
+Use a virtual environment -- `python3.12 -m venv /opt/venv` -- and then remember
+the two things that follow from it:
+
+- put `/opt/venv/bin` on `PATH` in **`%environment`**, or the console scripts
+  the image exists to run are not found and the failure reads as a broken
+  install;
+- put it on `PATH` in **`%post` too**. `tools/protenix` installed `ninja`
+  correctly and still died with `RuntimeError: Ninja is required to load C++
+  extensions`, because torch verifies ninja by *running* `ninja --version` as a
+  subprocess -- importable is not enough -- and nothing had added the venv's
+  bin directory to the build shell's `PATH`.
+
+### A CUDA `-devel` base can shadow the CUDA wheels pip installs
+
+`tools/intellifold` is built on `nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04`,
+so `/usr/local/cuda/lib64` holds CUDA 12.8's `libcusparse.so.12` and the Docker
+image puts that directory at the front of `LD_LIBRARY_PATH`. jax 0.9.1's cuda12
+plugin is built against the **12.9** wheels pip installs beside it under
+`site-packages/nvidia/*/lib`. The 12.8 copies win, the plugin fails its version
+probe, and jax says:
+
+```
+Jax plugin configuration error: ... cusparseGetProperty(MAJOR_VERSION, &major)
+  failed: The cuSPARSE library was not found.
+RuntimeError: Unknown backend: 'gpu' requested, but no platforms that are
+  instances of gpu are present. Platforms present are: cpu
+```
+
+The second line is what an operator sees, and it is a **lie about the
+hardware**: both failing jobs were on H100 nodes whose `nvidia-smi` had printed
+the device two lines earlier. Prepend the wheel directories in `%environment`:
+
+```sh
+for _d in /opt/venv/lib/python3.12/site-packages/nvidia/*/lib; do
+    [ -d "$_d" ] && LD_LIBRARY_PATH="$_d:${LD_LIBRARY_PATH:-}"
+done
+export LD_LIBRARY_PATH
+```
+
+### An import is not a `%test` when the thing you are testing is lazy
+
+The section above says `%test` is what catches a read-only-filesystem bug and
+`%post` structurally cannot. There is a second class it only catches if the
+test does real work: **anything initialised lazily**.
+
+`python -c "import jax"` passed on all three builds of the image above, because
+jax does not load its CUDA plugin until something asks for a device. The check
+that catches it needs no GPU:
+
+```sh
+python - <<'PY'
+import jax
+try: jax.devices("gpu")
+except Exception as exc: message = str(exc)
+else: message = ""
+for bad in ("was not found", "cannot open shared object", "libcu"):
+    if bad in message and "cuInit" not in message:
+        raise SystemExit("broken image, not a missing device: " + message)
+PY
+```
+
+On a login node the two outcomes are distinguishable and only one is a bug:
+
+| message | meaning |
+|---|---|
+| `The cuSPARSE library was not found` | the image cannot load its CUDA libraries |
+| `cuInit(0) failed: Unknown CUDA error 303` | there is simply no driver here, which is correct |
+
+The same shape applies to anything that JIT-compiles on first use.
+`tools/protenix` imports a module that calls `torch.utils.cpp_extension` on a
+`.cu` source **at import time, with no fallback**, so it needs `nvcc` in the
+image and not merely `cc` -- and a `-slim` base passes a plain
+`import protenix` and dies on the first real job.
+
 ## `%post` writing to `/tmp` is writing to the build machine
 
 Apptainer binds the **host's** `/tmp` into `%post`. So a recipe that stages
