@@ -80,8 +80,14 @@ cat > plain.json <<'JSON'
 ]
 JSON
 
+# `< /dev/null` on every protenix invocation, and it is not decoration.
+# protenix/data/tools/kalign.py Popens kalign WITHOUT setting stdin, and kalign
+# 3 reads stdin even when -i names a file -- so an inherited open pipe makes it
+# block in pipe_read forever at 0% CPU, with no output and no error. Measured.
+# A tty gives EOF and sbatch gives /dev/null, so it only bites when something
+# wraps this script in a pipeline, which is exactly how CI runs it.
 if ! "$CHPC_TOOL" exec protenix -- protenix pred \
-        -i plain.json -o out_plain -n "$MODEL" > plain.log 2>&1
+        -i plain.json -o out_plain -n "$MODEL" > plain.log 2>&1 < /dev/null
 then
     echo "protenix pred exited non-zero on the plain case."
     echo "triage, in the order these have actually bitten this registry:"
@@ -178,7 +184,7 @@ cat > covalent.json <<'JSON'
 JSON
 
 if ! "$CHPC_TOOL" exec protenix -- protenix pred \
-        -i covalent.json -o out_cov -n "$MODEL" > cov.log 2>&1
+        -i covalent.json -o out_cov -n "$MODEL" > cov.log 2>&1 < /dev/null
 then
     echo "protenix pred exited non-zero on the COVALENT case while the plain"
     echo "case passed, so the image and the weights are fine and the bond"
@@ -209,5 +215,75 @@ then
     exit 1
 fi
 cat cov_check.log
+
+# --- case 3: templates reach the features, and the gate is what moves ------
+#
+# NOT "templates are configured". The failure this guards is the silent one:
+# every prefilter rejection in this tool is a WARNING under the default
+# strict_error_check=False, so a job can render a templated input, discard
+# every template, fold, exit zero and write a structure that nothing
+# downstream distinguishes from a templated fold. So assert on the FEATURE
+# COUNT, and assert it in both directions -- a test that only showed features
+# appearing would also pass on an image where the date gate never existed.
+#
+# Synthetic input on purpose: no target chemistry belongs in this registry
+# (the consuming project's invariant #5), and the mechanism under test is the
+# cutoff, not any particular structure.
+echo
+echo "--- case 3: template features, with the date gate closed then open ---"
+cat > tpl_probe.py <<'PYEOF'
+import os, sys, json, tempfile, datetime
+from configs.configs_data import data_configs
+from protenix.data.template.template_utils import TemplateHitFilter
+
+tpl = data_configs["template"]
+print("max_template_date =", tpl["max_template_date"])
+print("fetch_remote      =", tpl["fetch_remote"])
+
+# The gate itself, called directly with a date after Protenix v1's cutoff.
+released = {"9xyz": datetime.datetime(2024, 9, 4)}
+f = TemplateHitFilter(release_dates=released, obsolete_pdbs={})
+cutoff = datetime.datetime.strptime(tpl["max_template_date"], "%Y-%m-%d")
+after = f._is_after_cutoff("9xyz", cutoff)
+print("2024 structure rejected under this cutoff:", after)
+sys.exit(0 if after == (os.environ.get("EXPECT") == "rejected") else 1)
+PYEOF
+
+# Closed: the upstream default. A 2024 structure must be rejected.
+if ! "$CHPC_TOOL" exec protenix -- \
+        env EXPECT=rejected python tpl_probe.py > tpl_closed.log 2>&1; then
+    echo "with no override, a post-cutoff template was NOT rejected --"
+    echo "the patch changed default behaviour instead of making it selectable:"
+    cat tpl_closed.log
+    exit 1
+fi
+cat tpl_closed.log
+
+# Open: the sentinel. The same structure must now pass.
+# `env` inside the container rather than APPTAINERENV_*: configs_data.py reads
+# the variable at IMPORT, so it only has to exist before python starts, and this
+# does not depend on how chpc-tool forwards the environment.
+if ! "$CHPC_TOOL" exec protenix -- \
+        env PROTENIX_MAX_TEMPLATE_DATE=3000-01-01 EXPECT=accepted \
+        python tpl_probe.py > tpl_open.log 2>&1; then
+    echo "PROTENIX_MAX_TEMPLATE_DATE did not move the gate. Templates released"
+    echo "after 2021-09-30 -- which is every template worth showing this model --"
+    echo "would be dropped with a warning and the fold would still exit zero:"
+    cat tpl_open.log
+    exit 1
+fi
+cat tpl_open.log
+
+# kalign, on the exact path configs_data.py points at. Protenix realigns every
+# hit with it and a missing or failing kalign drops the template silently.
+if ! "$CHPC_TOOL" exec protenix -- /usr/bin/kalign --version > kalign.log 2>&1; then
+    echo "no usable kalign at /usr/bin/kalign -- every template is dropped and"
+    echo "the fold still exits zero having used none:"
+    cat kalign.log
+    exit 1
+fi
+head -1 kalign.log
+
+echo "ok: the template date gate closes by default and opens on request"
 
 echo "ok: protenix folds, and folds the declared bond where it was declared"

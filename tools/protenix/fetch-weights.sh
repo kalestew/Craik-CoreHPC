@@ -111,8 +111,17 @@ fi
 # thing it came for. Turning it off makes this a weights fetch and nothing else.
 echo "running protenix once; a failure for want of a GPU is expected and ignored"
 set +e
+# --use_template true is NOT about folding anything here. It is the only
+# switch that makes `download_inference_cache` fetch the two files templates
+# need -- common/release_date_cache.json and common/obsolete_to_successor.json
+# -- and it fetches them BEFORE the dataloader runs, so the GPU-less failure
+# afterwards costs nothing. Without this the cache looks complete and every
+# templated fold then rejects every hit with "<pdbid> date unknown", because
+# the prefilter requires the accession to be IN the release-date table and
+# treats an absent table as "unknown" rather than as "no opinion".
 "$CHPC_TOOL" exec protenix -- protenix pred \
     -i "$inp" -o "$PWD/protenix-fetch-out" -n "$model" --use_msa false \
+    --use_template true \
     > protenix-fetch.log 2>&1
 rc=$?
 set -e
@@ -157,6 +166,31 @@ nccd=$(find "$dest/common" -type f 2>/dev/null | wc -l)
   echo "every ligand fold needs it, and a compute node cannot fetch it." >&2
   exit 1; }
 echo "CCD: $nccd file(s) under $dest/common"
+
+# --- the template dependency files ------------------------------------------
+# Separate assertions from the CCD count, because a count of one would pass
+# that check while templates stayed broken in the way that is hardest to see:
+# every hit dropped with a warning, the fold running untemplated, exit zero.
+for f in release_date_cache.json obsolete_to_successor.json; do
+  if [ ! -s "$dest/common/$f" ]; then
+    echo "missing $dest/common/$f" >&2
+    echo "templates need it. Protenix only downloads these two when" >&2
+    echo "--use_template true is passed, which this script now does; if it is" >&2
+    echo "still absent, read protenix-fetch.log for the download error." >&2
+    exit 1
+  fi
+done
+echo "template deps: release_date_cache.json, obsolete_to_successor.json"
+
+# The directory templates are read FROM. Protenix resolves a hit's structure as
+# $PROTENIX_ROOT_DIR/mmcif/<pdbid>.cif, lower case, and with
+# PROTENIX_TEMPLATE_FETCH_REMOTE=false it will not go and get one it lacks --
+# which is the correct setting on a compute node and makes this directory the
+# thing that has to be staged. Create it here so the path exists and is
+# ACL-repaired once, rather than by whichever job gets there first.
+mkdir -p "$dest/mmcif"
+if command -v chpc-fac-fixacl >/dev/null 2>&1; then chpc-fac-fixacl "$dest/mmcif" || true; fi
+echo "template mmcif dir: $dest/mmcif ($(find "$dest/mmcif" -type f -name '*.cif' 2>/dev/null | wc -l) staged)"
 
 # NOTE on `find ... | head` under `set -o pipefail`: head exits after N lines,
 # find takes SIGPIPE, and the pipeline's status becomes 141, which set -e then

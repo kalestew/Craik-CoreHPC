@@ -218,3 +218,44 @@ Verified against upstream on 2026-09-24:
 - whether `cuequivariance_torch` is installed by default and whether OpenFold3
   enables those kernels by default the way boltz does — `%post` prints what it
   finds and says what a miss would mean.
+
+## Templates: the only direct interface of the six
+
+Read from the installed package 2026-09-24. Not yet run — this entry is
+`built`, and nothing in this project renders an OpenFold3 input at all yet.
+
+`Chain` in `projects/of3_all_atom/config/inference_query_format.py` carries two
+mutually exclusive template routes, and the validator refuses both at once:
+
+- `template_alignment_file_path` (+ `template_entry_chain_ids`) — the search
+  route, an alignment cache entry.
+- **`template_cif_paths` + `template_cif_chain_ids`** — *"CASE 2: CIF-direct
+  mode"* in `preprocessing/template.py`. Hand it the files and the chains and
+  it does the rest: no alignment file, no hit table, no residue index map, no
+  search, no network. It is the simplest template interface in this registry and
+  the only one that takes a multi-chain mmCIF and a chain letter.
+
+Upstream's own `tests/inference/test_templates.py` is a working recipe, and it
+is worth reading for a second reason: it exists because of issue #294, where
+gapped alignment columns reached the template cache, the residue counts
+disagreed, and **the template was silently dropped**. The test asserts a
+CA-RMSD *gap* between a templated and an untemplated run rather than asserting
+the job succeeded, which is the right shape for a check on this surface and the
+shape `test.sh` should copy when this entry is qualified.
+
+Two settings to know: `n_templates: int = 4` (`dataset_config_components.py`),
+and `template_preprocessor_settings.output_directory`, which otherwise lands in
+a persistent `/tmp` directory shared across runs and across same-sequence
+queries — set it per run or one job reads another's cache.
+
+CLI: `run_openfold predict --query-json ... --use-templates true`.
+
+**Like every tool here but Boltz-2, its template pair features are masked to
+within one chain** — `multichain_pair_mask`, under the comment *"Create asym ID
+to mask inter-chain features"*. A template cannot hand over a binder's position
+in OpenFold3. See ADR 0020's 2026-09-24 amendment in the parent repo.
+
+**`covalent_bonds` is declared on `Query` and read by nothing.** Grep the
+package: it appears in the schema and in no other file. A covalently bonded
+ligand cannot be expressed here today, which matters more for this project than
+the template story does.

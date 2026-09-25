@@ -1,0 +1,517 @@
+Bootstrap: docker
+From: nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04
+
+# Protenix v1 -- AlphaFold3-class structure prediction with covalent bonds.
+#
+# REWRITTEN 2026-09-25 after the first build attempt failed, and both reasons
+# it failed are recorded here rather than quietly fixed, because each one would
+# have produced a WORKING-LOOKING image that was wrong.
+#
+# ── 1. The base had no nvcc, and Protenix compiles CUDA at IMPORT ──────────
+#
+# The first recipe used python:3.12-slim with build-essential, reasoning by
+# analogy with boltz_2.def: a C compiler covers Triton's JIT. That analogy is
+# wrong here. `protenix/model/layer_norm/layer_norm.py` runs, at module import
+# and with NO fallback path:
+#
+#     try:    fast_layer_norm_cuda_v2 = importlib.import_module(...)
+#     except ImportError:
+#             fast_layer_norm_cuda_v2 = compile(name=..., sources=[
+#                 "layer_norm_cuda.cpp", "layer_norm_cuda_kernel.cu"], ...)
+#
+# A `.cu` source needs **nvcc**, not cc. The torch wheel carries a CUDA runtime
+# and no toolkit, so `protenix --help` died in %test -- which is the good case.
+# The bad case is that the build's %post never imports the model modules, so an
+# image built without %test would have shipped, passed `import protenix`, and
+# failed on the first GPU job.
+#
+# So: a -devel base, for nvcc. This is the same conclusion intellifold_2.def and
+# openfold3_3.def reached from upstream's documentation; this entry reached it
+# from a failure, which is the weaker way to learn it and the one that produces
+# a number.
+#
+# CUDA 12.6 and not 12.8, deliberately: `pip install protenix` resolves
+# torch 2.7.1+cu126, and the extension is compiled against THAT torch's headers.
+# A 12.8 toolchain over a cu126 torch is a version skew with no upside here,
+# because this image has no sm_120 kernels anyway -- see GPU_MAX_CC below.
+#
+# ── 2. `--upgrade` resolved PROTENIX 2.0.0, which is the version this entry
+#       exists to refuse ────────────────────────────────────────────────────
+#
+# tool.conf's first paragraph says, in capitals, that this entry is pinned at
+# v1 because the v2 WEIGHTS carry no open-source licence and restrict the
+# outputs -- and then the recipe said `pip install --upgrade protenix`, which
+# on 2026-09-25 installs 2.0.0. PyPI carries 1.0.0 ... 1.1.0 and then 2.0.0;
+# the major version tracks the model generation. The policy was in a comment
+# and the command contradicted it, which is invariant #5's failure mode wearing
+# a different hat: the thing that decides is not the thing anybody reads.
+#
+# It is pinned now, exactly, and a version bump is a reviewed edit to this line.
+#
+# ── 3. Nothing JIT-compiles at run time, because %post already did ─────────
+#
+# layer_norm.py prefers its OWN directory when that is writable and falls back
+# to torch's extension cache when it is not. site-packages is writable during
+# %post and read-only in the finished .sif, so importing the model modules here
+# bakes the compiled extension into the image. Two things follow: the compile
+# is proven at build time rather than discovered on a compute node, and a job
+# never writes a CUDA build tree at all.
+#
+#
+# ══ REBUILT 2026-09-24 (protenix_2): TEMPLATES ═════════════════════════════
+#
+# protenix_1.sif could reach the template code and could never use a template.
+# Three things were wrong and all three are fixed here. Each was MEASURED in
+# protenix_1.sif, not read off a README.
+#
+# ── 1. No kalign, and Ubuntu has no package for it ────────────────────────
+#
+# Protenix re-aligns every template hit against the query with kalign, and
+# throws away whatever alignment the .a3m or .hhr carried. Its own config says
+#
+#     "kalign_binary_path": "/usr/bin/kalign",  # apt-get install kalign
+#
+# and that advice does not work on this base: kalign is in Debian, and is in
+# NO Ubuntu 24.04 component -- not main, not universe. `apt-cache policy
+# kalign` returns nothing at all. So it is built from source here, v3.4.0,
+# pinned by tag and sha256, installed with prefix /usr so that it lands on the
+# exact path Protenix already defaults to and NO config patch is needed for it.
+#
+# Version note, because the registry now contains two and they are not
+# interchangeable: chai1_2.def installs kalign 3.x from Debian because chai_lab
+# passes `--nthreads`, which kalign 2.04 rejects. Protenix passes the older
+# `-format fasta`, which kalign 3.4.0 still accepts -- measured -- so 3.x is a
+# superset and both tools get the same major version. bioconda's `kalign` is
+# still 2.04; do not substitute it here to "match upstream".
+#
+# ── 2. The inference template date cutoff was unreachable ─────────────────
+#
+# This is the one worth reading. `infer_dataloader.py` constructed the
+# featurizer with a STRING LITERAL:
+#
+#     max_template_date="2021-09-30",
+#
+# which is Protenix v1's training cutoff. Every structure released after it was
+# rejected. That is correct for benchmarking and wrong for prospective work,
+# and ADR 0020 in the consuming project admits a template ONLY if it postdates
+# the cutoff -- so the two conditions were exactly complementary and nothing
+# was admissible.
+#
+# It is not a policy. It is a one-line bug, and upstream's own code says so:
+#
+#   * `TemplateHitFilter._is_after_cutoff` opens with `if cutoff is None:
+#     return False` -- a designed "no cutoff" state.
+#   * `TemplateHitFeaturizer.get_templates` takes a per-call
+#     `max_template_date` override.
+#   * and the inference call site in `template_featurizer.py` ALREADY passes
+#     `max_template_date=None`, plainly meaning "do not date-filter here".
+#
+# That None is dead, because `get_templates` tests it with `if
+# max_template_date:` and falls back to the constructor's literal. The
+# intention is in the source and the truthiness test defeats it.
+#
+# The patch below does NOT change that shared function and does not touch the
+# training path. It makes the ONE literal read a config key whose default is
+# the same literal, so upstream behaviour is bit-identical unless the key is
+# set. The key is environment-driven, which is the idiom `configs_data.py`
+# already uses for PROTENIX_ROOT_DIR:
+#
+#     PROTENIX_MAX_TEMPLATE_DATE=3000-01-01
+#
+# 3000-01-01 is not invented here either -- it is the sentinel Protenix's own
+# training branch uses for "no cutoff" a dozen lines away in
+# `template_featurizer.py`.
+#
+# ── 3. fetch_remote defaults TRUE, and compute nodes have no internet ─────
+#
+# `configs.data.template.get("fetch_remote", True)` -- so a template whose
+# mmCIF is not already staged is fetched from PDBe mid-job. On this cluster
+# that is a hang, not an error (doc 02). The key did not exist in the config
+# dict at all, so it could not be turned off. It exists now, same env idiom:
+#
+#     PROTENIX_TEMPLATE_FETCH_REMOTE=false
+#
+# ── What is NOT patched, and why it matters ───────────────────────────────
+#
+# The COVALENT bond path needed nothing. `covalent_bonds` is read by
+# `json_to_feature.py:add_bonds_between_entities` and works, for a CCD ligand
+# by atom name and for a SMILES ligand by RDKit atom-map number. It was never
+# a template blocker and the two were never related.
+#
+# Two prefilter gates also survive on purpose, because they are real science
+# rather than defects, and the consuming project has to plan around them:
+#
+#   * a hit whose ungapped sequence is a substring of the query AND covers
+#     >95% of it is dropped as a DuplicateError -- so the exact reference
+#     structure of a target cannot template itself here;
+#   * a hit shorter than 10 residues is dropped as a LengthError -- so a
+#     peptide chain cannot be templated at all.
+#
+# Both are warnings, not errors, under the default strict_error_check=False,
+# which means they drop the template and the fold still exits zero.
+#
+# Build:  chpc-tool build protenix        (login node only; --fakeroot is
+#                                          unavailable here and `module load
+#                                          apptainer` does not exist -- it is
+#                                          /usr/bin/apptainer, 1.5.2)
+
+%labels
+    Tool         protenix
+    Version      1
+    Upstream     https://github.com/bytedance/Protenix
+    UpstreamRef  protenix==1.1.0 (PyPI)
+    Licence      Apache-2.0 (code and v1 model parameters)
+    Base         nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04
+    Kalign       3.4.0, built from source (no Ubuntu package exists)
+    Patched      template date cutoff + fetch_remote made config keys
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # ubuntu24.04 ships python3.12. python3-venv because this distribution
+    # marks its interpreter externally-managed and `pip install` into it
+    # refuses; a venv is the supported answer and --break-system-packages is
+    # not one. build-essential for the C++ half of the extension -- nvcc drives
+    # a host compiler and does not replace it.
+    apt-get install -y --no-install-recommends \
+        python3 python3-dev python3-venv build-essential git ca-certificates \
+        cmake curl
+    rm -rf /var/lib/apt/lists/*
+
+    python3 -m venv /opt/venv
+    # On PATH for the REST OF %post, not merely called by absolute path. The
+    # second rebuild died on `RuntimeError: Ninja is required to load C++
+    # extensions` with ninja installed, because torch's cpp_extension loader
+    # verifies it by running `ninja --version` as a SUBPROCESS -- importable is
+    # not enough, it has to be findable -- and pip had put it in /opt/venv/bin,
+    # which nothing had added to PATH. Same shape as the %environment entry
+    # below, and the reason that one exists.
+    export PATH=/opt/venv/bin:$PATH
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+    # PINNED. See the header: `--upgrade` here installed 2.0.0, whose weights
+    # this entry forbids.
+    #
+    # `ninja` is NOT decoration and is NOT a dependency of protenix 1.1.0 --
+    # 2.0.0 happens to pull it in and 1.1.0 does not, which is one more way the
+    # unpinned install was quietly different. torch's cpp_extension loader
+    # refuses without it:
+    #
+    #   RuntimeError: Ninja is required to load C++ extensions
+    #
+    # and it refuses at the same import that compiles the fused LayerNorm, so
+    # on a -slim image with no build step this would have been a run-time
+    # failure on a GPU node rather than a build-time one here.
+    /opt/venv/bin/pip install --no-cache-dir ninja protenix==1.1.0
+
+    # --- kalign 3.4.0, from source -------------------------------------------
+    # Not apt: kalign is in no Ubuntu 24.04 component (see the header). Prefix
+    # /usr, NOT /usr/local, so the binary lands on /usr/bin/kalign -- the exact
+    # path protenix's own configs_data.py already defaults kalign_binary_path
+    # to. Installing it anywhere else would mean patching that too, and a patch
+    # avoided is a patch that cannot drift.
+    KALIGN_VERSION=3.4.0
+    KALIGN_SHA256=67d1a562d54b3b7622cc3164588c05b9e2bf8f1a5140bb48a4e816c61a87d4a8
+    # NOT /tmp, and this is not fastidiousness. apptainer binds the HOST /tmp
+    # into the build, this login node's /tmp is shared with every other user,
+    # and python puts the working directory first on sys.path -- so a build that
+    # cd's to /tmp and then runs python imports whatever another user happens to
+    # have left lying there. This recipe already died once that way: a stray
+    # /tmp/inspect.py from an unrelated project shadowed the standard library
+    # and `import torch` failed with somebody else's FileNotFoundError. Build in
+    # a directory this image owns, and leave it before running anything.
+    mkdir -p /opt/src
+    cd /opt/src
+    curl -fsSL -o kalign.tar.gz \
+        "https://github.com/TimoLassmann/kalign/archive/refs/tags/v${KALIGN_VERSION}.tar.gz"
+    echo "${KALIGN_SHA256}  kalign.tar.gz" | sha256sum -c -
+    tar xzf kalign.tar.gz
+    mkdir -p "kalign-${KALIGN_VERSION}/build"
+    cd "kalign-${KALIGN_VERSION}/build"
+    cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr ..
+    make -j"$(nproc)"
+    make install
+    cd / && rm -rf /opt/src
+    # Assert the PROPERTY: not that the binary exists, but that it accepts the
+    # command line protenix's aligner actually builds, and returns an alignment.
+    test -x /usr/bin/kalign
+    /usr/bin/kalign --version
+    mkdir -p /opt/katest && cd /opt/katest
+    printf '>a\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEDSEATKG\n>b\nMKTAYIAKQRQISFVKSHFRQLEERLGLIE\n' > ka.fa
+    /usr/bin/kalign -i ka.fa -o ka.afa -format fasta
+    test -s ka.afa
+    grep -q '^MKTAYIAKQRQISFVKSHF' ka.afa
+    cd / && rm -rf /opt/katest
+
+    # --- RECORDED PATCHES to the installed protenix ---------------------------
+    # Two of them, both about templates, both explained at length in the header.
+    # They are applied by a script that ASSERTS its target text first, so a
+    # version bump that moves either line fails THIS BUILD loudly rather than
+    # matching nothing and shipping an image where the fix silently is not in.
+    # That is the whole reason this is not a sed one-liner.
+    /opt/venv/bin/python - <<'PATCHPY'
+import pathlib
+
+SITE = pathlib.Path("/opt/venv/lib/python3.12/site-packages")
+
+
+def patch(path, old, new):
+    p = SITE / path
+    text = p.read_text()
+    if new in text:
+        raise SystemExit(f"{path}: already patched -- refusing to double-apply")
+    n = text.count(old)
+    if n != 1:
+        raise SystemExit(
+            f"{path}: expected exactly 1 occurrence of the target text, found {n}.\n"
+            f"Upstream moved it. Re-read the source and update this recipe;\n"
+            f"do NOT relax the match.\n--- looked for ---\n{old}"
+        )
+    p.write_text(text.replace(old, new))
+    print(f"patched {path}")
+
+
+# 1. Two new template config keys, environment-driven, upstream defaults kept.
+#    configs_data.py already reads os.environ for PROTENIX_ROOT_DIR, so this is
+#    that file's own idiom rather than a new mechanism.
+patch(
+    "configs/configs_data.py",
+    '        "kalign_binary_path": "/usr/bin/kalign",  # apt-get install kalign\n'
+    "    },\n",
+    '        "kalign_binary_path": "/usr/bin/kalign",  # built from source, see protenix_2.def\n'
+    "        # --- added by corehpc protenix_2.def ---------------------------\n"
+    "        # Upstream hard-coded the inference template cutoff and had no key\n"
+    "        # for it. Default is the literal it replaced, so behaviour is\n"
+    "        # unchanged unless PROTENIX_MAX_TEMPLATE_DATE is set. 3000-01-01 is\n"
+    "        # protenix's own no-cutoff sentinel (template_featurizer.py).\n"
+    '        "max_template_date": os.environ.get(\n'
+    '            "PROTENIX_MAX_TEMPLATE_DATE", "2021-09-30"\n'
+    "        ),\n"
+    "        # Upstream default is True: an unstaged template mmCIF is fetched\n"
+    "        # from PDBe mid-job, which on a compute node with no route out is a\n"
+    "        # hang. The key did not exist, so it could not be turned off.\n"
+    '        "fetch_remote": os.environ.get(\n'
+    '            "PROTENIX_TEMPLATE_FETCH_REMOTE", "true"\n'
+    '        ).strip().lower() not in ("0", "false", "no", "off"),\n'
+    "    },\n",
+)
+
+# 2. The one literal. Note this touches ONLY the inference dataloader; the
+#    training path in template_featurizer.py keeps its own dates untouched.
+patch(
+    "protenix/data/inference/infer_dataloader.py",
+    '                max_template_date="2021-09-30",\n',
+    "                max_template_date=configs.data.template.get(\n"
+    '                    "max_template_date", "2021-09-30"\n'
+    "                ),\n",
+)
+PATCHPY
+
+    # Which architectures the fused kernel is built for, declared rather than
+    # inherited. torch guesses from the visible devices, and the login node has
+    # none, so an unset list makes the build depend on a default that has moved
+    # between torch releases. 8.9 is the L40S and 9.0 the H100 NVL, which are
+    # the two device classes this image may be scheduled on (the RTX PRO 6000
+    # at 12.0 is excluded by GPU_MAX_CC, because this torch has no sm_120).
+    export TORCH_CUDA_ARCH_LIST="8.9;9.0"
+    export MPLCONFIGDIR=/tmp/mpl
+
+    # Assert PROPERTIES, not imports (tools/README.md, "Assert the property you
+    # care about"). placer's recipe is the cautionary case: `import torch`
+    # passed while conda had swapped torch for a CPU build, and nothing noticed
+    # until a GPU job ran at CPU speed.
+    /opt/venv/bin/python - <<'PY'
+import sys, torch
+assert sys.version_info[:2] == (3, 12), sys.version
+
+# A CUDA build, not a CPU one. torch.cuda.is_available() is the WRONG check
+# here: the login node has no GPU, so it is False for a perfectly good image.
+# torch.version.cuda is a property of the WHEEL and answers the question we
+# actually have.
+assert torch.version.cuda is not None, "CPU-only torch -- this image cannot fold anything"
+print("python", sys.version.split()[0], "torch", torch.__version__, "cuda", torch.version.cuda)
+
+import protenix
+print("protenix", getattr(protenix, "__version__", "?"))
+
+# The arch flags ARE the GPU_MAX_CC measurement, and this is the cheapest
+# moment to take it. _cuda_getArchFlags reads the compiled-in list out of the
+# C extension and needs no GPU -- unlike torch.cuda.get_arch_list(), which
+# returns [] when no device is visible, which is exactly the login node.
+flags = torch._C._cuda_getArchFlags()
+print("arch flags:", flags)
+sm = [int(t[3:]) for t in (flags or "").split() if t.startswith("sm_") and t[3:].isdigit()]
+if sm:
+    top = max(sm)
+    print("GPU_MAX_CC candidate: %d.%d" % (top // 10, top % 10))
+    print("  -> copy that into tools/protenix/tool.conf, replacing UNMEASURED.")
+    if top >= 120:
+        print("  -> sm_120 present: safe on every gpu node, bare --gres=gpu:1 is fine.")
+    else:
+        print("  -> NO sm_120: needs --gres=gpu:nvidia_l40s:1 or an H100, never a bare --gres=gpu:1.")
+else:
+    print("NO sm_ arch flags -- this torch has no CUDA kernels at all. Do not publish.")
+    raise SystemExit(1)
+PY
+
+    # Compile the fused LayerNorm INTO the image, and prove it landed in
+    # site-packages rather than in a per-user cache that the .sif will not
+    # carry. This import is the one that failed the first build.
+    /opt/venv/bin/python - <<'PY'
+import os
+from protenix.model.layer_norm import layer_norm as ln
+
+module = ln.fast_layer_norm_cuda_v2
+where = getattr(module, "__file__", "")
+print("fused layer norm:", where)
+assert "/opt/venv/" in where, (
+    "the CUDA extension compiled somewhere outside the image "
+    f"({where!r}); a .sif is read-only, so every job would recompile it on the "
+    "compute node -- which is the failure this build exists to move forward."
+)
+assert os.path.exists(where)
+PY
+
+    # The console script is what a job actually runs, and it is what failed
+    # last time. Exercise it here, not only in %test.
+    /opt/venv/bin/protenix --help > /dev/null
+    command -v nvcc
+    command -v cc || command -v gcc
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    export PATH=/opt/venv/bin:$PATH
+    # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
+    # beside its own source refuses at IMPORT time inside one -- boltz hit this
+    # with numba, four seconds in, before any weights or GPU. Point the usual
+    # caches at the host's /tmp, which apptainer binds, is local NVMe on every
+    # compute node, and is per-node so two jobs cannot fight over one file.
+    #
+    # TORCH_EXTENSIONS_DIR and MPLCONFIGDIR are on this list because the first
+    # build proved they belong on it: torch's extension cache defaulted under a
+    # read-only path and raised `OSError: [Errno 30] Read-only file system`
+    # during import, and matplotlib printed the same complaint about
+    # /root/.config one line earlier. The extension is compiled into the image
+    # above, so this is insurance rather than the mechanism.
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton-cache}"
+    export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/inductor-cache}"
+    export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-/tmp/torch-extensions}"
+    export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/mpl}"
+    # PROTENIX_ROOT_DIR is deliberately NOT set here. It has to point at this
+    # cluster's FAC share, which is a site fact and not a property of Protenix;
+    # the registry owns site facts and chpc-tool exports it from CHPC_REFDATA.
+    # Baking a share path into the image makes the image wrong for the next lab
+    # that builds from this recipe.
+
+%test
+    set -eu
+    # Against the BUILT, read-only image. %post runs on a writable overlay, so
+    # an import that only fails on squashfs cannot be caught there -- that is
+    # how boltz's numba failure got past a green build (doc 07).
+    python -c "import protenix, torch; print('protenix ok, torch', torch.__version__)"
+    # The import that failed the first build, on the read-only filesystem this
+    # time. If the extension were not inside the image this raises OSError
+    # rather than recompiling, because there is nowhere to write.
+    python -c "
+from protenix.model.layer_norm import layer_norm as ln
+print('fused layer norm ok:', ln.fast_layer_norm_cuda_v2.__file__)
+"
+    protenix --help > /dev/null
+    # nvcc has to be reachable from the RUNTIME environment, not merely present
+    # during %post: a rebuild that slims the base would otherwise only be
+    # noticed by a GPU job.
+    sh -c 'command -v nvcc >/dev/null' || { echo "no nvcc on PATH in the built image"; exit 1; }
+    sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
+      || { echo "no C compiler on PATH in the built image"; exit 1; }
+
+    # --- templates: the aligner, the key, and the gate it opens ---------------
+    # All three assert a PROPERTY. "kalign exists" and "the key is present" are
+    # both true of an image where templates still silently do nothing, which is
+    # exactly the state protenix_1.sif was in.
+    # Run from / and never from the host's /tmp: python puts the working
+    # directory first on sys.path, this cluster's /tmp is shared, and %post
+    # already died once because another user's inspect.py was sitting in it.
+    cd /
+    command -v kalign
+    kalign --version
+    # The command line protenix's own aligner builds, not a generic one.
+    KT=$(mktemp -d)
+    printf '>a\nMKTAYIAKQRQISFVKSHFSRQLEERLGLIEDSEATKG\n>b\nMKTAYIAKQRQISFVKSHFRQLEERLGLIE\n' > "$KT/kt.fa"
+    kalign -i "$KT/kt.fa" -o "$KT/kt.afa" -format fasta
+    test -s "$KT/kt.afa"
+    rm -rf "$KT"
+
+    # Upstream default preserved when the environment says nothing. If this
+    # fails, the patch changed behaviour for everyone rather than making it
+    # selectable, which is not what it is allowed to do.
+    python -c "
+from configs.configs_data import data_configs
+t = data_configs['template']
+assert t['max_template_date'] == '2021-09-30', t['max_template_date']
+assert t['fetch_remote'] is True, t['fetch_remote']
+print('template config defaults preserved')
+"
+    # And that the environment actually moves it.
+    PROTENIX_MAX_TEMPLATE_DATE=3000-01-01 PROTENIX_TEMPLATE_FETCH_REMOTE=false python -c "
+from configs.configs_data import data_configs
+t = data_configs['template']
+assert t['max_template_date'] == '3000-01-01', t['max_template_date']
+assert t['fetch_remote'] is False, t['fetch_remote']
+print('template config override works')
+"
+    # The literal is gone from the inference path. A patch that matched nothing
+    # would leave this string in place, and every later assertion would still
+    # pass, so check the file itself.
+    python -c "
+import pathlib, protenix
+p = pathlib.Path(protenix.__file__).parent / 'data' / 'inference' / 'infer_dataloader.py'
+src = p.read_text()
+assert 'max_template_date=\"2021-09-30\"' not in src, 'the hard-coded cutoff is STILL in infer_dataloader.py'
+assert 'configs.data.template.get(' in src, 'the patch did not land'
+print('inference cutoff now reads the config key')
+"
+    # The behaviour the whole patch exists for: a 2024 structure is rejected
+    # under the training cutoff and accepted under the sentinel. This is
+    # upstream's own filter, called directly.
+    python -c "
+from datetime import datetime
+from protenix.data.template.template_utils import TemplateHitFilter
+f = TemplateHitFilter(release_dates={'8udr': datetime(2024, 10, 16)}, obsolete_pdbs={})
+assert f._is_after_cutoff('8udr', datetime(2021, 9, 30)) is True, 'expected rejection under the training cutoff'
+assert f._is_after_cutoff('8udr', datetime(3000, 1, 1)) is False, 'expected acceptance under the sentinel'
+assert f._is_after_cutoff('8udr', None) is False, 'None must mean no cutoff'
+print('date gate opens and closes as intended')
+"
+
+%runscript
+    exec protenix "$@"
+
+%help
+    Protenix v1 -- AlphaFold3-class structure prediction, pinned at v1 because
+    the v2 WEIGHTS carry no open-source licence and restrict the outputs. The
+    pip version is pinned too, at 1.1.0: PyPI's `protenix` major version tracks
+    the model generation and `--upgrade` installs 2.0.0.
+
+      chpc-tool exec protenix -- protenix predict --input in.json --out_dir out
+
+    This image has NO sm_120 kernels (torch 2.7.1+cu126 builds sm_50 .. sm_90),
+    so ask for --gres=gpu:nvidia_l40s:1 or an H100, never a bare --gres=gpu:1.
+
+    Weights and the chemical component dictionary live on FAC under
+    PROTENIX_ROOT_DIR, not inside the image and not on scratch. Fetch them once
+    from the LOGIN node with tools/protenix/fetch-weights.sh: compute nodes have
+    no internet, so a job that has to download is a job that hangs until it
+    times out.
+
+    Covalent bonds: a top-level covalent_bonds list of
+      {entity1, copy1, position1, atom1, entity2, copy2, position2, atom2}
+    where entityN is the 1-BASED POSITION IN THE sequences LIST, not a chain id.
+    Reorder that list and every bond moves without a word. A SMILES ligand's
+    atom is either a 0-based index into the SMILES string or an
+    element-plus-ordinal name (C3, N2) whose ordinal is 1-based.
+
+    MSAs: pairedMsaPath / unpairedMsaPath, absolute paths. Generate them on the
+    login node; a compute node cannot reach any MSA server.

@@ -1,0 +1,157 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# Chai-1 -- structure prediction. Carried as an INDEPENDENT check on Boltz-2:
+# two models agreeing is evidence, one model is a guess.
+#
+# Base is python:3.12-slim and not a pytorch tag because chai_lab 0.6.1 pins
+# `torch>=2.3.1,<2.7` and `numpy~=1.21`. pip resolves torch 2.6.x with cu124
+# wheels inside a 3.12 base; no current pytorch/pytorch tag is that old.
+#
+# HARDWARE LIMIT, and it is not a build problem: torch<2.7 predates sm_120, so
+# this image cannot run on the RTX Pro 6000 (Blackwell) nodes ggpu1-[13-19].
+# It is fine on L40S (sm_89) and H100/H200 (sm_90), because cu124 binaries run
+# under this cluster's newer driver. A job that needs it must say which GPU:
+#     #SBATCH --gres=gpu:nvidia_l40s:1
+# A bare `--gres=gpu:1` can land on Blackwell and die with
+#     no kernel image is available for execution on the device
+# See tools/chai1/README.md.
+#
+# ── kalign, and WHICH kalign, added 2026-09-24 ────────────────────────────
+#
+# chai1_1.sif could not use templates at all. chai_lab's m8 hit parser calls
+# `kalign_query_to_reference`, which opens with
+#
+#     assert shutil.which("kalign") is not None, \
+#         "kalign is required for templates, but was not found in PATH."
+#
+# and that binary was in no image in this registry except colabfold's. So
+# `--template-hits-path` was a flag that parsed its file, staged its mmCIFs
+# and then died on an assert. Measured in the image, not read off.
+#
+# THE MAJOR VERSION IS LOAD-BEARING, and only in one direction. chai_lab runs
+#
+#     kalign -i in.fasta -o out.fasta --nthreads 1
+#
+# `--nthreads` arrived in kalign 3. The kalign that bioconda still ships as
+# `kalign`, and that colabfold_1.5.5.sif carries, is 2.04, and it REJECTS that
+# command line -- measured against colabfold's own binary. Debian trixie's
+# package is 3.4.0 and takes it, and also takes the older `-format fasta` form
+# that protenix's AlphaFold-derived aligner uses, so 3.x is a superset and one
+# version serves both tools. Do not "simplify" this to a conda kalign or pin it
+# back to 2.x to match some other entry: that is the direction that breaks.
+#
+# And the breakage is SILENT. kalign_query_to_reference catches
+# CalledProcessError and returns None, and the caller drops that template and
+# carries on -- so the wrong kalign yields a fold that exits zero, writes a
+# structure, and used no templates at all. %test below therefore calls
+# chai_lab's own function and asserts on the alignment it returns, not on
+# `command -v kalign`, because the binary being present is not the claim.
+#
+# Build:  chpc-tool build chai1
+
+%labels
+    Tool         chai1
+    Version      0.6.1
+    Upstream     https://github.com/chaidiscovery/chai-lab
+    UpstreamRef  chai_lab==0.6.1 (PyPI)
+    Licence      Apache-2.0 (code AND model weights)
+    Base         python:3.12-slim
+    GPUArch      sm_89 sm_90 only -- NOT sm_120 (torch<2.7)
+    Kalign       3.4.0 (Debian trixie) -- REQUIRED for templates, see %post
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates kalign
+    rm -rf /var/lib/apt/lists/*
+
+    pip install --no-cache-dir chai_lab==0.6.1
+
+    python - <<'PY'
+import torch, numpy, sys
+major, minor = torch.__version__.split(".")[:2]
+assert (int(major), int(minor)) < (2, 7), f"torch {torch.__version__} breaks the chai_lab<2.7 pin"
+assert numpy.__version__.startswith("1."), numpy.__version__
+print("python", sys.version.split()[0], "torch", torch.__version__, "numpy", numpy.__version__)
+PY
+
+    # chai_lab defaults CHAI_DOWNLOADS_DIR to <site-packages>/chai_lab/downloads,
+    # which is inside the image and therefore READ-ONLY at run time -- the
+    # first fold would fail trying to create it. Make the fallback a writable
+    # place so a bare `apptainer exec` still works; the registry overrides it
+    # with a FAC path so the weights actually persist.
+    mkdir -p /tmp/chai-downloads
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # Overridden by `chpc-tool export chai1` with a FAC path. The /tmp default
+    # is a last resort that keeps a hand-run from crashing, not a cache: /tmp
+    # is per-node and is wiped, so weights would be re-fetched every job, and
+    # on a compute node with no internet that means the job hangs.
+    export CHAI_DOWNLOADS_DIR="${CHAI_DOWNLOADS_DIR:-/tmp/chai-downloads}"
+
+%test
+    set -eu
+    python -c "import chai_lab, torch; print('chai_lab ok, torch', torch.__version__)"
+    command -v chai-lab
+    # The import above proves nothing about where chai will try to WRITE, and
+    # its default download path is inside site-packages -- read-only in a .sif.
+    # Assert the redirect is set and usable, which is the part that fails as
+    # an image and passes during %post.
+    test -n "${CHAI_DOWNLOADS_DIR:-}" || { echo "CHAI_DOWNLOADS_DIR unset"; exit 1; }
+    mkdir -p "$CHAI_DOWNLOADS_DIR"
+    touch "$CHAI_DOWNLOADS_DIR/.writable" && rm -f "$CHAI_DOWNLOADS_DIR/.writable" \
+        || { echo "CHAI_DOWNLOADS_DIR=$CHAI_DOWNLOADS_DIR is not writable"; exit 1; }
+    echo "downloads dir $CHAI_DOWNLOADS_DIR is writable"
+
+    # --- templates: the aligner, and that it actually ALIGNS -----------------
+    # `command -v kalign` is not the claim. chai_lab shells out to kalign and
+    # turns a non-zero exit into `return None`, which the template loader reads
+    # as "no alignment for this hit" and skips -- so a kalign that is present
+    # and wrong produces a fold that exits zero and silently used no templates.
+    # Assert on the returned alignment instead, through chai_lab's own function,
+    # which is the exact call path a real `--template-hits-path` run takes.
+    command -v kalign
+    kalign --version 2>&1 | head -1
+    python - <<'PY'
+from chai_lab.tools.kalign import kalign_query_to_reference
+
+ref = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEDSEATKG"
+query = "MKTAYIAKQRQISFVKSHFRQLEERLGLIE"
+
+aln = kalign_query_to_reference(ref=ref, query=query)
+assert aln is not None, (
+    "kalign_query_to_reference returned None: kalign ran and failed. This is the "
+    "silent path -- every template hit would be dropped and the fold would still "
+    "exit zero and write a structure."
+)
+assert len(aln.reference_aligned) == len(aln.query_aligned), (
+    f"ragged alignment: {len(aln.reference_aligned)} vs {len(aln.query_aligned)}"
+)
+assert aln.reference_aligned.replace("-", "") == ref, "kalign mangled the reference"
+assert aln.query_aligned.replace("-", "") == query, "kalign mangled the query"
+assert "-" in aln.query_aligned, "expected the shorter query to be gapped against ref"
+print("kalign alignment ok:", aln.query_aligned)
+PY
+%runscript
+    exec chai-lab "$@"
+
+%help
+    Chai-1 0.6.1. Apache-2.0 for code and weights, so commercial use is fine.
+
+      chpc-tool exec chai1 -- chai-lab fold input.fasta out/
+
+    Weights download on first use into $CHAI_DOWNLOADS_DIR, which the registry
+    points at the FAC share. Fetch them once from the login node; compute nodes
+    have no internet.
+
+    Will NOT run on the RTX Pro 6000 nodes -- ask for --gres=gpu:nvidia_l40s:1
+    or an H100/H200. See the GPUArch label.
+
+    As with Boltz: do not filter substrate poses on ipTM. Beta-strand addition
+    is confidence-penalised, so an ipTM filter preferentially discards the
+    correct extended geometry.

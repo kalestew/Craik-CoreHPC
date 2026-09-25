@@ -76,3 +76,81 @@ The registry's `esm` entry is unrelated and does not satisfy this.
 - **Do not filter substrate poses on ipTM.** Beta-strand addition is
   confidence-penalised, so an ipTM filter preferentially discards the correct
   extended geometry. ipTM is fine for Track 3 binder designs.
+
+## Templates: fixed in chai1_2, and the hit range is kalign's to decide
+
+Measured 2026-09-24, in both images, with networking disabled.
+
+**`chai1_2.sif` fixes this and templates now load.** What follows is what
+`chai1_1.sif` did, kept because the second half of it is still true.
+
+Chai-1's template input is a **search result**, not a structure:
+`--template-hits-path` takes a BLAST-m8 table and `--use-templates-server`
+fetches one. Given a hit, `parse_m8_to_template_hits` resolves the structure
+itself and then realigns it to the query with **kalign**:
+
+```
+AssertionError: kalign is required for templates, but was not found in PATH.
+Try 'apt install kalign'?
+```
+
+`command -v kalign` found nothing in `chai1_1.sif`, so templates could not run
+there at all. `chai1_2.def` installs **kalign 3.4.0** from Debian trixie and the
+rebuild invalidates this tool's prediction cache by design (`spec_id` folds in
+`container_digest`).
+
+The major version is load-bearing in one direction. `chai_lab` runs
+`kalign -i in -o out --nthreads 1`, and `--nthreads` arrived in kalign 3. The
+kalign that bioconda still ships as `kalign`, and that `colabfold_1.5.5.sif`
+carries, is **2.04**, and it rejects that command line — measured against
+colabfold's own binary. kalign 3.4.0 also accepts the older `-format fasta` form
+that protenix uses, so 3.x is a superset and both tools take it.
+
+The failure is silent: `kalign_query_to_reference` catches `CalledProcessError`
+and returns `None`, the hit is dropped, and the fold exits zero having used no
+templates. `%test` therefore calls `chai_lab`'s own function and asserts on the
+alignment it returns, not on `command -v kalign`.
+
+Two other template facts worth having before that rebuild, both read from the
+installed package rather than from documentation:
+
+- **The CIF cache is offline-able, and the naming is exact.** The loader calls
+  `rcsb.download_cif_file(hit_identifier.upper(), directory=...)`, which resolves
+  `<dir>/<PDBID>.cif.gz` and downloads **only if that path does not exist**. The
+  directory is not a flag: it is `<output_dir>/templates`, fixed in `chai1.py`.
+  Staging `8VRA.cif.gz` there under exactly that upper-case name is what makes a
+  templated fold possible on a compute node. Lower-case, or `.cif`, and the job
+  reaches for `files.rcsb.org` and hangs.
+- **The hit table is tab-delimited, and the restraints file next door is not.**
+  `parse_m8_file` passes `delimiter="\t"`; the restraints reader passes no `sep`
+  at all and therefore takes commas. The two files this one tool consumes
+  disagree, and getting the restraints one wrong is what killed job 1976695.
+
+### The hit range is a fixpoint of kalign's alignment, not a span you choose
+
+`subject_start`/`subject_end` are counted over the template chain's **modelled**
+residues — the loader strips gap characters out of gemmi's polymer sequence
+before slicing — which is a different basis from the AlphaFold 3 dialect's, and
+for a cryo-EM Fab the two differ by more than a hundred residues.
+
+That is necessary and not sufficient. The loader slices
+`seq[subject_start:subject_end]`, realigns **that slice** to the query with
+kalign, and then `TemplateHit.__post_init__` refuses the hit unless the
+alignment consumes the slice from its first residue to its last:
+
+```
+ValueError: query_pdb_id='H' <> pdb_id='8vr9' yields discrepant start/end
+indices: 1 116 != 0 117 - 1.
+```
+
+So the admissible range is whatever kalign says it is. Measured on a
+three-member related set, 15 chain hits: **11 began at the first modelled
+residue and 4 did not**, because kalign left the template's leading residue
+unaligned. Writing the obvious `subject_start=1` made Chai-1 reject those four
+outright; correcting only those four made all 15 load.
+
+Being *rejected* rather than silently dropped is the only piece of luck on this
+surface — everywhere else on it, a template that cannot be reconciled just
+vanishes. It also means the span cannot be derived on the coordinator: it has to
+be computed in this image, where kalign is, in the same way the ligand atom
+mapping is derived where RDKit is.

@@ -231,3 +231,45 @@ Verified against upstream on 2026-09-24:
   by this engine;
 - the CCD code `ACT` and its methyl atom name `CH3` used in `test.sh`'s bonded
   case, and whether the engine will accept a bond to it at all.
+
+## Templates: the AlphaFold 3 route, validated offline
+
+Measured 2026-09-24 in this image. This entry runs the **JAX** path
+(`run_jax_inference.py`, AlphaFold 3 runner flags), not IntelliFold v1's
+PyTorch path — which matters here, because the two take templates completely
+differently and only one of them works.
+
+**What this image reads** is `alphafold3.common.folding_input`: a per-protein
+`templates` list of `{mmcifPath, queryIndices, templateIndices}`. Confirmed by
+loading a five-chain templated input with three members per chain — fifteen
+templates, all accepted, with the pair counts this project derived.
+
+Four properties, all from the installed package:
+
+- **`templates: []` means no templates; `templates` absent means go and search.**
+  The two are not the same and the difference is silent on a node with no
+  internet.
+- **Up to 20 templates per chain**, from `ProteinChain`'s own docstring.
+- **One polymer chain per file.** `get_polymer_features` raises
+  `must be filtered to a single polymer chain`, so a five-chain complex becomes
+  five files. It also raises when the mmCIF has no `_entry.id`, and separately
+  when it has no `_pdbx_audit_revision_history.revision_date` — naming that item
+  in the error text.
+- **`templateIndices` count the declared polymer, gaps included.**
+  `get_polymer_features` indexes `to_res_arrays(include_missing_residues=True)`
+  with them. Indices counted over the *modelled* residues are shifted by however
+  many the structure failed to model, silently — 9 residues for this project's
+  reference heavy chain, 110 for its related set's.
+
+**No date gate on this path.** Unlike Protenix, a user-supplied template
+bypasses the search pipeline's filters entirely: `features.py` goes straight
+from `template.mmcif` to `get_polymer_features` with no release-date comparison.
+The release date still has to be *present* or the read fails.
+
+Note that IntelliFold v1's own featurizer, in `data/module/inference.py`, is a
+vendored copy of Protenix's and carries the same hard-coded `2021-09-30` cutoff.
+It is not on this image's code path. Do not read that file and conclude the
+cutoff applies here; it does not.
+
+**kalign is not installed and is not needed** on this path, because the
+correspondence is supplied rather than computed.
