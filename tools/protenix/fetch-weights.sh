@@ -104,10 +104,16 @@ JSON
   echo "using built-in probe input: $inp  (schema UNCONFIRMED -- see comment)"
 fi
 
+# --use_msa false, and it is not an optimisation. The probe chain carries no
+# alignment, and protenix reads an absent path and a null path identically --
+# both mean SEARCH -- so with the default the script would start an MSA search
+# for a sequence nobody cares about, against a server, before downloading the
+# thing it came for. Turning it off makes this a weights fetch and nothing else.
 echo "running protenix once; a failure for want of a GPU is expected and ignored"
 set +e
 "$CHPC_TOOL" exec protenix -- protenix pred \
-    -i "$inp" -o "$PWD/protenix-fetch-out" -n "$model" > protenix-fetch.log 2>&1
+    -i "$inp" -o "$PWD/protenix-fetch-out" -n "$model" --use_msa false \
+    > protenix-fetch.log 2>&1
 rc=$?
 set -e
 echo "protenix exited $rc (not load-bearing)"

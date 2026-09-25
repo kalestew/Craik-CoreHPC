@@ -1,20 +1,61 @@
 Bootstrap: docker
-From: python:3.12-slim
+From: nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04
 
 # Protenix v1 -- AlphaFold3-class structure prediction with covalent bonds.
 #
-# NOT BUILT. This recipe has never been run; STATUS in tool.conf is `planned`
-# and stays there until someone builds it on the login node and test.sh passes
-# on a compute node. Everything below that is a MEASUREMENT is marked as such,
-# and everything that is not is an intention.
+# REWRITTEN 2026-09-25 after the first build attempt failed, and both reasons
+# it failed are recorded here rather than quietly fixed, because each one would
+# have produced a WORKING-LOOKING image that was wrong.
 #
-# Base is python:3.12-slim and pip resolves torch, the same choice boltz_2.def
-# made and for the same reason: the torch wheel PyPI serves carries its own
-# CUDA runtime and, at the time boltz was built, arch flags through sm_120 --
-# which is what makes a bare --gres=gpu:1 safe. That is a property of whatever
-# wheel pip picks ON THE DAY, not of this file, so %post ends by printing the
-# arch flags and tool.conf's GPU_MAX_CC stays UNMEASURED until a human copies
-# the number across.
+# ── 1. The base had no nvcc, and Protenix compiles CUDA at IMPORT ──────────
+#
+# The first recipe used python:3.12-slim with build-essential, reasoning by
+# analogy with boltz_2.def: a C compiler covers Triton's JIT. That analogy is
+# wrong here. `protenix/model/layer_norm/layer_norm.py` runs, at module import
+# and with NO fallback path:
+#
+#     try:    fast_layer_norm_cuda_v2 = importlib.import_module(...)
+#     except ImportError:
+#             fast_layer_norm_cuda_v2 = compile(name=..., sources=[
+#                 "layer_norm_cuda.cpp", "layer_norm_cuda_kernel.cu"], ...)
+#
+# A `.cu` source needs **nvcc**, not cc. The torch wheel carries a CUDA runtime
+# and no toolkit, so `protenix --help` died in %test -- which is the good case.
+# The bad case is that the build's %post never imports the model modules, so an
+# image built without %test would have shipped, passed `import protenix`, and
+# failed on the first GPU job.
+#
+# So: a -devel base, for nvcc. This is the same conclusion intellifold_2.def and
+# openfold3_3.def reached from upstream's documentation; this entry reached it
+# from a failure, which is the weaker way to learn it and the one that produces
+# a number.
+#
+# CUDA 12.6 and not 12.8, deliberately: `pip install protenix` resolves
+# torch 2.7.1+cu126, and the extension is compiled against THAT torch's headers.
+# A 12.8 toolchain over a cu126 torch is a version skew with no upside here,
+# because this image has no sm_120 kernels anyway -- see GPU_MAX_CC below.
+#
+# ── 2. `--upgrade` resolved PROTENIX 2.0.0, which is the version this entry
+#       exists to refuse ────────────────────────────────────────────────────
+#
+# tool.conf's first paragraph says, in capitals, that this entry is pinned at
+# v1 because the v2 WEIGHTS carry no open-source licence and restrict the
+# outputs -- and then the recipe said `pip install --upgrade protenix`, which
+# on 2026-09-25 installs 2.0.0. PyPI carries 1.0.0 ... 1.1.0 and then 2.0.0;
+# the major version tracks the model generation. The policy was in a comment
+# and the command contradicted it, which is invariant #5's failure mode wearing
+# a different hat: the thing that decides is not the thing anybody reads.
+#
+# It is pinned now, exactly, and a version bump is a reviewed edit to this line.
+#
+# ── 3. Nothing JIT-compiles at run time, because %post already did ─────────
+#
+# layer_norm.py prefers its OWN directory when that is writable and falls back
+# to torch's extension cache when it is not. site-packages is writable during
+# %post and read-only in the finished .sif, so importing the model modules here
+# bakes the compiled extension into the image. Two things follow: the compile
+# is proven at build time rather than discovered on a compute node, and a job
+# never writes a CUDA build tree at all.
 #
 # Build:  chpc-tool build protenix        (login node only; --fakeroot is
 #                                          unavailable here and `module load
@@ -25,51 +66,63 @@ From: python:3.12-slim
     Tool         protenix
     Version      1
     Upstream     https://github.com/bytedance/Protenix
-    UpstreamRef  protenix (PyPI) -- pin the exact version at build time
+    UpstreamRef  protenix==1.1.0 (PyPI)
     Licence      Apache-2.0 (code and v1 model parameters)
-    Base         python:3.12-slim
+    Base         nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04
     Maintainer   Craik Lab, UCSF
 
 %post
     set -eux
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-
-    # build-essential is NOT padding, and it is the difference between this
-    # image and boltz_2.sif.
-    #
-    # Boltz is built from this same base with only git and ca-certificates, and
-    # its cuequivariance kernels are Triton, which JIT-COMPILES at first use and
-    # therefore needs a C compiler INSIDE the image. Every prediction above
-    # ~128 total tokens dies four seconds in with
-    #     RuntimeError: Failed to find C compiler
-    # from triton/runtime/build.py, having written nothing. Independently
-    # confirmed outside this registry: job array 1928395 in a sibling project
-    # lost all five tasks in under a minute each to exactly that error.
-    #
-    # Upstream's README does not say whether Protenix pulls a Triton-backed or
-    # otherwise JIT-compiled kernel through its torch dependency chain, and we
-    # could not confirm it either way from the documentation. So this is
-    # insurance, not a diagnosis: ~200 MB of compiler against a failure mode
-    # that (a) costs a whole GPU job, (b) arrives mid-run rather than at import,
-    # and (c) is invisible to --help, to %test and to a small self-test. Boltz's
-    # escape hatch (--no_kernels) exists because someone had already paid for
-    # the discovery; Protenix has no documented equivalent, which is the second
-    # reason to bring the compiler rather than the flag.
+    # ubuntu24.04 ships python3.12. python3-venv because this distribution
+    # marks its interpreter externally-managed and `pip install` into it
+    # refuses; a venv is the supported answer and --break-system-packages is
+    # not one. build-essential for the C++ half of the extension -- nvcc drives
+    # a host compiler and does not replace it.
     apt-get install -y --no-install-recommends \
-        build-essential git ca-certificates
+        python3 python3-dev python3-venv build-essential git ca-certificates
     rm -rf /var/lib/apt/lists/*
 
-    # Pin at build time. An unpinned install makes the image unreproducible and
-    # makes UPSTREAM_REF in tool.conf a guess -- write the resolved version
-    # into tool.conf when this succeeds.
-    pip install --no-cache-dir --upgrade protenix
+    python3 -m venv /opt/venv
+    # On PATH for the REST OF %post, not merely called by absolute path. The
+    # second rebuild died on `RuntimeError: Ninja is required to load C++
+    # extensions` with ninja installed, because torch's cpp_extension loader
+    # verifies it by running `ninja --version` as a SUBPROCESS -- importable is
+    # not enough, it has to be findable -- and pip had put it in /opt/venv/bin,
+    # which nothing had added to PATH. Same shape as the %environment entry
+    # below, and the reason that one exists.
+    export PATH=/opt/venv/bin:$PATH
+    /opt/venv/bin/pip install --no-cache-dir --upgrade pip
+    # PINNED. See the header: `--upgrade` here installed 2.0.0, whose weights
+    # this entry forbids.
+    #
+    # `ninja` is NOT decoration and is NOT a dependency of protenix 1.1.0 --
+    # 2.0.0 happens to pull it in and 1.1.0 does not, which is one more way the
+    # unpinned install was quietly different. torch's cpp_extension loader
+    # refuses without it:
+    #
+    #   RuntimeError: Ninja is required to load C++ extensions
+    #
+    # and it refuses at the same import that compiles the fused LayerNorm, so
+    # on a -slim image with no build step this would have been a run-time
+    # failure on a GPU node rather than a build-time one here.
+    /opt/venv/bin/pip install --no-cache-dir ninja protenix==1.1.0
+
+    # Which architectures the fused kernel is built for, declared rather than
+    # inherited. torch guesses from the visible devices, and the login node has
+    # none, so an unset list makes the build depend on a default that has moved
+    # between torch releases. 8.9 is the L40S and 9.0 the H100 NVL, which are
+    # the two device classes this image may be scheduled on (the RTX PRO 6000
+    # at 12.0 is excluded by GPU_MAX_CC, because this torch has no sm_120).
+    export TORCH_CUDA_ARCH_LIST="8.9;9.0"
+    export MPLCONFIGDIR=/tmp/mpl
 
     # Assert PROPERTIES, not imports (tools/README.md, "Assert the property you
     # care about"). placer's recipe is the cautionary case: `import torch`
     # passed while conda had swapped torch for a CPU build, and nothing noticed
     # until a GPU job ran at CPU speed.
-    python - <<'PY'
+    /opt/venv/bin/python - <<'PY'
 import sys, torch
 assert sys.version_info[:2] == (3, 12), sys.version
 
@@ -102,23 +155,52 @@ else:
     print("NO sm_ arch flags -- this torch has no CUDA kernels at all. Do not publish.")
     raise SystemExit(1)
 PY
-    command -v protenix
-    # The compiler has to be there at RUN time, not just at build time, which
-    # is the whole point of installing it. Assert it survived.
+
+    # Compile the fused LayerNorm INTO the image, and prove it landed in
+    # site-packages rather than in a per-user cache that the .sif will not
+    # carry. This import is the one that failed the first build.
+    /opt/venv/bin/python - <<'PY'
+import os
+from protenix.model.layer_norm import layer_norm as ln
+
+module = ln.fast_layer_norm_cuda_v2
+where = getattr(module, "__file__", "")
+print("fused layer norm:", where)
+assert "/opt/venv/" in where, (
+    "the CUDA extension compiled somewhere outside the image "
+    f"({where!r}); a .sif is read-only, so every job would recompile it on the "
+    "compute node -- which is the failure this build exists to move forward."
+)
+assert os.path.exists(where)
+PY
+
+    # The console script is what a job actually runs, and it is what failed
+    # last time. Exercise it here, not only in %test.
+    /opt/venv/bin/protenix --help > /dev/null
+    command -v nvcc
     command -v cc || command -v gcc
 
 %environment
     export LC_ALL=C.UTF-8
     export PYTHONNOUSERSITE=1
+    export PATH=/opt/venv/bin:$PATH
     # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
     # beside its own source refuses at IMPORT time inside one -- boltz hit this
     # with numba, four seconds in, before any weights or GPU. Point the usual
     # caches at the host's /tmp, which apptainer binds, is local NVMe on every
     # compute node, and is per-node so two jobs cannot fight over one file.
-    # Overridable: a site whose /tmp is tiny or noexec will want them elsewhere.
+    #
+    # TORCH_EXTENSIONS_DIR and MPLCONFIGDIR are on this list because the first
+    # build proved they belong on it: torch's extension cache defaulted under a
+    # read-only path and raised `OSError: [Errno 30] Read-only file system`
+    # during import, and matplotlib printed the same complaint about
+    # /root/.config one line earlier. The extension is compiled into the image
+    # above, so this is insurance rather than the mechanism.
     export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
     export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton-cache}"
     export TORCHINDUCTOR_CACHE_DIR="${TORCHINDUCTOR_CACHE_DIR:-/tmp/inductor-cache}"
+    export TORCH_EXTENSIONS_DIR="${TORCH_EXTENSIONS_DIR:-/tmp/torch-extensions}"
+    export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/mpl}"
     # PROTENIX_ROOT_DIR is deliberately NOT set here. It has to point at this
     # cluster's FAC share, which is a site fact and not a property of Protenix;
     # the registry owns site facts and chpc-tool exports it from CHPC_REFDATA.
@@ -131,9 +213,18 @@ PY
     # an import that only fails on squashfs cannot be caught there -- that is
     # how boltz's numba failure got past a green build (doc 07).
     python -c "import protenix, torch; print('protenix ok, torch', torch.__version__)"
+    # The import that failed the first build, on the read-only filesystem this
+    # time. If the extension were not inside the image this raises OSError
+    # rather than recompiling, because there is nowhere to write.
+    python -c "
+from protenix.model.layer_norm import layer_norm as ln
+print('fused layer norm ok:', ln.fast_layer_norm_cuda_v2.__file__)
+"
     protenix --help > /dev/null
-    # Prove the compiler is reachable from the runtime environment too, not
-    # merely present on some PATH that %post happened to have.
+    # nvcc has to be reachable from the RUNTIME environment, not merely present
+    # during %post: a rebuild that slims the base would otherwise only be
+    # noticed by a GPU job.
+    sh -c 'command -v nvcc >/dev/null' || { echo "no nvcc on PATH in the built image"; exit 1; }
     sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
       || { echo "no C compiler on PATH in the built image"; exit 1; }
 
@@ -142,9 +233,14 @@ PY
 
 %help
     Protenix v1 -- AlphaFold3-class structure prediction, pinned at v1 because
-    the v2 WEIGHTS carry no open-source licence and restrict the outputs.
+    the v2 WEIGHTS carry no open-source licence and restrict the outputs. The
+    pip version is pinned too, at 1.1.0: PyPI's `protenix` major version tracks
+    the model generation and `--upgrade` installs 2.0.0.
 
-      chpc-tool exec protenix -- protenix pred -i in.json -o out -n <v1-model>
+      chpc-tool exec protenix -- protenix predict --input in.json --out_dir out
+
+    This image has NO sm_120 kernels (torch 2.7.1+cu126 builds sm_50 .. sm_90),
+    so ask for --gres=gpu:nvidia_l40s:1 or an H100, never a bare --gres=gpu:1.
 
     Weights and the chemical component dictionary live on FAC under
     PROTENIX_ROOT_DIR, not inside the image and not on scratch. Fetch them once

@@ -8,7 +8,7 @@
 | Licence | Apache-2.0, code and weights, academic **and commercial** use |
 | Weights | not fetched — Hugging Face `OpenFold/OpenFold3`, default set `OpenBind-0` |
 | GPU | yes — `GPU_MAX_CC` **UNMEASURED** |
-| Covalent bonds | **UNQUALIFIED — see below. This is the entry's open question.** |
+| Covalent bonds | **REFUSED — settled 2026-09-25 against the released wheel. See below.** |
 
 The OpenFold consortium's open reimplementation of AlphaFold 3, from the
 AlQuraishi lab. Apache-2.0 on both halves, so — like `../protenix` and
@@ -40,6 +40,49 @@ naming anywhere that could be found. So:
 It is entirely possible for this entry to reach `built` and legitimately never
 reach `verified`. That is a finding, not unfinished work, and the place to
 write it is the section below.
+
+## Settled 2026-09-25: it is not an AlphaFold 3 dialect, and the bond field is dead
+
+The entry below was written from upstream's documentation, which says only that
+OpenFold3 "replicates AlphaFold 3's input features" and never mentions a bond.
+Reading the released wheel (`openfold3` 0.5.0) answers it, and the answer is
+worse than unqualified.
+
+**It has its own input schema.**
+`openfold3/projects/of3_all_atom/config/inference_query_format.py` defines
+pydantic models that `run_openfold --query-json` loads through
+`InferenceQuerySet.from_json`:
+
+```
+{"seeds": [42], "queries": {"<name>": {
+    "chains": [{"molecule_type": ..., "chain_ids": [...], "sequence": ...,
+                "ccd_codes": [...], "smiles": ..., "main_msa_file_paths": [...],
+                "paired_msa_file_paths": [...]}],
+    "use_msas": true, "covalent_bonds": [...], "pocket_constraint": ...}}}
+```
+
+`chains`, not `sequences`. `ccd_codes`, not `ccdCodes`. `main_msa_file_paths`,
+not `unpairedMsaPath`. And `Chain` is declared `extra="forbid"`, so an
+AlphaFold 3 JSON is rejected rather than half-read — which is the one piece of
+good news here.
+
+**The bond endpoint is an integer index.** `Bond(atom1: Atom, atom2: Atom)`
+with `Atom = (chain_id: str, residue_id: int, atom_id: int)`. Not a name. That
+makes it the only tool in this registry whose bond has no vocabulary to be
+checked against at all: an off-by-one moves the bond and nothing disagrees.
+
+**And nothing reads it.** The string `covalent_bonds` appears in exactly one
+file of the wheel — the schema above. No consumer, in the inference path or
+anywhere else. So a covalent request validates, runs, exits zero, and writes a
+confident structure in which the ligand is bonded to nothing. That is the
+HA-ADAPT contamination with a new spelling, and it is why this is a refusal
+rather than an open question.
+
+**What follows.** Fold the apo system here; refuse anything covalent. The
+consuming project has removed `openfold3` from its AF3-dialect builder for the
+same reason, so an input is never labelled for a tool that cannot read it.
+`test.sh` phase 2 keeps its value: it becomes the check that tells us when
+upstream starts consuming the field.
 
 `test.sh` phase 2 tries the AlphaFold 3 spelling — `bondedAtomPairs` with
 `[entity_id, residue_id, atom_name]` endpoints and a registered CCD ligand —

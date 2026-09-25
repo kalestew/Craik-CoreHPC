@@ -51,10 +51,26 @@ fi
 # say so in README.md.
 
 echo "1/2: setup_openfold inside the image"
+# --non-interactive, and a config naming the destination. MEASURED 2026-09-25:
+# the bare command is an interactive click prompt --
+#     Please specify the OpenFold cache directory (default: /root/.openfold3):
+#     Aborted!
+# -- and it aborts rather than taking the default when stdin is not a terminal,
+# which is every way this script could ever call it. `--config` takes a JSON
+# serialisation of OpenFoldSetupConfig; `openfold_cache` and `param_directory`
+# are the two fields that matter here and both point at the share, because a
+# checkpoint inside a .sif is a checkpoint that needs a rebuild to replace.
+cfg=$(mktemp "${TMPDIR:-/tmp}/of3-setup-XXXXXX.json")
+cat > "$cfg" <<JSON
+{"openfold_cache": "$dest", "param_directory": "$dest", "selected_parameters": "default"}
+JSON
+echo "config: $(cat "$cfg")"
 set +e
-"$CHPC_TOOL" exec openfold3 -- setup_openfold > of3-setup.log 2>&1
+"$CHPC_TOOL" exec openfold3 -- setup_openfold --non-interactive --config "$cfg" \
+  > of3-setup.log 2>&1
 rc1=$?
 set -e
+rm -f "$cfg"
 echo "setup_openfold exited $rc1"
 
 n=$(find "$dest" -type f \( -name '*.pt' -o -name '*.ckpt' -o -name '*.safetensors' \) 2>/dev/null | wc -l)
@@ -121,6 +137,9 @@ find "$dest" -maxdepth 3 -type f -printf '%13s  %P\n' | sort -k2 || true
 echo
 echo "parameter files: $n"
 echo
-echo "Reminder: this fetches WEIGHTS. It says nothing about whether OpenFold3"
-echo "accepts a covalent bond -- that is still unqualified, and"
-echo "chpc-tool test openfold3 is the only thing that answers it."
+echo "Reminder: this fetches WEIGHTS and nothing else. Whether OpenFold3 accepts"
+echo "a covalent bond was SETTLED 2026-09-25 by reading openfold3 0.5.0: the"
+echo "string covalent_bonds appears only in its own schema declaration and"
+echo "nothing in the inference path reads it, so a bonded request runs, exits"
+echo "zero and writes a structure with no bond. Fold apo systems here."
+echo "test.sh phase 2 is what will say when upstream starts reading the field."

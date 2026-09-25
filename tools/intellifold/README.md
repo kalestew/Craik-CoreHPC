@@ -93,7 +93,38 @@ Two reasons and only the first is obvious:
 hardcoding the answer, so a rebuild that slims the base is noticed rather than
 discovered by a job.
 
-## Bonds are UNQUALIFIED, and `test.sh` case 2 is the qualification
+## Bonds: the AF3 keys ARE honoured, and a bond it declares may not be one
+
+**Measured 2026-09-25**, on a real covalent complex (a haptenated peptide-MHC
+with an antibody Fv, 658 tokens) on an H100 NVL, five diffusion samples on
+each of two ligand routes. This settles the first question and opens a
+sharper one.
+
+**`userCCD` and `bondedAtomPairs` both work.** A top-level `userCCD` block
+referenced as `ccdCodes: ["LIG-1"]` is read, the ligand is tokenised per
+atom (41 heavy atoms, matching the block), and the output carries
+`_struct_conn` with `conn_type_id covale` naming the peptide cysteine's `SG`
+and the ligand atom the input asked for. A registered code in `ccdCodes`
+works too, from the image's own component table.
+
+**But the declaration is not the geometry.** In two of five samples on each
+route, the file declares the covale and the two atoms are **2.78-2.79 A**
+apart -- outside any S-C covalent range. The bond is on the right atom (the
+decoy carbon is 12-15 A away in all ten) and it is not a bond. A gate built
+on `_struct_conn` alone would pass all ten.
+
+So `test.sh` case 2, which asserts on the coordinates, is still the right
+check and is now known to be necessary rather than merely prudent.
+
+**The two routes are not interchangeable.** Same molecule, same atom names,
+same 41 heavy atoms -- and the structures differ systematically: the
+antibody lands 17-46 A from its crystal position on the shipped-block route
+and 52-53 A away on the registry route, with non-overlapping ranges over
+five samples at one seed. The registry route is the one the model is more
+confident about (ipTM 0.70-0.71 against 0.57-0.59). Whatever you fold with,
+record which.
+
+## Original note: bonds were UNQUALIFIED, and `test.sh` case 2 is the qualification
 
 The brief this entry was written from says the input is AlphaFold-3-style JSON
 with `bondedAtomPairs` addressed as `[entity_id, residue_id, atom_name]`,
@@ -101,6 +132,21 @@ with `bondedAtomPairs` addressed as `[entity_id, residue_id, atom_name]`,
 is an AlphaFold 3-style JSON"* — and **never mentions `bondedAtomPairs` at
 all**. So the bond form is an inference from the shared dialect, not a
 documented capability, and it is recorded here as unqualified.
+
+**Read from the source 2026-09-25, which narrows it without closing it.**
+`intellifold/run_jax_inference.py` parses its input with
+`alphafold3.common.folding_input.load_fold_inputs_from_path` — AF3's own
+parser, not a reimplementation — and grep finds the strings `bondedAtomPairs`
+and `userCCD` in **no file of the `intellifold` package**, which is what you
+would expect when the parsing is delegated. So both keys are read by the same
+code that reads them for AlphaFold 3, and the dialect inference above is now an
+inference about one line of code rather than about a family resemblance.
+
+That is not qualification, and the gap that remains is the interesting half:
+parsing a key is not the same as *featurising* it. `folding_input` will accept
+a `bondedAtomPairs` entry and hand IntelliGen's own featuriser a bond it may or
+may not carry into the model. Only `test.sh` case 2, on the coordinates,
+settles that — which is exactly what it was written to do.
 
 Two consequences worth knowing before anyone writes an input:
 

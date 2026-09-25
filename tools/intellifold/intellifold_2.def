@@ -63,10 +63,27 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
     # each). Same shape, different JIT.
     apt-get install -y --no-install-recommends \
         build-essential cmake git ca-certificates zlib1g-dev \
-        python3.12 python3.12-dev python3-pip
+        python3.12 python3.12-dev python3.12-venv
     rm -rf /var/lib/apt/lists/*
-    ln -sf /usr/bin/python3.12 /usr/local/bin/python
-    python -m pip install --no-cache-dir --break-system-packages --upgrade pip
+    # A VIRTUAL ENVIRONMENT, rather than installing into the distribution's
+    # own interpreter. The first build attempt died on the line this replaces:
+    #
+    #   ERROR: Cannot uninstall pip 24.0, RECORD file not found.
+    #          Hint: The package was installed by debian.
+    #
+    # Ubuntu 24.04 marks its python externally managed (PEP 668) and ships pip
+    # through dpkg with no RECORD file, so pip cannot replace itself whatever
+    # flag it is given. The override we were using works for ordinary packages
+    # and cannot work for that one, which is the awkward middle it hides: the
+    # recipe looks consistent and fails on exactly one line, seven minutes into
+    # a build.
+    #
+    # A venv removes the question. tools/protenix installs the same way, so the
+    # three AF3-schema entries in this registry agree.
+    python3.12 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+    ln -sf /opt/venv/bin/python /usr/local/bin/python
+    python -m pip install --no-cache-dir --upgrade pip
 
     mkdir -p /opt
     git clone --depth 1 https://github.com/IntelliGen-AI/IntelliFold /opt/intellifold
@@ -80,9 +97,9 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
     # Upstream's own order. build_data compiles AF3's chemical component
     # database INTO the package -- it must happen at build time, because it
     # downloads, and a compute node has no internet.
-    python -m pip install --no-cache-dir --break-system-packages ./third_party/alphafold3
+    python -m pip install --no-cache-dir ./third_party/alphafold3
     build_data
-    python -m pip install --no-cache-dir --break-system-packages intellifold
+    python -m pip install --no-cache-dir intellifold
 
     # Assert PROPERTIES, not imports (tools/README.md). The cautionary case in
     # this registry is placer, where `import torch` passed while conda had
@@ -124,6 +141,37 @@ PY
 %environment
     export LC_ALL=C.UTF-8
     export PYTHONNOUSERSITE=1
+    # Everything is installed in a venv (see %post), so its bin directory
+    # has to be on PATH or the console scripts this image exists to run are
+    # not found -- and that failure reads as a broken install rather than as
+    # a missing path.
+    export PATH=/opt/venv/bin:$PATH
+
+    # THE PIP CUDA LIBRARIES COME FIRST, AND THIS IS LOAD-BEARING.
+    #
+    # The base is nvidia/cuda:12.8.1-*-devel, so /usr/local/cuda/lib64 holds
+    # CUDA 12.8's libcusparse.so.12 and the Docker image puts that directory at
+    # the front of LD_LIBRARY_PATH. jax 0.9.1's cuda12 plugin is built against
+    # the 12.9 wheels pip installs beside it, under
+    # site-packages/nvidia/*/lib. The 12.8 copies shadow them, the plugin fails
+    # its version probe, and jax reports:
+    #
+    #   Jax plugin configuration error: ... operation cusparseGetProperty(
+    #     MAJOR_VERSION, &major) failed: The cuSPARSE library was not found.
+    #   RuntimeError: Unknown backend: 'gpu' requested, but no platforms that
+    #     are instances of gpu are present. Platforms present are: cpu
+    #
+    # which reads as "this node has no GPU" and is not that. Measured on
+    # CoreHPC jobs 1977201/1977202, both on real H100 nodes whose nvidia-smi
+    # had already printed the device two lines earlier.
+    #
+    # It is reproducible with NO GPU -- see %test -- which is what makes it a
+    # build-time property rather than a job-time surprise.
+    for _d in /opt/venv/lib/python3.12/site-packages/nvidia/*/lib; do
+        [ -d "$_d" ] && LD_LIBRARY_PATH="$_d:${LD_LIBRARY_PATH:-}"
+    done
+    export LD_LIBRARY_PATH
+    unset _d
     # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
     # beside its own source refuses at IMPORT time inside one -- boltz hit
     # exactly this with numba, before any weights or GPU (doc 07). /tmp is
@@ -147,6 +195,32 @@ PY
     # Against the BUILT, read-only image -- %post runs on a writable overlay,
     # so an import that only fails on squashfs cannot be caught there (doc 07).
     python -c "import intellifold, alphafold3, jax; print('intellifold ok, jax', jax.__version__)"
+    # Ask jax for a GPU backend ON THE LOGIN NODE, where there is none, and
+    # insist that the refusal is about the DEVICE and not about a LIBRARY.
+    #
+    # A plain import cannot catch this: jax does not initialise the CUDA plugin
+    # until something asks for it, so the first three builds of this image
+    # passed %test and died on a real H100. The two failures are distinguishable
+    # from here with no hardware at all:
+    #
+    #   no libraries : "The cuSPARSE library was not found"     <- the bug
+    #   no device    : "cuInit(0) failed: Unknown CUDA error 303" <- correct here
+    python - <<'PY'
+import jax
+try:
+    jax.devices("gpu")
+except Exception as exc:
+    message = str(exc)
+else:
+    message = ""   # a GPU was actually visible; nothing to prove
+for bad in ("was not found", "cannot open shared object", "libcu"):
+    if bad in message and "cuInit" not in message:
+        raise SystemExit(
+            "jax cannot load its CUDA libraries, which is a broken image rather "
+            f"than a missing device:\n  {message.splitlines()[0]}"
+        )
+print("jax CUDA plugin loads; the only thing missing here is a device")
+PY
     intellifold predict --help > /dev/null
     sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
       || { echo "no C compiler on PATH in the built image"; exit 1; }

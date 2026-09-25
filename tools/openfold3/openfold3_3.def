@@ -65,22 +65,51 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
     apt-get update
     apt-get install -y --no-install-recommends \
         build-essential ninja-build cmake git ca-certificates \
-        python3.12 python3.12-dev python3-pip
+        python3.12 python3.12-dev python3.12-venv
     rm -rf /var/lib/apt/lists/*
-    ln -sf /usr/bin/python3.12 /usr/local/bin/python
-    python -m pip install --no-cache-dir --break-system-packages --upgrade pip
+    # A VIRTUAL ENVIRONMENT, rather than installing into the distribution's
+    # own interpreter. The first build attempt died on the line this replaces:
+    #
+    #   ERROR: Cannot uninstall pip 24.0, RECORD file not found.
+    #          Hint: The package was installed by debian.
+    #
+    # Ubuntu 24.04 marks its python externally managed (PEP 668) and ships pip
+    # through dpkg with no RECORD file, so pip cannot replace itself whatever
+    # flag it is given. The override we were using works for ordinary packages
+    # and cannot work for that one, which is the awkward middle it hides: the
+    # recipe looks consistent and fails on exactly one line, seven minutes into
+    # a build.
+    #
+    # A venv removes the question. tools/protenix installs the same way, so the
+    # three AF3-schema entries in this registry agree.
+    python3.12 -m venv /opt/venv
+    export PATH=/opt/venv/bin:$PATH
+    ln -sf /opt/venv/bin/python /usr/local/bin/python
+    python -m pip install --no-cache-dir --upgrade pip
 
-    python -m pip install --no-cache-dir --break-system-packages openfold3
-    # setup_openfold is upstream's post-install step. It is run here, at build
-    # time, on the login node -- if it reaches the network for anything, a
-    # compute node cannot, and discovering that in a job is a wasted
-    # allocation. If it wants a destination argument, give it one that is NOT
-    # a share path: share paths are a site fact and belong in tool.conf.
-    setup_openfold || {
-        echo "setup_openfold failed. It is upstream's post-install step; if it"
-        echo "needs arguments or network access this is where to find out,"
-        echo "and NOT in a job on a node with no internet."
-        exit 1; }
+    python -m pip install --no-cache-dir openfold3
+    # setup_openfold is NOT run here, and finding out why is what the first
+    # build attempt bought. It was run here, on the reasoning that a post-install
+    # step reaching the network must do so on the login node. Both halves of
+    # that were right and the placement was still wrong:
+    #
+    #   Setting up OpenFold3...
+    #   Please specify the OpenFold cache directory (default: /root/.openfold3):
+    #   Aborted!
+    #
+    # It is an INTERACTIVE click prompt, so it cannot run in a %post at all --
+    # and what it does once answered is download model parameters from S3 into
+    # the directory it asked about. Weights do not belong inside a .sif (every
+    # other entry in this registry puts them on the share, and a 5 GB image that
+    # has to be rebuilt to re-fetch a checkpoint is the reason), so even a
+    # non-interactive run here would be writing them to the wrong place.
+    #
+    # The console script is asserted instead, and fetch-weights.sh runs it on
+    # the login node with `--non-interactive` and a `--config` JSON naming the
+    # FAC destination. Note for whoever touches this: `--non-interactive` and
+    # `--config` are the two ways past the prompt; the bare command always
+    # prompts, including when stdin is not a terminal, where it aborts.
+    command -v setup_openfold
 
     # Assert PROPERTIES, not imports (tools/README.md). placer is the
     # cautionary case here: `import torch` passed while conda had swapped torch
@@ -130,6 +159,11 @@ PY
 %environment
     export LC_ALL=C.UTF-8
     export PYTHONNOUSERSITE=1
+    # Everything is installed in a venv (see %post), so its bin directory
+    # has to be on PATH or the console scripts this image exists to run are
+    # not found -- and that failure reads as a broken install rather than as
+    # a missing path.
+    export PATH=/opt/venv/bin:$PATH
     # A .sif is a read-only squashfs. Anything that JIT-compiles and caches
     # beside its own source refuses at IMPORT time inside one -- boltz hit
     # exactly this with numba, before any weights or GPU (doc 07). /tmp is
