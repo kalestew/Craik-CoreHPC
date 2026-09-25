@@ -10,11 +10,20 @@ chpc-tool export proteinmpnn        # the variables a project's site.conf needs
 chpc-tool exec proteinmpnn -- python -c 'import torch'
 chpc-tool doctor                    # is each tool really there, and really working
 chpc-tool test proteinmpnn          # run the entry's test.sh -- what STATUS=verified means
+chpc-tool show --env [<tool>...]    # the same entries as KEY='value' lines, for a program
 ```
 
 A project embeds this repo as a submodule and reads the registry; it does not
 restate tool paths of its own. That is the whole point: the next project on
 CoreHPC gets the catalogue for free.
+
+That last line is only true if a project can actually *read* an entry. A
+`tool.conf` is sourced shell and its values are produced by shell, so the only
+faithful reader of one is a shell — which leaves anything else copying the
+registry's values into a second file that goes stale the first time an image is
+rebuilt. `chpc-tool show --env` is the way out: one shell-quoted assignment per
+line, one record per entry, with the image resolved per image rather than
+composed from a directory. See doc 07 for the shape and the reasoning.
 
 ## What belongs here, and what does not
 

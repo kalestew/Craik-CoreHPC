@@ -496,6 +496,40 @@ A script that interpolates `$CHPC_CONTAINERS/<image>.sif` by hand does NOT get
 that fallback; one variable cannot express a per-image answer. Prefer
 `chpc-tool path <tool>` or the `SIF_*` from `chpc-tool export`.
 
+**Reading an entry from something that is not a shell.** A `tool.conf` is
+sourced shell and its values are produced by shell, so the only faithful reader
+of one is a shell. That leaves a Python or Go consumer two bad choices —
+reimplement bash's quoting rules, or copy the registry's values into a second
+file that goes stale the first time an image is rebuilt. `show --env` is the
+third:
+
+```console
+$ chpc-tool show --env boltz
+NAME='boltz'
+KIND='container'
+STATUS='verified'
+GPU_MAX_CC=''
+IMAGE='boltz_2.sif'
+IMAGE_PATH='/mnt/scratch/group/CX500146_DS1/containers/boltz_2.sif'
+IMAGE_MIRROR='/mnt/scratch/group/CX500146_DS1/containers/boltz_2.sif'
+IMAGE_CANONICAL='/mnt/fac/CX500146_DS1/containers/boltz_2.sif'
+EXPORT_SIF_BOLTZ='/mnt/scratch/group/CX500146_DS1/containers/boltz_2.sif'
+EXPORT_BOLTZ_CACHE='/mnt/fac/CX500146_DS1/data/boltz'
+```
+
+One shell-quoted assignment per line, one record per entry, blank line between
+records; no argument means every entry. `IMAGE_PATH` is the resolved answer —
+the same `_image_path` `exec` uses — with both candidates beside it so a caller
+diagnosing *which copy and why* does not have to reimplement the choice.
+`EXPORT_*` are the entry's own exports, evaluated rather than echoed. `NOTE` is
+deliberately absent: it is prose for a person reading plain `show`, it is the
+one field that routinely carries quotes and backticks, and no consumer acts on
+it. A value carrying a newline is refused rather than emitted, because a
+line-oriented format that can turn one value into two lines is not a format.
+
+Hap108or consumes this: its CoreHPC profile names the *entry* and this answers
+with the path, so the filename lives in one place. See its ADR 0021.
+
 Rules:
 
 1. Build or pull into your own scratch, test in an interactive job, then

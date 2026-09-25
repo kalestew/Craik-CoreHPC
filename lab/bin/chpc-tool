@@ -3,6 +3,7 @@
 #
 #   chpc-tool list                          what exists, and whether it is built
 #   chpc-tool show <tool>                   one entry, fully resolved
+#   chpc-tool show --env [<tool>...]        the same as KEY='value' lines, for a program
 #   chpc-tool path <tool>                   the image or install path, for scripts
 #   chpc-tool export <tool>...              plain assignments for a project site.conf
 #   chpc-tool exec <tool> [--] <cmd>...     run a command through the right runtime
@@ -181,6 +182,83 @@ _all_tools() {
   done
 }
 
+# --- the machine-readable form of an entry ------------------------------------
+# `show` prints for a person; `show --env` prints for a program. They are the
+# same entry and deliberately not the same text: a consumer that scraped the
+# human table would break the day a column widened, and this project's own rule
+# for sacct -- parse the structured form, never the printed one -- applies to
+# our registry as much as to SLURM's.
+#
+# WHY THIS EXISTS AT ALL. A tool.conf is sourced shell, so the only faithful
+# reader of one is a shell. Anything else -- a Python consumer, a profile loader
+# -- either reimplements bash's quoting rules or restates the registry's values
+# in a second file, and the second file is the failure the registry README
+# warns about: the day an image is rebuilt under a new version, the copy says
+# the old name and a job dies on a path that has not existed for a week.
+#
+# Values are SINGLE-QUOTED with the standard '\'' escape, so the output is
+# valid shell AND parseable by shlex in any language, and a value can never be
+# confused for a key. One assignment per line; a value carrying a newline is
+# refused rather than emitted, because a line-oriented format that can produce
+# two lines from one value is not a format.
+#
+# NOTE is deliberately absent. It is prose for a human reading `show`, it is the
+# one field that routinely carries quotes and backticks, and no consumer acts on
+# it -- carrying it here would put the registry's most escape-prone field into
+# its most escape-sensitive output for nobody's benefit.
+_NL='
+'
+_kv() {
+  case "$2" in
+    *"$_NL"*) die "${NAME:-?}: $1 contains a newline, which the --env form cannot carry.
+The machine-readable form is one assignment per line; keep multi-line prose in NOTE." ;;
+  esac
+  printf "%s='%s'\n" "$1" "$(printf '%s' "$2" | sed "s/'/'\\\\''/g")"
+}
+
+_show_env() {
+  for _fld in $_FIELDS; do
+    case "$_fld" in NOTE) continue ;; esac
+    eval "_v=\${$_fld:-}"
+    _kv "$_fld" "$_v"
+  done
+  _kv TOOLDIR "$TOOLDIR"
+  # Resolved, and both candidates beside it. IMAGE_PATH is the answer -- it is
+  # what exec, test and the SIF_* exports all use -- and the other two are here
+  # so a caller diagnosing "why that copy" does not have to reimplement the
+  # choice to find out. Empty for a kind that has no image, rather than absent:
+  # a consumer reads a key that is always present and decides on its value.
+  case "$KIND" in
+    container)
+      _kv IMAGE_PATH      "$(_image_path)"
+      _kv IMAGE_MIRROR    "$(_image_mirror_path)"
+      _kv IMAGE_CANONICAL "$(_image_canon_path)" ;;
+    *)
+      _kv IMAGE_PATH ""
+      _kv IMAGE_MIRROR ""
+      _kv IMAGE_CANONICAL "" ;;
+  esac
+  # The entry's own exports, EVALUATED and re-quoted rather than echoed. What
+  # tool_exports emits is source text -- SIF_BOLTZ="/a/b.sif", quotes included --
+  # so passing it through would hand a consumer a value with literal quotes
+  # around it. Prefixed because these are the TOOL's variable names, chosen to
+  # be what the tool itself reads (BOLTZ_CACHE, CHAI_DOWNLOADS_DIR), and one of
+  # them could otherwise collide with a registry field name.
+  if type tool_exports >/dev/null 2>&1; then
+    set -f; _ifs=$IFS; IFS="$_NL"
+    for _l in $(tool_exports); do
+      case "$_l" in
+        [A-Za-z_]*=*)
+          _k=${_l%%=*}
+          eval "$_l"
+          eval "_v=\${$_k:-}"
+          _kv "EXPORT_$_k" "$_v" ;;
+      esac
+    done
+    IFS=$_ifs; set +f
+  fi
+}
+
 # --- subcommands ---------------------------------------------------------------
 cmd_list() {
   printf '%-14s %-9s %-10s %-9s %-4s %s\n' NAME VERSION KIND STATUS GPU LICENSE
@@ -193,29 +271,53 @@ cmd_list() {
 }
 
 cmd_show() {
-  [ $# -ge 1 ] || die "usage: chpc-tool show <tool>"
-  _load "$1"
-  printf 'name        %s\n' "$NAME"
-  printf 'version     %s\n' "${VERSION:--}"
-  printf 'kind        %s\n' "$KIND"
-  printf 'status      %s\n' "$STATUS"
-  printf 'licence     %s\n' "${LICENSE:--}"
-  printf 'upstream    %s\n' "${UPSTREAM:--}"
-  printf 'upstream#   %s\n' "${UPSTREAM_REF:-not recorded}"
-  printf 'entry dir   %s\n' "$TOOLDIR"
-  case "$KIND" in
-    container)
-      printf 'image       %s\n' "$(_image_path)"
-      printf 'gpu (--nv)  %s\n' "$([ "$GPU" = 1 ] && echo yes || echo no)"
-      [ -n "${APPDIR:-}" ] && printf 'appdir      %s  (inside the image)\n' "$APPDIR" ;;
-    *)
-      [ -n "${PREFIX:-}" ]  && printf 'prefix      %s\n' "$PREFIX"
-      [ -n "${ENV_YML:-}" ] && printf 'recipe      %s\n' "$ENV_YML" ;;
-  esac
-  if type tool_exports >/dev/null 2>&1; then
-    printf 'exports\n'
-    tool_exports | sed 's/^/            /'
+  _env=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --env) _env=1; shift ;;
+      --)    shift; break ;;
+      -*)    die "chpc-tool show: unknown option '$1'" ;;
+      *)     break ;;
+    esac
+  done
+
+  if [ "$_env" = 0 ]; then
+    [ $# -ge 1 ] || die "usage: chpc-tool show <tool>   (or: chpc-tool show --env [<tool>...])"
+    _load "$1"
+    printf 'name        %s\n' "$NAME"
+    printf 'version     %s\n' "${VERSION:--}"
+    printf 'kind        %s\n' "$KIND"
+    printf 'status      %s\n' "$STATUS"
+    printf 'licence     %s\n' "${LICENSE:--}"
+    printf 'upstream    %s\n' "${UPSTREAM:--}"
+    printf 'upstream#   %s\n' "${UPSTREAM_REF:-not recorded}"
+    printf 'entry dir   %s\n' "$TOOLDIR"
+    case "$KIND" in
+      container)
+        printf 'image       %s\n' "$(_image_path)"
+        printf 'gpu (--nv)  %s\n' "$([ "$GPU" = 1 ] && echo yes || echo no)"
+        [ -n "${APPDIR:-}" ] && printf 'appdir      %s  (inside the image)\n' "$APPDIR" ;;
+      *)
+        [ -n "${PREFIX:-}" ]  && printf 'prefix      %s\n' "$PREFIX"
+        [ -n "${ENV_YML:-}" ] && printf 'recipe      %s\n' "$ENV_YML" ;;
+    esac
+    if type tool_exports >/dev/null 2>&1; then
+      printf 'exports\n'
+      tool_exports | sed 's/^/            /'
+    fi
+    return 0
   fi
+
+  if [ $# -eq 0 ]; then
+    # shellcheck disable=SC2046
+    set -- $(_all_tools)
+  fi
+  _first=1
+  for _t in "$@"; do
+    [ "$_first" = 1 ] || echo
+    _first=0
+    ( _load "$_t"; _show_env )
+  done
 }
 
 cmd_path() {
@@ -654,7 +756,7 @@ cmd_publish() {
   echo "  8. set STATUS=verified and UPSTREAM_REF in $TOOLDIR/tool.conf, and commit"
 }
 
-usage() { sed -n '2,19p' "$_self" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,20p' "$_self" | sed 's/^# \{0,1\}//'; }
 
 # --- dispatch ------------------------------------------------------------------
 [ $# -ge 1 ] || { usage; exit 2; }
