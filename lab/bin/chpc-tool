@@ -72,12 +72,54 @@ fi
 _FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC"
 
 # Helpers a tool.conf may call from tool_exports / tool_doctor.
+# Where an image would live, in each of the two places it can live.
+# CHPC_CONTAINERS is the fast scratch mirror when one exists, else the FAC copy
+# (lab/chpc.env); CHPC_LAB/containers is always the canonical one.
+_image_mirror_path() {
+  case "${IMAGE:-}" in
+    ""|/*) printf '' ;;
+    *)     printf '%s/%s' "$CHPC_CONTAINERS" "$IMAGE" ;;
+  esac
+}
+_image_canon_path() {
+  case "${IMAGE:-}" in
+    ""|/*) printf '' ;;
+    *)     printf '%s/containers/%s' "${CHPC_LAB:-}" "$IMAGE" ;;
+  esac
+}
+
+# Prefer the fast mirror; fall back to the canonical copy PER IMAGE.
+#
+# lab/chpc.env chooses CHPC_CONTAINERS once, by asking whether the mirror
+# DIRECTORY exists. That is right for speed and wrong the moment the mirror is
+# incomplete -- and an incomplete mirror is not an edge case, it is scheduled:
+# group scratch is purged at 30 days (doc 02), so every image eventually
+# vanishes from it while the FAC copy stays put.
+#
+# MEASURED 2026-09-25: chai1_2.sif and protenix_2.sif were on FAC and absent
+# from the mirror, so `chpc-tool exec` refused both with "image not found"
+# naming a scratch path -- while the image sat readable on FAC, two directories
+# away. `chpc-tool test` therefore could not run either entry, and both were
+# stuck at STATUS=built for want of a file that was present.
+#
+# The mirror is an optimisation. A missing optimisation must degrade to the
+# slower correct thing, not fail. Falling back here fixes it for every caller
+# at once -- exec, test, doctor and the SIF_* variables tool_exports emits --
+# because all four resolve through this one function.
 _image_path() {
   case "${IMAGE:-}" in
-    "") printf '' ;;
-    /*) printf '%s' "$IMAGE" ;;
-    *)  printf '%s/%s' "$CHPC_CONTAINERS" "$IMAGE" ;;
+    "") printf ''; return ;;
+    /*) printf '%s' "$IMAGE"; return ;;
   esac
+  _ip_fast=$(_image_mirror_path)
+  if [ -r "$_ip_fast" ]; then printf '%s' "$_ip_fast"; return; fi
+  _ip_canon=$(_image_canon_path)
+  if [ -n "${CHPC_LAB:-}" ] && [ "$_ip_canon" != "$_ip_fast" ] && [ -r "$_ip_canon" ]; then
+    printf '%s' "$_ip_canon"; return
+  fi
+  # Neither is readable. Return the preferred path, so a caller's error names
+  # the place an operator would stage INTO rather than the fallback.
+  printf '%s' "$_ip_fast"
 }
 _prefix()  { printf '%s' "${PREFIX:-}"; }
 _refdata() { printf '%s/%s' "$CHPC_REFDATA" "${1:-${NAME:-}}"; }
@@ -371,6 +413,7 @@ _absent() {
 # in the subshell and the totals would always read zero.
 _doctor_one() {
   _load "$1"
+  _drift=""
   if [ "$STATUS" = "planned" ]; then
     _drow "$NAME" "----" "planned -- described only, nothing built yet"
     return 2
@@ -391,7 +434,26 @@ _doctor_one() {
   case "$KIND" in
     container)
       _sif=$(_image_path)
-      [ -r "$_sif" ] || { _absent "$NAME" "no image at $_sif"; return $?; }
+      if [ ! -r "$_sif" ]; then
+        # Name BOTH places, because the whole point of the fallback is that
+        # they can disagree, and "no image at <one path>" sent someone looking
+        # in the wrong one once already.
+        _dc=$(_image_canon_path)
+        if [ -n "$_dc" ] && [ "$_dc" != "$_sif" ]; then
+          _absent "$NAME" "no image at $_sif nor $_dc"; return $?
+        fi
+        _absent "$NAME" "no image at $_sif"; return $?
+      fi
+      # The fallback fired: the image is usable and the mirror is stale. Carry
+      # that as a SEPARATE note rather than folding it into _where, because a
+      # tool_doctor that produces its own message replaces _where entirely --
+      # so a drift warning written there would be visible on exactly the
+      # entries that have no tool_doctor, and silent on chai1, protenix and
+      # boltz, which is to say on the ones this mattered for.
+      _dm=$(_image_mirror_path)
+      if [ -n "$_dm" ] && [ "$_sif" != "$_dm" ]; then
+        _drift=" [not in the scratch mirror -- run chpc-stage-containers]"
+      fi
       _where="$_sif" ;;
     native)
       [ -n "${PREFIX:-}" ] || { _drow "$NAME" "FAIL" "KIND=native but PREFIX is unset"; return 1; }
@@ -419,9 +481,9 @@ _doctor_one() {
   if type tool_doctor >/dev/null 2>&1; then
     _st=0; _out=$(tool_doctor 2>&1) || _st=$?
     if [ "$_st" -ne 0 ]; then _drow "$NAME" "FAIL" "${_out:-tool_doctor failed}"; return 1; fi
-    _drow "$NAME" "OK" "${_out:-$_where}"
+    _drow "$NAME" "OK" "${_out:-$_where}$_drift"
   else
-    _drow "$NAME" "OK" "$_where"
+    _drow "$NAME" "OK" "$_where$_drift"
   fi
   return 0
 }

@@ -478,6 +478,24 @@ $CHPC_LAB/bin/<tool>                          wrapper: apptainer exec --nv --bin
 /mnt/scratch/group/CX500146_DS1/containers/    rsync'd copy for fast start-up (lab/bin/chpc-stage-containers)
 ```
 
+**Which of the two a job gets.** `lab/chpc.env` points `CHPC_CONTAINERS` at the
+scratch mirror when that DIRECTORY exists, else at `$CHPC_LAB/containers`. That
+choice is made once, for every image at once, and it cannot notice that the
+mirror is missing the particular image you asked for — which happens on a
+schedule, because group scratch is purged at 30 days while the FAC copy stays.
+
+`chpc-tool` therefore resolves **per image**: it prefers the mirror, and falls
+back to `$CHPC_LAB/containers` for any image the mirror lacks. `exec`, `test`,
+`doctor` and the `SIF_*` variables `chpc-tool export` emits all go through that
+one path, so all four degrade to the slower correct copy instead of failing.
+`doctor` says so when it happens — `[not in the scratch mirror -- run
+chpc-stage-containers]` — because a silent fallback is how a purge goes
+unnoticed until somebody wonders why jobs got slower.
+
+A script that interpolates `$CHPC_CONTAINERS/<image>.sif` by hand does NOT get
+that fallback; one variable cannot express a per-image answer. Prefer
+`chpc-tool path <tool>` or the `SIF_*` from `chpc-tool export`.
+
 Rules:
 
 1. Build or pull into your own scratch, test in an interactive job, then
