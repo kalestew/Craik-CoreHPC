@@ -512,7 +512,7 @@ $CHPC_LAB = /mnt/fac/CX500146_DS1                the share root; lab/chpc.env se
 $CHPC_LAB/containers/<tool>_<version>.sif     immutable; never overwrite, bump the version
 $CHPC_LAB/containers/defs/<tool>_<version>.def a COPY of the recipe; the original is in git, at tools/<tool>/
 $CHPC_LAB/containers/README.md                one line per image: what, version, who built, date, how to run
-$CHPC_LAB/bin/<tool>                          wrapper: apptainer exec --nv --bind ... $CHPC_CONTAINERS/<tool>_<version>.sif "$@"
+$CHPC_LAB/bin/<tool>                          wrapper: chpc-tool exec <tool> -- <entry> "$@" (tools/README.md, "The published wrapper")
 /mnt/scratch/group/CX500146_DS1/containers/    rsync'd copy for fast start-up (lab/bin/chpc-stage-containers)
 ```
 
@@ -572,14 +572,15 @@ Rules:
 
 1. Build or pull into your own scratch, test in an interactive job, then
    `cp` to `$CHPC_LAB/containers/` and `chmod 644`. Group-readable, not writable by others.
-2. Never modify a published sif. New version = new file name; update the
-   wrapper's default.
+2. Never modify a published sif. New version = new file name, and `IMAGE` in
+   the entry's `tool.conf`; the wrapper reads the registry at run time.
 3. Every image gets a `.def` (or the `docker://` URL in the README) so it
    can be rebuilt after a CVE or when the image is lost.
 4. The supported way to run a tool is `chpc-tool exec <tool> -- <program>`
-   (`tools/README.md`). `publish` also writes a `$CHPC_LAB/bin/<tool>` wrapper
-   that prepends the tool's default program and does nothing else: no exports,
-   no GPU guard, no per-image fallback, no `--writable-tmpfs`.
+   (`tools/README.md`). `publish` also writes a `$CHPC_LAB/bin/<tool>` wrapper,
+   which since 2026-09-26 is that same `exec` with the tool's default program
+   always prepended, so it carries the exports, the GPU guard, the per-image
+   fallback and `--writable-tmpfs` too.
 5. Jobs read the sif from group scratch when present (fast VAST), falling
    back to FAC. `lab/bin/chpc-stage-containers` refreshes the scratch copy;
    run it after publishing and after each quarterly purge.

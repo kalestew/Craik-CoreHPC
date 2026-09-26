@@ -440,6 +440,15 @@ nothing and it is the difference between a fold and a job that burns its whole
 wall-clock allocation producing nothing. This affects only the template path,
 because kalign is the only thing Protenix shells out to.
 
+### The image's own help text was wrong until 2026-09-26
+
+`apptainer run-help` on `protenix_2.sif` (built 2026-09-24) advertises
+`protenix predict --input in.json --out_dir out`: there is no `predict`
+subcommand and no `--input` flag, and the model is unnamed. The recipe's
+`%help` was corrected 2026-09-26 to the `pred -i ... -o ... -n ... < /dev/null`
+line under Run it; the built image keeps the old text until the next rebuild.
+Trust this README over the image's help.
+
 ### Two gates that survive on purpose
 
 Both are warnings under the default `strict_error_check=False`, so both drop the

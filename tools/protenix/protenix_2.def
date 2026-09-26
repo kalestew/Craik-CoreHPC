@@ -495,7 +495,14 @@ print('date gate opens and closes as intended')
     pip version is pinned too, at 1.1.0: PyPI's `protenix` major version tracks
     the model generation and `--upgrade` installs 2.0.0.
 
-      chpc-tool exec protenix -- protenix predict --input in.json --out_dir out
+      chpc-tool exec protenix -- protenix pred -i in.json -o out \
+          -n protenix_base_default_v1.0.0 -s 101 -e 5 < /dev/null
+
+    The subcommand is `pred` (`predict` does not exist), the model is named
+    explicitly, and `< /dev/null` matters: kalign reads stdin and a job whose
+    stdin is an open pipe hangs until its time limit (tools/protenix/README.md,
+    Traps). Until 2026-09-26 this text said `protenix predict --input`; the
+    image built 2026-09-24 still shows that line under `apptainer run-help`.
 
     This image has NO sm_120 kernels (torch 2.7.1+cu126 builds sm_50 .. sm_90),
     so ask for --gres=gpu:nvidia_l40s:1 or an H100, never a bare --gres=gpu:1.

@@ -734,35 +734,30 @@ cmd_build() {
 }
 
 cmd_wrapper() {
-  [ $# -ge 1 ] || die "usage: chpc-tool wrapper <tool>"
+  [ $# -ge 1 ] || die "usage: chpc-tool wrapper <tool> [<path>]"
   _load "$1"
   [ "$KIND" = container ] || die "$NAME: wrappers are for containers"
   _src="$SELF_DIR/run-in-container"
   [ -f "$_src" ] || die "no $_src"
   _dst="${2:-$CHPC_LAB/bin/$NAME}"
   mkdir -p "$(dirname "$_dst")"
-  # Anchor on the DEFAULT-VALUE form, not on a bare `^IMAGE=`. run-in-container
-  # assigns IMAGE twice: line 8 is the default we are replacing, and further
-  # down comes `IMAGE="${!img_var:-$IMAGE}"`, which is the <TOOL>_IMAGE
-  # override. A `^IMAGE=.*` substitution silently rewrites that second line
-  # too and the override stops working, with the wrapper otherwise behaving
-  # perfectly -- so it would not be noticed until someone needed it.
-  sed -e "s|^IMAGE=\"\${IMAGE:-[^\"]*}\".*|IMAGE=\"\${IMAGE:-$IMAGE}\"|" \
-      -e "s|^GPU=\"\${GPU:-[^\"]*}\".*|GPU=\"\${GPU:-$GPU}\"|" \
-      -e "s|^ENTRY=\"\${ENTRY:-[^\"]*}\".*|ENTRY=\"\${ENTRY:-${ENTRY:-}}\"|" "$_src" > "$_dst"
-  grep -q 'img_var' "$_dst" \
-    || die "generated wrapper lost run-in-container's <TOOL>_IMAGE override; $_src has changed shape"
-  grep -q "IMAGE:-$IMAGE" "$_dst" \
-    || die "generated wrapper did not pick up IMAGE=$IMAGE; $_src has changed shape"
+  # Two plain assignments, each on its own line and each present once in
+  # run-in-container, are all a wrapper carries: the tool's name and its
+  # ENTRY. Everything else it asks chpc-tool for at run time, so a rebuilt
+  # image (a new IMAGE in tool.conf) needs no new wrapper.
+  sed -e "s|^TOOL=.*|TOOL=$NAME|" \
+      -e "s|^ENTRY=.*|ENTRY=\"${ENTRY:-}\"|" "$_src" > "$_dst"
+  grep -q "^TOOL=$NAME\$" "$_dst" \
+    || die "generated wrapper did not pick up TOOL=$NAME; $_src has changed shape"
   # Without ENTRY the wrapper runs its first argument as a program, so
   # `foldseek version` fails with `"version": executable file not found`.
   # It looks like a broken image and is a wrapper that forgot what it wraps.
-  if [ -n "${ENTRY:-}" ]; then
-    grep -q "ENTRY:-$ENTRY" "$_dst" \
-      || die "generated wrapper did not pick up ENTRY=$ENTRY; $_src has changed shape"
-  fi
+  grep -q "^ENTRY=\"${ENTRY:-}\"\$" "$_dst" \
+    || die "generated wrapper did not pick up ENTRY=${ENTRY:-}; $_src has changed shape"
+  grep -q 'exec "$_ct" exec "$TOOL" --' "$_dst" \
+    || die "generated wrapper does not hand over to chpc-tool exec; $_src has changed shape"
   chmod 755 "$_dst"
-  echo "wrote $_dst  (IMAGE=$IMAGE GPU=$GPU)"
+  echo "wrote $_dst  (chpc-tool exec $NAME -- ${ENTRY:-<program>} ...)"
 }
 
 cmd_publish() {

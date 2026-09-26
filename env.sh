@@ -48,6 +48,15 @@ CHPC_PROJECT=${_chpc_super:-$CHPC_REPO}
 export CHPC_PROJECT
 
 # --- per-project overrides ---------------------------------------------------
+# CHPC_TOOLS is cleared before the override file is read. A value already in
+# the environment came from another checkout's env.sh, or from lab/chpc.env
+# defaulting it to the share's copy, and must not survive into this one: the
+# registry a project gets is the one its pinned commit carries, unless
+# chpc.env.local names another. So the environment never supplies CHPC_TOOLS,
+# and a `${CHPC_TOOLS:-...}` in chpc.env.local behaves like a plain
+# assignment. (Until 2026-09-26 the assignment further down was unconditional
+# and an override in chpc.env.local was silently clobbered.)
+unset CHPC_TOOLS
 for _chpc_f in "${CHPC_ENV_LOCAL:-}" "$CHPC_PROJECT/chpc.env.local" "$CHPC_REPO/lab/chpc.env.local"; do
   if [ -n "$_chpc_f" ] && [ -f "$_chpc_f" ]; then
     # shellcheck disable=SC1090
@@ -75,9 +84,10 @@ export CHPC_USER
 CHPC_ENV=$CHPC_REPO/lab/chpc.env
 export CHPC_ENV
 # The tool registry, from THIS checkout rather than the copy on the share, so a
-# project pinned to a commit gets the tool definitions that commit describes.
-# Set before chpc.env is sourced, which only supplies a fallback.
-CHPC_TOOLS=$CHPC_REPO/tools
+# project pinned to a commit gets the tool definitions that commit describes,
+# unless chpc.env.local set it (the note above the overrides loop). Set before
+# chpc.env is sourced, which only supplies a fallback.
+CHPC_TOOLS="${CHPC_TOOLS:-$CHPC_REPO/tools}"
 export CHPC_TOOLS
 # shellcheck source=lab/chpc.env
 source "$CHPC_ENV"

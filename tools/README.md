@@ -450,11 +450,15 @@ composed from a directory. See doc 07 for the shape and the reasoning.
 ### The published wrapper
 
 `chpc-tool publish` writes `$CHPC_LAB/bin/<tool>` from `lab/bin/run-in-container`.
-It prepends the entry's `ENTRY` and runs the image, and that is all it does: no
-`tool_exports`, no `GPU_MAX_CC` check, no per-image fallback from the mirror to
-FAC, no `--writable-tmpfs`. It exists because the publish step has always
-written one; `chpc-tool exec` is the supported way to run a tool, and a project
-must not depend on the wrapper.
+Since 2026-09-26 that wrapper is `chpc-tool exec <tool> -- <ENTRY> "$@"` under
+a shorter name, so `boltz predict in.yaml` on the login node gets everything
+`exec` gives: the exports, the `GPU_MAX_CC` refusal, the mirror-to-FAC
+fallback, `--writable-tmpfs` where declared. The one difference is that a
+wrapper always prepends `ENTRY`, because a command named after a tool takes
+that tool's arguments; `exec` prepends it only before a flag. The wrapper reads
+the registry at run time through `chpc-tool`, so a rebuilt image needs no new
+wrapper. `chpc-tool exec` stays the form the docs teach, because it is the one
+that works identically from a project's pinned submodule off the share.
 
 ## Traps before you write an entry
 
@@ -473,8 +477,8 @@ makes apptainer try to execute the `.py` itself and fails with a bare
 `FATAL: permission denied`, which says nothing about a missing interpreter.
 Spell the interpreter out. The generated `$CHPC_LAB/bin/<tool>` wrapper is the
 other way round — it always prepends `ENTRY`, because a wrapper named after a
-tool takes that tool's arguments — and that is all it does ("The published
-wrapper", above); `chpc-tool exec` is the supported form.
+tool takes that tool's arguments, and then hands over to `chpc-tool exec`
+("The published wrapper", above).
 
 **A `test.sh` needs a fixture with real variety, not a minimal one.**
 `_template/make_test_pdb.sh` generates the backbone the tests use, and it

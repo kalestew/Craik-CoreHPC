@@ -1,34 +1,38 @@
 #!/usr/bin/env bash
-# Generic wrapper: copy this to $CHPC_LAB/bin/<tool>, set IMAGE (and GPU=1 if
-# the tool needs --nv). Works identically on the login node, in salloc, in sbatch.
-#   mytool --help
-#   srun mytool input.fa
-# Override image: MYTOOL_IMAGE=/path/other.sif mytool ...
+# $CHPC_LAB/bin/<tool>: a tool's own name as a command. `chpc-tool wrapper
+# <tool>` writes one from this file by filling in the two assignments below,
+# and `chpc-tool publish` calls that. Everything else -- which image, --nv,
+# the binds, the tool's exported variables, the GPU_MAX_CC refusal,
+# --writable-tmpfs, the fallback from the scratch mirror to FAC -- is
+# chpc-tool's, because this script hands straight over to `chpc-tool exec`:
+#
+#   foldseek version            is   chpc-tool exec foldseek -- foldseek version
+#   boltz predict in.yaml ...   is   chpc-tool exec boltz -- boltz predict in.yaml ...
+#
+# The one thing a wrapper does differently is that ENTRY is ALWAYS prepended:
+# a command named after a tool takes that tool's arguments, whereas
+# `chpc-tool exec` prepends ENTRY only before a flag or before nothing at all
+# (tools/README.md, Traps). So `boltz bash` is not a shell inside the image;
+# `chpc-tool exec boltz -- bash` is.
+#
+# Until 2026-09-26 this file ran apptainer itself and did none of the above,
+# which is why every README says `chpc-tool exec` is the supported form. It
+# still is; the wrapper is now merely the same thing under a shorter name.
 set -euo pipefail
-IMAGE="${IMAGE:-mytool_1.0.sif}"        # file name inside $CHPC_CONTAINERS, or absolute path
-GPU="${GPU:-0}"                          # 1 = pass --nv
-EXTRA_BIND="${EXTRA_BIND:-}"             # e.g. "$CHPC_LAB/data:/refdata:ro"
-# The program this wrapper IS. `foldseek version` has to mean "run foldseek
-# with the argument version", not "run a program called version" -- a wrapper
-# named after a tool takes the tool's arguments, not a command line. Empty
-# means the caller names the program, which is the generic-copy behaviour.
-ENTRY="${ENTRY:-}"
+TOOL=mytool
+ENTRY=""
 
-if [ -z "${CHPC_CONTAINERS:-}" ]; then
-  for f in "${CHPC_ENV:-}" "/mnt/fac/${FAC_SHARE:-CX500146_DS1}/chpc.env" "$HOME/chpc.env"; do
-    [ -n "$f" ] && [ -f "$f" ] && source "$f" && break
-  done
+# chpc-tool lives beside this wrapper on the share; a copy elsewhere falls
+# back to PATH. The registry (../tools) is resolved by chpc-tool itself.
+_here=$(cd "$(dirname "$0")" && pwd -P)
+if [ -x "$_here/chpc-tool" ]; then
+  _ct="$_here/chpc-tool"
+elif _ct=$(command -v chpc-tool 2>/dev/null); then
+  :
+else
+  echo "$(basename "$0"): no chpc-tool beside $_here and none on PATH" >&2
+  exit 127
 fi
-tool=$(basename "$0")
-img_var="$(echo "$tool" | tr '[:lower:]-' '[:upper:]_')_IMAGE"
-IMAGE="${!img_var:-$IMAGE}"
-case "$IMAGE" in /*) sif="$IMAGE" ;; *) sif="${CHPC_CONTAINERS:?set CHPC_CONTAINERS or source chpc.env}/$IMAGE" ;; esac
-[ -r "$sif" ] || { echo "$tool: image not found: $sif" >&2; exit 127; }
-
-args=(exec)
-[ "$GPU" = "1" ] && args+=(--nv)
-[ -z "${APPTAINER_BIND:-}" ] && args+=(--bind /mnt/scratch,/mnt/fac)   # chpc.env normally sets APPTAINER_BIND
-[ -n "$EXTRA_BIND" ] && args+=(--bind "$EXTRA_BIND")
 # ENTRY unquoted on purpose: it may be more than one word ("python -u").
 # shellcheck disable=SC2086
-exec apptainer "${args[@]}" "$sif" ${ENTRY:+$ENTRY} "$@"
+exec "$_ct" exec "$TOOL" -- ${ENTRY:+$ENTRY} "$@"
