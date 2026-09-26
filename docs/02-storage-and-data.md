@@ -133,14 +133,64 @@ header.
 
 **There is no FAC Globus collection.** The two CoreHPC collections are User
 Home and User Scratch, so a Globus transfer intended for a lab share lands in
-scratch and then needs an `rsync` into FAC — and it must not be aimed at Home,
+scratch and then needs a copy into FAC -- and it must not be aimed at Home,
 which is the 20 GiB quota. Weights, containers and reference databases belong
 on FAC precisely because scratch is purged, so Globus is the first leg of that
 trip and never the whole of it. When the data is already on a workstation that
 mounts the share, copying it there directly skips Globus altogether.
+`chpc-globus.sh` below is that two-leg trip, scripted.
 
 Approved data-transfer paths per the AUP are Globus, the FAC share, and Open
 OnDemand. Do not set up other tunnels for data egress.
+
+### `chpc-globus.sh`: the scripted route
+
+Confirmed with the cluster administrators on 2026-09-26 that Globus is the
+preferred path, so it is a first-party one here rather than a manual procedure
+in a document. `scripts/chpc-globus.sh` is the replacement for
+`scripts/chpc-stage.sh`, and it is what a pipeline should depend on.
+
+```bash
+chpc-globus.sh doctor                            # what is set up, what is not
+chpc-globus.sh env                               # the resolved settings
+chpc-globus.sh push ./outputs "$CHPC_LAB/proj/outputs"
+chpc-globus.sh pull "$CHPC_LAB/proj/results" ~/results
+chpc-globus.sh push ./big "$CHPC_LAB/x" --dry-run   # print the route, run nothing
+```
+
+**Two legs, and it says which it took.** Because there is no FAC collection, a
+push to the share is one Globus transfer into `$CHPC_GLOBUS_STAGING` on user
+scratch, then a cluster-local `cp`, then `chpc-fac-fixacl` on what landed --
+without that last step the files are unreadable by the person who just wrote
+them. A pull is the same trip backwards, and it fills the buffer *before* it
+transfers: a transfer of an unfilled staging path does not fail, it delivers an
+empty directory and reports `SUCCEEDED`.
+
+A transfer to or from scratch itself is one leg and needs no ssh at all.
+
+**What is a site fact and what is yours.** `lab/chpc.env` holds both collection
+UUIDs and derives `CHPC_GLOBUS_SCRATCH_ROOT` from `CHPC_USER` -- the scratch
+collection is one shared UUID whose `/` is your own `/mnt/scratch/user/$CHPC_USER`,
+verified 2026-09-26. Nothing about the cluster side is per-person. What you
+declare, in `chpc.env.local`, is the directory on your own machine that Globus
+may write (`CHPC_GLOBUS_STAGING_LOCAL`) and what `/` means inside your personal
+collection (`CHPC_GLOBUS_LOCAL_ROOT`); the collection id itself is detected with
+`globus endpoint local-id`, so there is nothing to paste. See
+`chpc.env.local.example`.
+
+**The root matters more than it looks.** A collection path is a POSIX path with
+the collection's root removed, and a wrong root does not fail a transfer -- it
+relocates one, successfully, with nothing downstream able to tell. That is why
+`chpc-globus.sh` refuses a path outside its declared root instead of passing it
+through, and why `doctor` resolves your staging directory through the declared
+root and asks the collection to list it rather than trusting the setting.
+
+`globus collection show` needs a `manage_collections` consent that a transfer
+does not, so a `MissingLoginError` from *that* command is not a broken setup.
+`globus ls` is the check that matches what a transfer needs. Note also that the
+`data_access` scope exists only for mapped collections: a `globus login --gcs`
+against a personal collection fails with `UNKNOWN_SCOPE_ERROR` and is not
+something you did wrong.
 
 ### "Slow" is about bandwidth, not about every access pattern
 
