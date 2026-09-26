@@ -10,9 +10,9 @@
 # $CHPC_REFDATA/foldseek/<slug>, where the slug is the name lower-cased with
 # `/` as `_`, and the database is the prefix <destination>/<slug>: the form
 # `foldseek easy-search` takes, and what `chpc-tool export foldseek` puts in
-# FOLDSEEK_DB_PDB for the default. Sizes (2026): PDB about 1.5 GB,
-# Alphafold/Swiss-Prot about 4 GB, Alphafold/UniProt far too big for this
-# share without a conversation first.
+# FOLDSEEK_DB_PDB for the default. Sizes on disk: PDB 3.1 GB (fetched
+# 2026-09-26), Alphafold/Swiss-Prot several GB, Alphafold/UniProt far too big
+# for this share without a conversation first.
 #
 # A partly-written database is worse than none, so the download lands in a
 # temporary directory beside the destination and is moved into place only

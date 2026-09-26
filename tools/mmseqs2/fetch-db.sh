@@ -5,8 +5,8 @@
 #   corehpc/tools/mmseqs2/fetch-db.sh [<name> [<destination>]]
 #
 # <name> is any name `mmseqs databases` lists (UniProtKB/Swiss-Prot, UniRef50,
-# PDB, NR, ...); the default is UniProtKB/Swiss-Prot, small (about 300 MB
-# built) and curated, which is the right first target for "what is this
+# PDB, NR, ...); the default is UniProtKB/Swiss-Prot, small (406 MB on disk,
+# fetched 2026-09-26) and curated, which is the right first target for "what is this
 # sequence". The destination defaults to $CHPC_REFDATA/mmseqs2/<slug>, where
 # the slug is the name lower-cased, `/` as `_` and `uniprotkb_` dropped, so
 # the default is $CHPC_REFDATA/mmseqs2/swiss-prot/swiss-prot: the prefix

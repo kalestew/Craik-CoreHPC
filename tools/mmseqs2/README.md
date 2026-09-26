@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Status | verified 2026-09-26 on `gcpu2-33` (CPU, job 2000974): `chpc-tool test mmseqs2`, self-hit at identity 1.000, 1 s |
+| Status | verified 2026-09-26 on `gcpu2-34` (CPU, job 2002450): `chpc-tool test mmseqs2`, self-hit at identity 1.000, then the fixture against Swiss-Prot, 151 hits, top `A7ZTV5` at identity 0.987, 24 s. Earlier the same day on `gcpu2-33` (job 2000974) with no database installed |
 | Image | `mmseqs2_18.sif`, 51 MB; recipe [`mmseqs2_18.def`](mmseqs2_18.def) |
 | GPU | CPU (`-p cpu`) |
-| Weights | none. Databases: one directory each under `$MMSEQS2_DB_DIR` (`$CHPC_LAB/data/mmseqs2`), fetched on the login node by [`fetch-db.sh`](fetch-db.sh); `$MMSEQS2_DB_SWISSPROT` is Swiss-Prot. **None for this image as of 2026-09-26**; the 1 TB ColabFold set beside them is `colabfold_search`'s (Do not miss) |
+| Weights | none. Databases: one directory each under `$MMSEQS2_DB_DIR` (`$CHPC_LAB/data/mmseqs2`), fetched on the login node by [`fetch-db.sh`](fetch-db.sh); `$MMSEQS2_DB_SWISSPROT` is Swiss-Prot, **installed 2026-09-26** (406 MB on disk); the 1 TB ColabFold set beside it is `colabfold_search`'s (Do not miss) |
 | Licence | GPL-3.0 |
 | Upstream | release `18-8cc5c`, prebuilt `mmseqs-linux-avx2` |
 | Base | `debian:12-slim` |
@@ -18,15 +18,15 @@ salloc -p cpu -c 8 --mem 16G -t 2:00:00
 mkdir -p /mnt/scratch/user/$USER/mmseqs2/run1 && cd "$_"   # q.fa and targets.fa here; the same path is valid inside the container
 chpc-tool exec mmseqs2 -- mmseqs easy-search q.fa targets.fa res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"
 eval "$(chpc-tool export mmseqs2)"                            # $MMSEQS2_DB_SWISSPROT
-chpc-tool exec mmseqs2 -- mmseqs easy-search q.fa "$MMSEQS2_DB_SWISSPROT" res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"   # (untested: not fetched yet)
+chpc-tool exec mmseqs2 -- mmseqs easy-search q.fa "$MMSEQS2_DB_SWISSPROT" res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"
 ```
 
 The first line is the self-test's form, which searches `q.fa` against itself
 with `--threads 2`: `easy-search` takes a FASTA as the target as readily as a
 prebuilt database (`--threads "$SLURM_CPUS_PER_TASK"` is untested). The second
-is the form for a database; `$MMSEQS2_DB_SWISSPROT` is where `fetch-db.sh`
-puts Swiss-Prot, and until someone has run that on the login node `chpc-tool
-doctor mmseqs2` warns and the search dies (Do not miss).
+is the form for a database, and what `test.sh` runs against Swiss-Prot;
+`$MMSEQS2_DB_SWISSPROT` is where `fetch-db.sh` put it on 2026-09-26, and
+`chpc-tool doctor mmseqs2` says so (Do not miss).
 
 As a job: copy `templates/slurm/tool-gpu.sbatch` with `--partition=cpu` and no
 `--gres` (drop its `nvidia-smi` line too), and set the other EDIT lines to the
@@ -56,15 +56,15 @@ clears it at the defaults (Provenance), a low-complexity one may not
 
 ## Do not miss
 
-- **No database for this image is installed (2026-09-26).** `chpc-tool
-  doctor mmseqs2` warns until someone runs [`fetch-db.sh`](fetch-db.sh) on the
-  login node, the only node with internet
-  ([doc 02](../../docs/02-storage-and-data.md#internet-access)): with no
-  arguments it fetches UniProtKB/Swiss-Prot (about 300 MB built) to
-  `$MMSEQS2_DB_SWISSPROT`; with a name from `mmseqs databases` (UniRef50,
-  PDB, ...) it lands beside it under `$MMSEQS2_DB_DIR`. UniRef90 and NR are
-  hundreds of GB; budget the share before starting one. `test.sh` searches
-  Swiss-Prot too once it exists.
+- **Swiss-Prot is the only database installed for this image (2026-09-26,
+  406 MB).** Another is [`fetch-db.sh`](fetch-db.sh) `<name>` on the login
+  node, the only node with internet
+  ([doc 02](../../docs/02-storage-and-data.md#internet-access)), with a name
+  from `mmseqs databases` (UniRef50, PDB, ...); it lands beside Swiss-Prot
+  under `$MMSEQS2_DB_DIR`. UniRef90 and NR are hundreds of GB; budget the
+  share before starting one. `chpc-tool doctor mmseqs2` warns only while
+  Swiss-Prot itself is missing, and `test.sh` searches it, so `chpc-tool test
+  mmseqs2` after a re-fetch is the check.
 - **The 1 TB under `$MMSEQS2_DB_DIR/colabfold_uniref30_2302_envdb_202108` is
   not a target for this image.** It is UniRef30 2302 plus the ColabFold
   environmental database, extracted and indexed 2026-09-24 by its own

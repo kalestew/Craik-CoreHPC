@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Status | verified 2026-09-26 on `gcpu2-33` (CPU, job 2000974): `chpc-tool test foldseek`, self-hit identity 1.000 over 60 residues, E = 1.06e-09, under a second |
+| Status | verified 2026-09-26 on `gcpu2-34` (CPU, job 2002450): `chpc-tool test foldseek`, self-hit identity 1.000 over 60 residues, E = 1.06e-09, then the fixture searched against the PDB (ran, 0 hits, as a 60-residue idealised backbone should), 8 s. Earlier the same day on `gcpu2-33` (job 2000974) with no database installed |
 | Image | `foldseek_10.sif`, 46 MB; recipe [`foldseek_10.def`](foldseek_10.def) |
 | GPU | CPU (`salloc -p cpu`) |
-| Weights | none. Databases: one directory each under `$FOLDSEEK_DB_DIR` (`$CHPC_LAB/data/foldseek`), fetched on the login node by [`fetch-db.sh`](fetch-db.sh); `$FOLDSEEK_DB_PDB` is the PDB. **None is installed as of 2026-09-26**; `chpc-tool doctor foldseek` says |
+| Weights | none. Databases: one directory each under `$FOLDSEEK_DB_DIR` (`$CHPC_LAB/data/foldseek`), fetched on the login node by [`fetch-db.sh`](fetch-db.sh); `$FOLDSEEK_DB_PDB` is the PDB, **installed 2026-09-26** (3.1 GB on disk). `chpc-tool doctor foldseek` says whether it is there |
 | Licence | GPL-3.0 |
 | Upstream | release `10-941cd33`, prebuilt `foldseek-linux-avx2` |
 | Base | `debian:12-slim` |
@@ -17,12 +17,12 @@
 salloc -p cpu -c 8 --mem 16G -t 2:00:00
 mkdir -p /mnt/scratch/user/$USER/foldseek/run1 && cd "$_"   # query.pdb here; the same path is valid inside the container
 eval "$(chpc-tool export foldseek)"                          # $FOLDSEEK_DB_PDB, the PDB as a Foldseek database
-chpc-tool exec foldseek -- foldseek easy-search query.pdb "$FOLDSEEK_DB_PDB" res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"   # (untested against the PDB: not fetched yet)
+chpc-tool exec foldseek -- foldseek easy-search query.pdb "$FOLDSEEK_DB_PDB" res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"
 ```
 
-The program and its arguments are what `test.sh` runs; `$FOLDSEEK_DB_PDB` is
-where `fetch-db.sh` puts the PDB, and until someone has run that on the login
-node `chpc-tool doctor foldseek` warns and the search dies (Do not miss). As a job: copy
+The program and its arguments are what `test.sh` runs against the PDB;
+`$FOLDSEEK_DB_PDB` is where `fetch-db.sh` put it on 2026-09-26, and
+`chpc-tool doctor foldseek` says so (Do not miss). As a job: copy
 `templates/slurm/tool-gpu.sbatch`, switch it to `--partition=cpu` and drop
 the `--gres` and `nvidia-smi` lines as its header says, and set the tool, the
 work directory and the command after `--` to the values above. The method,
@@ -41,7 +41,8 @@ Output is `res.m8`, tab-separated, one hit per line, in the default
 `convertalis` format: query, target, `fident` (column 3), alignment length
 (column 4), mismatches, gap opens, query start/end, target start/end, E-value
 (column 11), bit score. `test.sh` reads columns 3, 4 and 11 of the first line.
-Hits are listed per query, best first (untested against a real database). The
+Hits are listed per query, best first (the ordering is untested: the
+self-test's fixture finds nothing in the PDB, as it should). The
 `tmp` directory is Foldseek's own scratch and is safe to delete afterwards.
 
 Before trusting a number: `fident` is sequence identity over the aligned
@@ -52,15 +53,15 @@ is not comparable to one against the PDB.
 
 ## Do not miss
 
-- **No database is installed (2026-09-26).** `chpc-tool doctor foldseek`
-  warns until someone runs [`fetch-db.sh`](fetch-db.sh) on the **login
-  node**, the only node with internet
-  ([`docs/02`](../../docs/02-storage-and-data.md#internet-access)): with no
-  arguments it fetches the PDB (about 1.5 GB) to `$FOLDSEEK_DB_PDB`; with a
+- **The PDB is the only database installed (2026-09-26, 3.1 GB).** Another
+  is [`fetch-db.sh`](fetch-db.sh) `<name>` on the **login node**, the only
+  node with internet
+  ([`docs/02`](../../docs/02-storage-and-data.md#internet-access)), with a
   name from `foldseek databases` (`Alphafold/Swiss-Prot`, `Alphafold/Proteome`
-  for the human proteome, ...) it lands beside it under `$FOLDSEEK_DB_DIR`.
-  `test.sh` searches the PDB too once it exists, so the next `chpc-tool test
-  foldseek` after the fetch is the check.
+  for the human proteome, ...); it lands beside the PDB under
+  `$FOLDSEEK_DB_DIR`. `chpc-tool doctor foldseek` warns only while the PDB
+  itself is missing, and `test.sh` searches it, so `chpc-tool test foldseek`
+  after a re-fetch is the check.
 - **`--exhaustive-search 1` is not a production flag.** `test.sh` passes it
   because a synthetic 60-residue fixture cannot clear the prefilter; against a
   real database it disables the prefilter and aligns everything. Leave it out.
