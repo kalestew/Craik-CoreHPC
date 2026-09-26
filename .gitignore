@@ -19,3 +19,6 @@ tools/*/*
 !tools/*/*.sh
 !tools/*/assets.tsv
 !tools/*/README.md
+
+# Per-person Claude Code settings (permission rules for this checkout)
+.claude/settings.local.json
