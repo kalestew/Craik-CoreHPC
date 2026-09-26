@@ -76,7 +76,7 @@ Then, on a laptop or on the cluster:
 ```bash
 source corehpc/env.sh                      # any path, bash or zsh
 chpc-prime.sh                              # Duo once; scripts/ and lab/bin/ are now on PATH
-chpc-stage.sh ./inputs/ "$CHPC_GROUP_SCRATCH/myproj/inputs/"
+chpc-globus.sh push ./inputs "$CHPC_LAB/myproj/inputs"   # Globus; two legs to FAC, one to scratch
 cp corehpc/templates/slurm/gpu.sbatch jobs/train.sbatch   # copy templates out; edit the copy
 sbatch jobs/train.sbatch                   # the job sources the pinned chpc.env through $CHPC_ENV
 chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your project, not the submodule
@@ -158,7 +158,8 @@ chpc.env.local.example      Copy to <your project>/chpc.env.local: username, sha
 ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
-scripts/chpc-stage.sh       rsync files to group scratch through the master session
+scripts/chpc-globus.sh      Move data over Globus, the approved path (push/pull/doctor/env)
+scripts/chpc-stage.sh       rsync to group scratch -- NOT an approved path; see its header
 tools/<tool>/tool.conf      THE TOOL REGISTRY: one entry per piece of software
 tools/README.md             What an entry must declare, and how to add one
 templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, community, gpu, multi-gpu, array, mpi, container, local-nvme)

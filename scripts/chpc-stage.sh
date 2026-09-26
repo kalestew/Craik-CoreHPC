@@ -10,8 +10,12 @@
 # PHI-compliance reasons; an attendee's scp to the UCSF bastion failed live.
 #
 # This script predates that finding and is kept because retiring it is the
-# owner's call, not a doc edit's. Prefer Globus (doc 02) for anything that is
-# not a handful of small files, and do not make a pipeline depend on this.
+# owner's call, not a doc edit's.
+#
+# USE scripts/chpc-globus.sh INSTEAD. As of 2026-09-26 the approved path is
+# scripted and first-party: it takes the same two arguments, works out whether
+# the destination needs one leg or two, repairs the FAC ACL on what it lands,
+# and has a --dry-run that prints the route. Nothing should depend on this file.
 # ---------------------------------------------------------------------------
 # Usage:   chpc-stage.sh <local-path> <remote-path> [extra rsync args]
 # Example: chpc-stage.sh ./inputs/ "$CHPC_GROUP_SCRATCH/proj/inputs/"
