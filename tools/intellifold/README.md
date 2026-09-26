@@ -2,14 +2,15 @@
 
 | | |
 |---|---|
-| Status | **planned** — nothing built, nothing fetched, nothing run |
-| Recipe | [`intellifold_2.def`](intellifold_2.def) — written, never executed |
+| Status | **built** 2026-09-25 — folded a real covalent complex on a compute node, twice. Not `verified`: `test.sh` has not run. |
+| Image | `intellifold_2.sif` — [`intellifold_2.def`](intellifold_2.def) |
 | Upstream | <https://github.com/IntelliGen-AI/IntelliFold> |
 | Licence | **Apache-2.0, code *and* model parameters, commercial use permitted** |
-| Weights | not fetched — [`fetch-weights.sh`](fetch-weights.sh), login node only |
+| Weights | on FAC — [`fetch-weights.sh`](fetch-weights.sh), login node only |
 | Engine | AlphaFold 3's JAX/XLA engine, vendored and **built from source** |
-| GPU | yes — `GPU_MAX_CC` **UNMEASURED**, and unusually hard to measure |
-| Bonds | **UNQUALIFIED** — see below |
+| GPU | `GPU_MAX_CC=9.0` — an **exercised lower bound**, not a derived ceiling. See below. |
+| Bonds | the AF3 keys are honoured; a declared `covale` may still be 2.78 Å. See below. |
+| Training cutoff | **none stated upstream.** Re-checked 2026-09-25. See below. |
 
 Upstream's licence statement, verbatim:
 
@@ -59,14 +60,27 @@ fold on each of `--gres=gpu:nvidia_l40s:1` (8.9), an H100 NVL (9.0) and a
 Blackwell node (12.0) — and write the job ids into this table before setting
 `GPU_MAX_CC` to anything.
 
-Until then `tool.conf` carries the literal `GPU_MAX_CC=UNMEASURED`, which
-**fails closed**: `chpc-tool` compares with `awk` (`a+0 > b+0`), `awk` reads a
-non-numeric string as `0`, every device is above `0`, and `chpc-tool exec
-intellifold` refuses on any GPU node. A refusal costs seconds; a wrong ceiling
-is a job that dies twenty minutes in with `no kernel image is available for
-execution on the device`, which reads as a broken install and is a scheduling
-accident (doc 05). Five tools here already declare 9.0 and lose jobs to exactly
-that on the Blackwell nodes.
+`tool.conf` now carries `GPU_MAX_CC=9.0`, and its provenance is different from
+every other entry here. There is no torch, so there are no arch flags to read.
+What the number rests on is **a real fold**: a 658-token covalent
+peptide-MHC/Fv complex, five diffusion samples, completed on an H100 NVL
+(cc 9.0) on 2026-09-25, twice, on two ligand routes.
+
+So read it as **an exercised lower bound rather than a derived ceiling.** 8.9
+(L40S) and 9.0 (H100 NVL) are permitted; 12.0 (RTX PRO 6000) is refused, which
+is the right behaviour while Blackwell is untested — JAX compiles its
+Pallas/Triton kernels at first use, and a node class nothing has run on is a
+node class nothing has run on. Raising it to 12.0 is a fold on `ggpu1-[13-19]`
+and a job id in this table, not an edit.
+
+Before it was measured the field held the literal `UNMEASURED`, which **fails
+closed**: `chpc-tool` compares with `awk` (`a+0 > b+0`), `awk` reads a
+non-numeric string as `0`, every device is above `0`, and `chpc-tool exec`
+refuses on any GPU node. A refusal costs seconds; a wrong ceiling is a job that
+dies twenty minutes in with `no kernel image is available for execution on the
+device`, which reads as a broken install and is a scheduling accident
+(doc 05). Five tools here declare 9.0 and lose jobs to exactly that on the
+Blackwell nodes.
 
 **Two: the C-compiler trap is here in its second form.** Boltz's is the first
 form — `python:3.12-slim` with no compiler, Triton JIT-compiling cuequivariance
@@ -273,3 +287,35 @@ cutoff applies here; it does not.
 
 **kalign is not installed and is not needed** on this path, because the
 correspondence is supplied rather than computed.
+
+## No training cutoff is stated upstream, and that blocks templating
+
+Re-checked 2026-09-25, and this time against the paper rather than only the
+release notes. **IntelliFold-2 states no training data cutoff anywhere:**
+
+- the preprint (*IntelliFold-2: Surpassing AlphaFold 3 via Architectural
+  Refinement and Structural Consistency*, bioRxiv 2026.02.09.704787) says only
+  "We re-processed the Protein Data Bank (PDB) dataset using an updated
+  pipeline" in its data-curation section, with no date, no range and no
+  evaluation-set boundary;
+- the GitHub README gives none;
+- the Hugging Face card gives none;
+- the staged `model_v2` directory carries no metadata file.
+
+Third parties benchmarking it partition on AlphaFold 3's 2021-09-30, but that
+is a uniform benchmark date applied to ten co-folding tools at once — a
+property of the benchmark, not a claim about these weights.
+
+**A cutoff is a property of the weights, and this is a 2026 model.** Inheriting
+IntelliFold-1's number would be an assumption, and the risk runs the dangerous
+way: a 2026 model re-processing the PDB plausibly includes a 2024 release, which
+would turn a template set meant as independent evidence into a memory aid and
+make every score taken under it meaningless.
+
+So a consumer who wants to template this tool has to establish the date
+themselves — the mechanics work, and `## Templates` above records them. What
+cannot be established from this page is whether a given structure post-dates the
+weights. Hap108or records that as a declared refusal with reason
+`cutoff_unstated_upstream` in both its template sets, dated, so that the refusal
+reads as a finding somebody can overturn rather than as an omission. Restore a
+date here when upstream states one, not before.

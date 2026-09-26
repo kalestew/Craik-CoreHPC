@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| Status | **planned** — nothing built, nothing fetched, nothing run |
-| Recipe | [`protenix_1.def`](protenix_1.def) — written, never executed |
+| Status | **verified** 2026-09-25 — SLURM 1986816, ggpu1-09, NVIDIA L40S, 140 s, exit 0 |
+| Image | `protenix_2.sif` — [`protenix_2.def`](protenix_2.def), the templates build |
 | Upstream | <https://github.com/bytedance/Protenix> |
 | Licence | code Apache-2.0; **v1 parameters Apache-2.0, commercial use permitted** |
-| Weights | not fetched — [`fetch-weights.sh`](fetch-weights.sh), login node only |
-| GPU | yes — `GPU_MAX_CC` **UNMEASURED**, see below |
+| Weights | on FAC — [`fetch-weights.sh`](fetch-weights.sh), login node only |
+| GPU | yes — `GPU_MAX_CC=9.0`, measured; **no `sm_120`**, so never a bare `--gres=gpu:1` |
 | Pinned at | **v1**, for the licence. See "Why v1". |
 
 An AlphaFold-3-class co-folding model that, unlike AlphaFold 3, is Apache-2.0
@@ -110,7 +110,7 @@ an MSA server is a job that hangs until it times out. Generate on the login
 node — that is what [`../mmseqs2`](../mmseqs2) and [`../colabfold`](../colabfold)
 are for — and pass the files in.
 
-## `GPU_MAX_CC` is UNMEASURED, and that is a deliberate refusal
+## `GPU_MAX_CC` is 9.0, measured — so never a bare `--gres=gpu:1`
 
 The `gpu` partition is three different devices: L40S at compute capability
 8.9, H100 NVL at 9.0, RTX PRO 6000 Blackwell at 12.0. A bare `--gres=gpu:1`
@@ -119,17 +119,28 @@ Blackwell nodes with `no kernel image is available for execution on the
 device` — which reads as a broken install and is a scheduling accident
 (doc 05).
 
-`tool.conf` therefore carries the literal `GPU_MAX_CC=UNMEASURED`. `chpc-tool`
-compares with `awk` (`a+0 > b+0`) and `awk` reads a non-numeric string as `0`,
-so **every** device is above this ceiling and `chpc-tool exec protenix` refuses
-on any GPU node until a real number replaces it. Fails closed, on purpose: a
-refusal is recoverable in seconds, a wrong ceiling is a job that dies twenty
-minutes in with a message about the wrong thing.
+**Measured 2026-09-25 inside the built image, on the login node, on the pinned
+version** (protenix 1.1.0, torch 2.7.1+cu126):
 
-Measure it inside the built image, **on the login node**:
+```
+sm_50 sm_60 sm_70 sm_75 sm_80 sm_86 sm_90
+```
+
+No `sm_120`. So this is one of the entries that must name its device: ask for
+`--gres=gpu:nvidia_l40s:1` or an H100, or exclude `ggpu1-[13-19]` by name,
+which keeps both eligible and is what this project's job scripts do.
+
+The value stayed `UNMEASURED` until it was measured, and that literal is the
+reason nothing was lost in the meantime: `chpc-tool` compares with `awk`
+(`a+0 > b+0`) and `awk` reads a non-numeric string as `0`, so every device is
+above that ceiling and `chpc-tool exec` refuses on any GPU node. Fails closed,
+on purpose — a refusal is recoverable in seconds, a wrong ceiling is a job that
+dies twenty minutes in with a message about the wrong thing.
+
+To re-measure after a rebuild, inside the image, **on the login node**:
 
 ```bash
-/usr/bin/apptainer exec "$CHPC_CONTAINERS/protenix_1.sif" \
+/usr/bin/apptainer exec "$CHPC_CONTAINERS/protenix_2.sif" \
   python -c "import torch; print(torch._C._cuda_getArchFlags())"
 ```
 
@@ -234,7 +245,8 @@ text says *"requires templatesPath in input JSON"*, and a parser for both
 hmmsearch a3m and hhsearch hhr hits.
 
 `protenix_1.sif` could reach all of that and never use a template, for three
-independent reasons. `protenix_2` fixes all three.
+independent reasons. `protenix_2.sif` — the image this entry now ships — fixes
+all three.
 
 ### 1. No kalign, and Ubuntu has no package for it
 
@@ -431,3 +443,39 @@ Measured consequence on a real three-member related set: of fifteen chain hits,
 for MHC-α, and none for β2m or the peptide, because those two chains are
 identical to the query in every member. The chains Protenix can be templated on
 are exactly the ones that differ from the query.
+
+### Who templates this, and who has decided not to
+
+This entry keeps the whole templated path — the kalign build, both config
+patches, the staging layout and everything measured above — and it is the only
+place that keeps it. **Hap108or itself has decided not to use it.** Recorded
+2026-09-25 in its two template sets (`Hap108or-data/templates/*.yaml`, a
+declared refusal with reason `tool_drops_members`), so `h8` runs Protenix
+untemplated and refuses at plan time rather than at workspace time.
+
+The reason is the duplicate gate two sections up, not a defect in this image.
+That project folds a haptenated peptide-MHC, so any template worth showing
+shares the target's HLA allele, its β2-microglobulin and its peptide — and
+those three chains are exact subsequences of the query at coverage 1.000, above
+the 0.95 `DuplicateError` threshold. Three of the five covered chains drop, the
+fold exits zero, and the record says it was shown a set whose chains were never
+used. Rendering only the Fv chains is a different experiment: its `set_id` rides
+inside that project's computation digest, and "templated on this set" and
+"templated on the Fv half of this set" are not the same claim.
+
+**None of that is a reason for another consumer to avoid it.** The gate only
+fires on chains that are near-identical to the query, so it costs nothing on a
+system where the template is a homologue rather than the same molecule — which
+is the ordinary case. If you are templating here, what you need is on this page:
+
+1. `protenix_2.sif`, for kalign and the two patched keys;
+2. `--use_template`, and a per-chain `templatesPath` on each `proteinChain`;
+3. `PROTENIX_MAX_TEMPLATE_DATE=3000-01-01` if any member post-dates
+   2021-09-30, and a `common/release_date_cache.json` **overlay** carrying
+   every member released after the snapshot's 2024-05-22 end;
+4. every member staged as `$PROTENIX_ROOT_DIR/mmcif/<pdbid>.cif`, lower case
+   and uncompressed;
+5. `< /dev/null`, always;
+6. and the expectation that a hit covering >95% of the query as a substring,
+   or one under ten residues, will be dropped with a warning and an exit
+   status of zero.

@@ -2,13 +2,14 @@
 
 | | |
 |---|---|
-| Status | **planned** — nothing built, nothing fetched, nothing run |
-| Recipe | [`openfold3_3.def`](openfold3_3.def) — written, never executed |
+| Status | **built** 2026-09-25 — image exists, `%test` passed on the login node. Nothing folded. |
+| Image | `openfold3_3.sif` — [`openfold3_3.def`](openfold3_3.def) |
 | Upstream | <https://github.com/aqlaboratory/openfold-3> — **note the hyphen** |
 | Licence | Apache-2.0, code and weights, academic **and commercial** use |
-| Weights | not fetched — Hugging Face `OpenFold/OpenFold3`, default set `OpenBind-0` |
-| GPU | yes — `GPU_MAX_CC` **UNMEASURED** |
+| Weights | Hugging Face `OpenFold/OpenFold3`, default set `OpenBind-0` |
+| GPU | yes — `GPU_MAX_CC=12.0`, measured from torch's arch flags. See the caveat. |
 | Covalent bonds | **REFUSED — settled 2026-09-25 against the released wheel. See below.** |
+| Training cutoff | `OpenBind-0`: the PDB through **June 2025** |
 
 The OpenFold consortium's open reimplementation of AlphaFold 3, from the
 AlQuraishi lab. Apache-2.0 on both halves, so — like `../protenix` and
@@ -65,6 +66,24 @@ pydantic models that `run_openfold --query-json` loads through
 not `unpairedMsaPath`. And `Chain` is declared `extra="forbid"`, so an
 AlphaFold 3 JSON is rejected rather than half-read — which is the one piece of
 good news here.
+
+**`molecule_type`'s vocabulary is still unread**, and that is the one
+outstanding fact on this page rather than an oversight. It is the first field a
+renderer has to get right and its accepted values are whatever that module's
+enum says; nothing here has read it, and guessing `"protein"` because it looks
+like AlphaFold 3 is exactly the reasoning the rest of this section disproves.
+One command on the login node settles it, and it needs no GPU:
+
+```bash
+/usr/bin/apptainer exec "$CHPC_CONTAINERS/openfold3_3.sif" python -c \
+  "from openfold3.projects.of3_all_atom.config import inference_query_format as q; \
+   print(q.Chain.model_json_schema())"
+```
+
+Record the answer here when somebody runs it. It does not change the refusal
+below — a dead `covalent_bonds` field is not a naming problem — but it turns
+"unknown" into a measurement, which is the difference between declining to build
+something and not having looked.
 
 **The bond endpoint is an integer index.** `Bond(atom1: Atom, atom2: Atom)`
 with `Atom = (chain_id: str, residue_id: int, atom_id: int)`. Not a name. That
@@ -139,7 +158,7 @@ tasks should both be writing a build tree.
 if the import is missing, because boltz's failure mode was precisely a kernel
 package that was absent while everything importable imported fine.
 
-## `GPU_MAX_CC` is UNMEASURED
+## `GPU_MAX_CC` is 12.0, from torch's arch flags — with one caveat
 
 The `gpu` partition is three devices — L40S 8.9, H100 NVL 9.0, RTX PRO 6000
 Blackwell 12.0 — and a bare `--gres=gpu:1` lands on any of them. Five tools
@@ -147,12 +166,17 @@ here declare a 9.0 ceiling and die on the Blackwell nodes with `no kernel image
 is available for execution on the device`, which reads as a broken install and
 is a scheduling accident (doc 05).
 
-`tool.conf` carries the literal `GPU_MAX_CC=UNMEASURED`, which **fails
-closed**: `chpc-tool` compares with `awk` (`a+0 > b+0`), `awk` reads a
-non-numeric string as `0`, and `chpc-tool exec openfold3` therefore refuses on
-any GPU node until a real number replaces it. Measure it inside the built
-image, on the **login node** (no `nvidia-smi` there, so the guard cannot block
-its own measurement):
+**Measured 2026-09-25 inside the built image, on the login node:** torch
+2.14.0+cu130, arch flags `sm_75 sm_80 sm_86 sm_90 sm_100 sm_120`. `sm_120` is
+present, so this is the second entry here (after boltz) that may take a bare
+`--gres=gpu:1`.
+
+The value stayed `UNMEASURED` until then, and that literal **fails closed**:
+`chpc-tool` compares with `awk` (`a+0 > b+0`), `awk` reads a non-numeric string
+as `0`, and `chpc-tool exec` therefore refuses on any GPU node until a real
+number replaces it. To re-measure after a rebuild, inside the image, on the
+**login node** (no `nvidia-smi` there, so the guard cannot block its own
+measurement):
 
 ```bash
 /usr/bin/apptainer exec "$CHPC_CONTAINERS/openfold3_3.sif" \
@@ -259,3 +283,32 @@ in OpenFold3. See ADR 0020's 2026-09-24 amendment in the parent repo.
 package: it appears in the schema and in no other file. A covalently bonded
 ligand cannot be expressed here today, which matters more for this project than
 the template story does.
+
+## Who folds with this, and who has decided not to
+
+This entry stays. It is built, its weights are fetched, its GPU ceiling is
+measured, and everything known about its schema is written down — so a consumer
+who wants an Apache-2.0 co-folding model with no restriction on its outputs can
+use it for what it can actually do.
+
+**Hap108or has decided not to build an adapter for it**, recorded 2026-09-25 in
+ADR 0022 and as a declared refusal in both of its template sets
+(`Hap108or-data/templates/*.yaml`). Two independent reasons, each sufficient:
+
+- **The chemistry.** That project folds a peptide bonded to a hapten, and the
+  section above settles that `covalent_bonds` is declared and never read on the
+  inference path. The best possible adapter could only fold the apo system.
+- **The templates.** `OpenBind-0` is trained on the PDB through June 2025, and
+  both of that project's template sets are 2024 structures. They are already in
+  these weights, so showing them adds no evidence — the first time that
+  project's cutoff rule has fired on a real date, and it fired the right way.
+
+What made the decision cheap rather than close: the apo fold is already covered.
+`../colabfold` is `verified`, folds the apo system, and in that project's own
+five-predictor benchmark placed the antibody variable domain better than any of
+the ligand-bearing models (DockQ 0.110 against 0.017–0.046). A second apo arm
+would have cost a renderer and bought nothing measurable.
+
+None of that is a judgement on this tool for anyone else. A system whose
+chemistry has no covalent bond in it, or a template set newer than June 2025,
+meets neither objection.

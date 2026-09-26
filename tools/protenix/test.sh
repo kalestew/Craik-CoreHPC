@@ -31,7 +31,7 @@ esac
 if grep -q '^GPU_MAX_CC=UNMEASURED' "$TOOLDIR/tool.conf" 2>/dev/null; then
     echo "GPU_MAX_CC is still UNMEASURED in $TOOLDIR/tool.conf, so chpc-tool"
     echo "will refuse to exec on any GPU node. Measure it on the LOGIN node:"
-    echo "  /usr/bin/apptainer exec \"\$CHPC_CONTAINERS/protenix_1.sif\" \\"
+    echo "  /usr/bin/apptainer exec \"\$CHPC_CONTAINERS/protenix_2.sif\" \\"
     echo "    python -c \"import torch; print(torch._C._cuda_getArchFlags())\""
     echo "highest sm_NN -> N.N; write it into tool.conf, then re-run this test."
     exit 1

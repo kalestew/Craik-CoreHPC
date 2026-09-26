@@ -94,9 +94,10 @@ an absence looks like an omission:
 - **No `GPU_MAX_CC`.** That field stops a CUDA binary landing on a device it
   has no kernels for (doc 05). A CPU tool has no kernels, no device and no
   ceiling; `chpc-tool` only consults the field when `GPU=1` in any case. The
-  three GPU entries added alongside this one all carry
-  `GPU_MAX_CC=UNMEASURED`; this one carries nothing, and the difference is
-  meaningful.
+  three GPU entries added alongside this one each carried
+  `GPU_MAX_CC=UNMEASURED` until they were measured (they now hold 9.0, 9.0 and
+  12.0); this one carries nothing at all, and the difference is meaningful —
+  unmeasured means "ask later", absent means "there is nothing to ask".
 - **`GPU=0` is written out explicitly** even though it is the default, so that
   nobody adds `--nv` to match the neighbours.
 
