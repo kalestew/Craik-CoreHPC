@@ -65,8 +65,10 @@ Three things in that block are the whole method:
 - **The tool's own caveats.** `--no_kernels` above comes from the `NOTE=` in
   `tools/boltz/tool.conf`, which `chpc-tool show boltz` prints: the previous
   image had no C compiler, so any prediction over about 128 tokens died
-  without it, and the rebuilt image has not yet been measured with the
-  kernels on. Every entry has such a note; read it, and the entry's
+  without it; the rebuilt image runs them on every node class, and the flag
+  stays in this example because a fold made with the kernels is a different
+  computation from one made without them (the entry's README says how little
+  they buy). Every entry has such a note; read it, and the entry's
   `README.md` ("Do not miss"), before the first real run.
 
 Where things are: inputs and outputs on `/mnt/scratch/user/$USER` (purged at
@@ -113,7 +115,7 @@ and the `--`.
 **`chpc-tool list`** — every entry, one line: name, version, kind, status,
 GPU, licence. `STATUS` is the thing to read: `verified` has passed its
 self-test on a compute node here; `built` exists on the share but has not;
-`planned` is a description and nothing else. On 2026-09-25 that was 14, 6 and
+`planned` is a description and nothing else. On 2026-09-26 that was 15, 5 and
 13 of 33.
 
 **`chpc-tool show <tool>`** — the entry, resolved: the image path actually in
@@ -211,7 +213,7 @@ As of 2026-09-25:
 |---|---|---|
 | chai1, colabfold, intellifold, placer, protenix, rfdiffusion, rfdiffusion3 | 9.0 | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1`. Never a bare `gpu:1`. |
 | esm, ligandmpnn, proteinmpnn | none (the image carries `sm_120`) | `--gres=gpu:1`, any node |
-| boltz | none | `--gres=gpu:1` with `--no_kernels` (measured on all three classes). With the kernels on, nothing has run on a Blackwell node yet: ask for `nvidia_l40s` or `nvidia_h100_nvl` until its README says otherwise |
+| boltz | none | `--gres=gpu:1`, any node, kernels on or off: the kernel path has run on an L40S (job 1997376) and on an RTX PRO 6000 Blackwell (job 1997377, 2026-09-26) |
 | openfold3 (built, not yet verified) | 12.0 | `--gres=gpu:1` |
 
 `nvidia_l40s` and `nvidia_h100_nvl` are the two models our QoS can reach. The

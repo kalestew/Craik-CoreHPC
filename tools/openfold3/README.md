@@ -133,7 +133,8 @@ node with `torch._C._cuda_getArchFlags()`: torch 2.14.0+cu130, arch flags
 advertises cuEquivariance and DeepSpeed4Science kernels whose own wheels may
 be narrower, and neither has been exercised on a Blackwell node. Boltz's "any
 `gpu` node" row is trustworthy because it was actually run there (jobs 1899084
-on an H100 NVL and 1899088 on `ggpu1-19`); this one is not yet. How the
+on an H100 NVL and 1899088 on `ggpu1-19` for torch, and 1997377 on `ggpu1-16`
+for its cuequivariance kernels, 2026-09-26); this one is not yet. How the
 measurement is taken: [`../README.md`](../README.md#add-a-tool).
 
 ### Settled 2026-09-25: it is not an AlphaFold 3 dialect, and the bond field is dead

@@ -119,7 +119,7 @@ chpc-tool exec <tool> -- python -c \
 | Image | torch | Arch flags | Safe on Blackwell? |
 |---|---|---|---|
 | `esm`, `proteinmpnn`, `ligandmpnn` | 2.14 / cu132 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
-| `boltz` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes with `--no_kernels` — bare `--gres=gpu:1`. Those are torch's flags; the cuequivariance Triton kernels have never run on a Blackwell node (its README) |
+| `boltz` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1`, kernels on or off: the cuequivariance Triton kernels compiled and ran on `ggpu1-16` (job 1997377, 2026-09-26) |
 | `openfold3` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` (built, not yet verified) |
 | `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
 | `protenix` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |

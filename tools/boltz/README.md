@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Status | built 2026-09-25: `boltz_2_gcc.sif`, rebuilt with a C compiler; `chpc-tool test boltz` passed on an L40S the same day (job 1997376, `ggpu1-08`, both cases, kernels on); the speedup was measured 2026-09-26 (job 2001087: 225 s with the kernels against 230 s without, same node, same hour, 658 tokens); Blackwell still to measure (Provenance). Its predecessor `boltz_2.sif` was verified 2026-09-19 on an H100 NVL (job 1899084) and an RTX PRO 6000 (job 1899088), kernels off, and qualified at 658 tokens on an L40S (job 1986189, `--no_kernels`). What the gcc image still has to prove: Provenance |
+| Status | verified 2026-09-26: `boltz_2_gcc.sif`, rebuilt with a C compiler on 2026-09-25, passed `chpc-tool test boltz` with the kernels on, both cases, on an L40S (job 1997376, `ggpu1-08`, 2026-09-25) and on an RTX PRO 6000 Blackwell (job 1997377, `ggpu1-16`, 2026-09-26; a second submission, job 1997947, agreed on the same node); the speedup was measured (job 2001087: 225 s with the kernels against 230 s without, same node, same hour, 658 tokens). Its predecessor `boltz_2.sif` was verified 2026-09-19 on an H100 NVL (job 1899084) and an RTX PRO 6000 (job 1899088), kernels off, and qualified at 658 tokens on an L40S (job 1986189, `--no_kernels`). What each run proved: Provenance |
 | Image | `boltz_2_gcc.sif`, no weights (`boltz_2.sif` was 4.08 GB; gcc adds about 130 MB); recipe [`boltz_2_gcc.def`](boltz_2_gcc.def). [`boltz_2.def`](boltz_2.def) is kept: every Boltz-2 number this lab holds was produced with it |
-| GPU | `--gres=gpu:1`, any node, **with `--no_kernels`** (measured on all three classes). With the kernels on: measured on an L40S only (job 1997376); until Provenance records test case 2 passing on a Blackwell node, a kernels-on run asks for `--gres=gpu:nvidia_l40s:1` or `nvidia_h100_nvl:1` |
+| GPU | `--gres=gpu:1`, any node. Kernels on: measured on an L40S (job 1997376) and on an RTX PRO 6000 Blackwell, `sm_120` (job 1997377, the first cuequivariance kernel compiled for `sm_120` in this registry); kernels off: measured on all three classes |
 | Weights | 5.0 GB at `$BOLTZ_CACHE` (`$CHPC_LAB/data/boltz`), fetched by [`fetch-weights.sh`](fetch-weights.sh) |
 | Licence | MIT |
 | Upstream | `boltz[cuda]==2.2.1` (PyPI) |
@@ -38,9 +38,9 @@ because of what dropping it buys: on the 658-token baseline complex the
 kernels saved 5 s of 230 (job 2001087, 2026-09-26, same L40S, same hour) and
 changed the confidence in the third decimal, while `--no_kernels` on this
 image reproduced the old image's numbers exactly ("The baseline to beat",
-under Provenance). Drop it on an L40S if you want the 2%, and know that a
-fold made with the kernels cannot be cited for one planned without them; on
-any other node class wait until Provenance records case 2 passing there.
+under Provenance). Drop it on any node if you want the 2% (case 2 has passed
+on an L40S and on a Blackwell node, Provenance), and know that a fold made
+with the kernels cannot be cited for one planned without them.
 
 As a job: copy `templates/slurm/tool-gpu.sbatch` and set its four EDIT lines
 to the values above (boltz is its shipped example). The method, the `eval`
@@ -88,7 +88,7 @@ substrate.
 
 ## Do not miss
 
-- **The kernels need a C compiler in the image, at run time.** `boltz_2_gcc.sif` has one; `boltz_2.sif` did not, and on it anything above about 128 tokens died four seconds in with `RuntimeError: Failed to find C compiler`, having written nothing (measured 2026-09-22 on an L40S: 31 and 71 residues predict, 142 fail). On that image, or any `-slim` rebuild, `--no_kernels` every time; it costs 2% of wall on a 658-token complex (Provenance) and does not conflict with `--use_potentials`. The kernel path has run on an L40S (job 1997376) and never on a Blackwell node: with a bare `--gres=gpu:1`, keep `--no_kernels` until Provenance says otherwise.
+- **The kernels need a C compiler in the image, at run time.** `boltz_2_gcc.sif` has one; `boltz_2.sif` did not, and on it anything above about 128 tokens died four seconds in with `RuntimeError: Failed to find C compiler`, having written nothing (measured 2026-09-22 on an L40S: 31 and 71 residues predict, 142 fail). On that image, or any `-slim` rebuild, `--no_kernels` every time; it costs 2% of wall on a 658-token complex (Provenance) and does not conflict with `--use_potentials`. The kernel path has run on an L40S (job 1997376) and on a Blackwell node (job 1997377), so a bare `--gres=gpu:1` is fine with the kernels on; keep `--no_kernels` for a number that has to match one made without them.
 - **A job that dies on `libcuda` rather than on a compiler** is Triton failing to link its launcher, not to build it. Point `TRITON_LIBCUDA_PATH` at the driver directory, or fall back to `--no_kernels` (Traps).
 - **`BOLTZ_CACHE` must be absolute, and it is only in your shell after `eval "$(chpc-tool export boltz)"`.** boltz resolves `--cache` against the working directory; a relative or empty value is a different, empty cache and an attempt to download 5 GB from a node with no internet.
 - **`--use_msa_server` cannot reach its server** from a compute node. Precompute MSAs on the login node, or `msa: empty`.
@@ -131,10 +131,10 @@ every larger input; one chain or two makes no difference (2 × 71 and 1 × 142
 both fail, at 142 total tokens), so the boundary is total token count and lies
 between 71 and 142. The self-test passed while every real job died. `test.sh`
 now carries a second case, 213 residues with the kernels on, that reaches the
-kernel path. No run of that case is recorded; on this image, which has no
-compiler, it is expected to fail with `Failed to find C compiler` until the
-image is rebuilt with gcc, and `chpc-tool doctor boltz` reports the missing
-compiler as a caveat rather than a failure. The consolidated trap and its
+kernel path. On `boltz_2.sif`, which has no compiler, it fails with `Failed to
+find C compiler`; on `boltz_2_gcc.sif` it has passed on an L40S and on a
+Blackwell node ("What the gcc image had to prove", below), and `chpc-tool
+doctor boltz` fails an image of that name that lacks a compiler. The consolidated trap and its
 other three forms: [`docs/07`](../../docs/07-containers-apptainer.md), "A
 kernel that compiles at first use needs a compiler in the image".
 
@@ -172,6 +172,14 @@ its first `GPU_MAX_CC` and boltz stops being the one tool in the registry that
 runs anywhere — which is a real cost under a 21-job cap, and is why it is worth
 measuring before a campaign rather than during one.
 
+Settled 2026-09-26: job 1997377 on `ggpu1-16` (NVIDIA RTX PRO 6000 Blackwell
+Server Edition, compute capability 12.0) ran case 2 with the kernels on,
+`kernel path exercised ... 213 CA atoms in big_model_0.pdb, 27 s`, both cases
+PASS, 88 s wall for the whole test; a second submission of the same test (job
+1997947) followed on the same node with the same result in 26 s. That is the
+first cuequivariance Triton kernel compiled for `sm_120` in this registry, and
+boltz keeps its bare `--gres=gpu:1` with no `GPU_MAX_CC`.
+
 ### The baseline to beat
 
 Job `1986189`, L40S: the full 658-token covalent peptide-MHC plus Fv at
@@ -200,11 +208,11 @@ The kernels-on log carries cuequivariance's
 triangle-attention kernel took its generic path; whether a tuned path exists
 for this shape was not pursued.
 
-### What the gcc image still has to prove
+### What the gcc image had to prove
 
-Three measurements before this entry says `verified` again, per `tool.conf`;
+Three measurements before this entry said `verified` again, per `tool.conf`;
 the first two were impossible before, because no image could compile the
-kernels:
+kernels. All three are done:
 
 1. **Done 2026-09-25.** `chpc-tool test boltz` case 2 (213 residues, kernels
    on) passed on `boltz_2_gcc.sif`: job 1997376, `ggpu1-08`, NVIDIA L40S
@@ -212,9 +220,11 @@ kernels:
    both cases PASS, 81 s wall for the whole test. On `boltz_2.sif` the same
    case fails, which is why that image was `verified` with a test that does
    not pass: the case was added after the qualification it postdates.
-2. The kernel path on a Blackwell node: case 2 on
-   `--gres=gpu:nvidia_rtx_pro_6000:1`. If it fails, this entry gains its first
-   `GPU_MAX_CC` and boltz stops being the tool that runs anywhere.
+2. **Done 2026-09-26.** The kernel path on a Blackwell node: case 2 on
+   `--gres=gpu:nvidia_rtx_pro_6000:1`, job 1997377, `ggpu1-16`, 27 s for the
+   213-mer, both cases PASS (above). Had it failed, this entry would have
+   gained its first `GPU_MAX_CC`; it did not, and boltz stays the tool that
+   runs anywhere.
 3. **Done 2026-09-26.** The speedup against the baseline above: 225 s with
    the kernels against 230 s without, paired on one L40S (job 2001087), and
    240 s for the original run on `boltz_2.sif`. Two per cent, and a

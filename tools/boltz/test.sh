@@ -85,6 +85,8 @@ echo "ok: $n_ca CA atoms in $(basename "$pdb"), CA spread ${spread} A"
 # never run a cuequivariance kernel: the sm_120 measurement this entry rests on
 # folded the 31-mer above, which is below the size that reaches one at all.
 # Run this case there explicitly before trusting a bare --gres=gpu:1.
+# DONE 2026-09-26: job 1997377 on ggpu1-16 (RTX PRO 6000, sm_120) passed it
+# with the kernels on, 27 s for the 213-mer; job 1997947 agreed on the same node.
 #
 # Measured 2026-09-22 on an L40S: 31 aa and 71 aa predict fine with kernels on,
 # 142 aa does not, and neither does anything larger. One chain or two makes no
