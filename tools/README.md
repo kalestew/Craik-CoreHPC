@@ -63,10 +63,11 @@ Three things in that block are the whole method:
   variable is empty and the tool falls back to its own default, which for
   Boltz is downloading weights from a node with no internet.
 - **The tool's own caveats.** `--no_kernels` above comes from the `NOTE=` in
-  `tools/boltz/tool.conf`, which `chpc-tool show boltz` prints: the image has
-  no C compiler, so any prediction over about 128 tokens dies without it.
-  Every entry has such a note; read it, and the entry's `README.md` ("Do not
-  miss"), before the first real run.
+  `tools/boltz/tool.conf`, which `chpc-tool show boltz` prints: the previous
+  image had no C compiler, so any prediction over about 128 tokens died
+  without it, and the rebuilt image has not yet been measured with the
+  kernels on. Every entry has such a note; read it, and the entry's
+  `README.md` ("Do not miss"), before the first real run.
 
 Where things are: inputs and outputs on `/mnt/scratch/user/$USER` (purged at
 30 days); weights and databases at `$CHPC_LAB/data/<tool>`, already fetched
@@ -108,7 +109,7 @@ and the `--`.
 **`chpc-tool list`** — every entry, one line: name, version, kind, status,
 GPU, licence. `STATUS` is the thing to read: `verified` has passed its
 self-test on a compute node here; `built` exists on the share but has not;
-`planned` is a description and nothing else. On 2026-09-25 that was 15, 5 and
+`planned` is a description and nothing else. On 2026-09-25 that was 14, 6 and
 13 of 33.
 
 **`chpc-tool show <tool>`** — the entry, resolved: the image path actually in
@@ -205,7 +206,8 @@ As of 2026-09-25:
 | Tools | `GPU_MAX_CC` | Ask for |
 |---|---|---|
 | chai1, colabfold, intellifold, placer, protenix, rfdiffusion, rfdiffusion3 | 9.0 | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1`. Never a bare `gpu:1`. |
-| boltz, esm, ligandmpnn, proteinmpnn | none (the image carries `sm_120`) | `--gres=gpu:1`, any node |
+| esm, ligandmpnn, proteinmpnn | none (the image carries `sm_120`) | `--gres=gpu:1`, any node |
+| boltz | none | `--gres=gpu:1` with `--no_kernels` (measured on all three classes). With the kernels on, nothing has run on a Blackwell node yet: ask for `nvidia_l40s` or `nvidia_h100_nvl` until its README says otherwise |
 | openfold3 (built, not yet verified) | 12.0 | `--gres=gpu:1` |
 
 `nvidia_l40s` and `nvidia_h100_nvl` are the two models our QoS can reach. The
@@ -217,7 +219,7 @@ srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
 
 and `templates/slurm/tool-gpu.sbatch` defaults to `nvidia_l40s` for the same
 reason: it is safe for every tool, at the cost of a narrower queue for the
-four that did not need it. Which GPU a job actually got is the first line of
+three that did not need it. Which GPU a job actually got is the first line of
 its log (the template prints `nvidia-smi`), and the `Status` row of a tool's
 README says which model its self-test ran on.
 

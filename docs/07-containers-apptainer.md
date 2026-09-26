@@ -355,7 +355,7 @@ must carry:
 
 | Form | Compiles with | Needs in the image | Registry examples |
 |---|---|---|---|
-| Triton kernels (cuequivariance) | `cc` shelled out at first use | a C compiler, or a documented off switch | boltz: no compiler, `--no_kernels` in its `NOTE` |
+| Triton kernels (cuequivariance) | `cc` shelled out at first use | a C compiler, or a documented off switch | boltz: `boltz_2.sif` had none, so `--no_kernels`; `boltz_2_gcc.def` adds `gcc` and `libc6-dev` and its `%post` builds a launcher against `Python.h` rather than checking `command -v gcc` |
 | `torch.utils.cpp_extension` on a `.cu` source | `nvcc` at import | a `-devel` base, not `-runtime` | protenix: `build-essential` plus nvcc, asserted in `%post` and `%test` |
 | DeepSpeed JIT ops | `nvcc`, a C++ compiler, `ninja` at first use | the same | openfold3: full toolchain, `-devel` base |
 | XLA (jax) | LLVM in-process, but reaches for `ptxas`/`nvlink` | the CUDA toolkit, so `-devel` | intellifold: toolchain kept, `XLA_FLAGS` default set in `%environment` |
