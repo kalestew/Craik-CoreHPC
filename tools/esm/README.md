@@ -2,16 +2,102 @@
 
 | | |
 |---|---|
-| Built | 2026-09-18, kanderson6, CoreHPC login node (1045 s) |
-| Image | `esm_2.sif`, 5.15 GB — weights included |
-| Recipe | [`esm_2.def`](esm_2.def) |
-| Upstream | `fair-esm==2.0.0` (PyPI) |
-| Models | `esm2_t33_650M_UR50D`, `esm2_t30_150M_UR50D`, + contact-regression heads |
-| Base | `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` |
+| Status | verified — `chpc-tool test esm` passed on ccpu1-01 (a CPU node); the date of that run is not recorded in this entry |
+| Image | `esm_2.sif`, 5.15 GB — weights included; recipe [`esm_2.def`](esm_2.def) |
+| GPU | `--gres=gpu:1`, any node (CUDA 13.2 base, `sm_120` present); CPU works, slower |
+| Weights | in the image at `/opt/torch/hub/checkpoints/`: `esm2_t33_650M_UR50D`, `esm2_t30_150M_UR50D` and their contact-regression heads. Nothing under `$CHPC_LAB/data`, nothing fetched at run time |
 | Licence | MIT |
-| GPU | yes — CUDA 13.2 base, so **any** `gpu` node including sm_120 |
+| Upstream | `fair-esm==2.0.0` (PyPI), the archived `facebookresearch/esm` |
+| Base | `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` |
+| Built | 2026-09-18, kanderson6, CoreHPC login node (1045 s) |
 
-## What the test proves
+## Run it
+
+There is no command-line program: you hand `python` a script. The block below
+is `test.sh` with the production model in place of the small one and the
+tensors moved to the GPU when there is one (those two changes are untested;
+the test ran the same code on the 150M model on a CPU node).
+
+```bash
+srun -p gpu --gres=gpu:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l   # or salloc -p cpu -c 8 --mem 16G -t 2:00:00
+mkdir -p /mnt/scratch/user/$USER/esm/run1 && cd "$_"                # the same path is valid inside the container
+chpc-tool exec esm -- python - <<'PY'
+import torch, esm
+
+model, alphabet = esm.pretrained.esm2_t33_650M_UR50D()   # production; the test uses esm2_t30_150M_UR50D for speed
+model.eval()
+dev = "cuda" if torch.cuda.is_available() else "cpu"
+model = model.to(dev)
+bc = alphabet.get_batch_converter()
+
+seq = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIE"
+_, _, toks = bc([("p", seq)])
+toks = toks.to(dev)
+
+with torch.no_grad():
+    out = model(toks, repr_layers=[33])                   # t33 = 33 layers; the test asks for layer 30 of the t30
+
+logits = out["logits"]                                    # (1, len+2, 33): BOS and EOS bracket the sequence
+rep = out["representations"][33]                          # (1, len+2, 1280): per-residue embedding
+lp = torch.log_softmax(logits[0, 1:-1], dim=-1)
+avg = lp[range(len(seq)), toks[0, 1:-1]].mean().item()
+print(f"mean logP {avg:.3f}, repr {tuple(rep.shape)}")
+PY
+```
+
+A script of your own is `chpc-tool exec esm -- python my_script.py`, with
+`python` spelled out (Do not miss). As a job: copy
+`templates/slurm/tool-gpu.sbatch`, set its four EDIT lines to the values
+above (`--gres=gpu:1` is safe for this image) and put the heredoc after the
+`--`. The method, the `eval` idiom and which GPU to ask for:
+[`../README.md`](../README.md#run-a-tool-on-your-inputs).
+
+## Inputs and outputs
+
+Input is whatever your script reads: a list of `(name, sequence)` pairs to the
+batch converter, one-letter amino-acid strings, no FASTA parser provided. For
+per-sequence embeddings from a FASTA without writing Python, `fair-esm`
+installs `esm-extract`:
+`chpc-tool exec esm -- esm-extract esm2_t33_650M_UR50D in.fasta out --repr_layers 33 --include mean per_tok`
+writes one `out/<name>.pt` per record (untested here).
+
+Output is whatever your script prints or saves; nothing is written unless you
+write it, and nothing is ranked. The test's reference point, on the 150M model
+and the 31-mer above: logits `(1, 33, 33)`, representations `(1, 33, 640)`,
+mean log-likelihood **-0.440**, against roughly -3.5 for a model predicting
+uniformly. The 650M's hidden size is 1280, so its representations are
+`(1, 33, 1280)` (untested).
+
+Before trusting a number: the score above reads each position's logit with
+that residue visible. The masked pseudo-log-likelihood in the literature masks
+one position per forward pass (L passes for a sequence of length L) and comes
+out lower; compare like with like, and say which one you computed. The
+650M is the model the lab's naturalness scoring is wired for; the 150M is for
+smoke tests only.
+
+## Do not miss
+
+- **This is ESM-2 via `fair-esm`, not the PyPI `esm` package.** That one is
+  EvolutionaryScale's ESM-3/ESM-C and carries no ESM-2 at all; `pip install
+  esm` anywhere near this is the wrong model (Traps).
+- **Spell out `python` before a `.py`.** `ENTRY=python` is prepended only in
+  front of a flag, so `chpc-tool exec esm -- -c "…"` works but
+  `chpc-tool exec esm -- my_script.py` hands apptainer a script to execute
+  and fails with `permission denied`, no mention of an interpreter.
+- **Nothing is fetched at run time; that is the point of the 5 GB image.**
+  `TORCH_HOME=/opt/torch` inside the container points `esm.pretrained.*` at
+  the two baked-in checkpoints. Any other `esm.pretrained.*` model (the 3B,
+  the 15B) is not in the image and will try to download, which a compute
+  node cannot do ([`docs/02`](../../docs/02-storage-and-data.md#internet-access)).
+- **Any `gpu` node is fine, and so is the CPU partition.** The image carries
+  `sm_120`; a bare `--gres=gpu:1` lands anywhere and runs. The 650M forward
+  pass on a CPU node is slower, not wrong.
+
+---
+
+## Provenance
+
+Built 2026-09-18 by kanderson6 on the CoreHPC login node (1045 s).
 
 `chpc-tool test esm`: loads `esm2_t30_150M_UR50D`, runs a forward pass over a
 31-residue sequence and asserts the logit and representation shapes, that
@@ -29,9 +115,10 @@ the image being 5 GB.
 The 650M is asserted present but not loaded; loading it too would only re-test
 torch. `chpc-tool doctor esm` does load it.
 
-## Why the weights are baked in
+## Build notes
 
-The opposite of what `rfdiffusion` and `boltz` do here, for three reasons:
+Why the weights are baked in: the opposite of what `rfdiffusion` and `boltz`
+do here, for three reasons:
 
 - **`esm2_t33_650M_UR50D` is frozen.** A 2022 release that will never be
   revised, so "a weights refresh should not force an image rebuild" — the
@@ -55,6 +142,3 @@ The opposite of what `rfdiffusion` and `boltz` do here, for three reasons:
   ESM-C/ESM-3 and **no ESM-2**. Its licence is now plain MIT — the old
   non-commercial community licence is gone — but it is still a different
   model and belongs in its own registry entry. Do not conflate them.
-- `ENTRY=python`, so `chpc-tool exec esm -- -c "…"` works, but a bare script
-  path does not get an interpreter prepended. Spell out `python` when handing
-  it a `.py`.

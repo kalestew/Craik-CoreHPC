@@ -2,49 +2,200 @@
 
 | | |
 |---|---|
-| Built | 2026-09-18, kanderson6, CoreHPC login node (716 s) |
-| Image | `chai1_1.sif`, 3.47 GB — no weights |
-| Recipe | [`chai1_1.def`](chai1_1.def) |
+| Status | verified 2026-09-25 on an L40S (`chpc-tool test chai1`, job 1986672, `ggpu1-06`, 87 s, two cases) |
+| Image | `chai1_2.sif`, no weights (size not recorded); recipe [`chai1_2.def`](chai1_2.def), rebuilt 2026-09-24 to add kalign |
+| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`, measured: no `sm_120`). Never a bare `--gres=gpu:1`. |
+| Weights | 6.2 GB at `$CHAI_DOWNLOADS_DIR` (`$CHPC_LAB/data/chai1`), fetched by [`fetch-weights.sh`](fetch-weights.sh); three parts, see Traps |
+| Licence | Apache-2.0, code **and** weights |
 | Upstream | `chai_lab==0.6.1` (PyPI) |
-| Weights | 6.2 GB on FAC, via [`fetch-weights.sh`](fetch-weights.sh) |
 | Base | `python:3.12-slim` (torch 2.6.0+cu124) |
-| Licence | Apache-2.0 — **code and weights** |
-| GPU | yes — **not on Blackwell**, see below |
+| Built | `chai1_1`: 2026-09-18, kanderson6, CoreHPC login node (716 s); `chai1_2`: rebuilt 2026-09-24 |
 
-Licence note: the old non-commercial Chai Community License was replaced.
-v0.6.1 is Apache-2.0 for the weights as well as the code, so this is usable
-commercially and nothing here needs `chpc-assets`.
+## Run it
 
-## What the test proves
-
-`chpc-tool test chai1`: folds a 31-residue peptide end to end at
-`--num-trunk-recycles 1 --num-diffn-timesteps 20 --num-diffn-samples 1`,
-then asserts 31 CA records, numeric coordinates in every Cartesian column,
-and a CA radius of gyration above 3 Å. Measured on an L40S: 47 s, 17.3 GB
-peak RSS, spread 12.91 Å, pLDDT 82–89.
-
-The spread check is the one that matters — it separates "wrote a CIF" from
-"ran the diffusion module". ESM embeddings are left **on** (the default),
-because that path is what needs the 5.6 GB trace and is the most likely
-thing to be missing.
-
-## Hardware: it cannot use the Blackwell nodes
-
-`chai_lab` requires `torch<2.7`, so this image is torch 2.6.0+cu124.
-Measured inside it:
-
-```
-torch._C._cuda_getArchFlags() -> sm_50 sm_60 sm_70 sm_75 sm_80 sm_86 sm_90
+```bash
+srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
+mkdir -p /mnt/scratch/user/$USER/chai1/run1 && cd "$_"   # in.fasta here; the same path is valid inside the container
+chpc-tool exec chai1 -- chai-lab fold --num-trunk-recycles 3 --num-diffn-timesteps 200 --num-diffn-samples 5 --num-trunk-samples 1 --seed 1 in.fasta out
 ```
 
-No `sm_120`. Use `--gres=gpu:nvidia_l40s:1` or an H100, never a bare
-`--gres=gpu:1`.
+Those are the image's own defaults (read from it 2026-09-25) plus a seed; the
+self-test runs the same command at one recycle, 20 timesteps and one sample.
+No `eval` is needed: `exec` exports `CHAI_DOWNLOADS_DIR` into the container
+and nothing on the line above names a variable. The 31-residue self-test
+peaked at 17.3 GB RSS; size `--mem` for your input.
 
-Do **not** use `torch.cuda.get_arch_list()` to check this on a CPU node: on
-torch 2.6 it returns `[]` when no GPU is present, which is indistinguishable
-from a CPU-only build (doc 05).
+A covalent bond is one more flag and one more file (the format is under
+"Inputs and outputs"):
 
-## Weights: three parts, and the third is easy to miss
+```bash
+chpc-tool exec chai1 -- chai-lab fold --constraint-path cov.restraints --num-trunk-recycles 3 --num-diffn-timesteps 200 --num-diffn-samples 5 --num-trunk-samples 1 --seed 1 cov.fasta out_cov
+```
+
+As a job: copy `templates/slurm/tool-gpu.sbatch` and set its four EDIT lines
+to the values above (its `--gres` default is already `nvidia_l40s`). The
+method, the `eval` idiom and which GPU to ask for:
+[`../README.md`](../README.md#run-a-tool-on-your-inputs).
+
+## Inputs and outputs
+
+**Input** is a FASTA whose headers carry chai's entity grammar:
+`>protein|name=...`, or `>ligand|name=...` with a SMILES as the sequence. A
+plain `>seq` header parses as a record and then fails entity-type dispatch,
+which is a confusing error for a simple mistake. The self-test's two inputs:
+
+```
+>protein|name=test-peptide
+MKTAYIAKQRQISFVKSHFSRQLEERLGLIE
+```
+
+```
+>protein|name=pep
+MKTAYCAKQRQISFV
+>ligand|name=lig
+C=CC(=O)NC
+```
+
+Chains are assigned positionally from the FASTA: entity 1 is `A`, entity 2 is
+`B`. The self-test and the block above run single-sequence; upstream
+recommends MSAs "for improved performance". Templates go in through
+`--template-hits-path`, a tab-delimited m8 table whose structures must already
+be staged (Traps, "Templates"); a compute node cannot fetch them.
+
+**A covalent bond** is a `--constraint-path` file, comma-delimited with a
+header. The residue is 1-based, the atom follows `@`, and a SMILES ligand's
+atoms are named element plus 1-based per-element ordinal in RDKit atom order,
+so `@C1` is the terminal CH2 of `C=CC(=O)NC` (its carbons are C1 C2 C3 in
+written order and C4 the N-methyl):
+
+```
+chainA,res_idxA,chainB,res_idxB,connection_type,confidence,min_distance_angstrom,max_distance_angstrom,comment,restraint_id
+A,C6@SG,B,@C1,covalent,1.0,0.0,0.0,peptide-hapten,bond1
+```
+
+Those names come from the RDKit pinned in this image; the self-test asserts
+them and prints the whole ligand's naming (`C1_1 C2_1 C3_1 O1_1 N1_1 C4_1` in
+`chai1_2.sif`, the `_1` being the entity copy). Every predictor addresses a
+bond differently and every one folds a wrong address without complaint:
+[`../covalent-bonds.md`](../covalent-bonds.md).
+
+**Weights** are three parts (six TorchScript components, `conformers_v1.apkl`,
+and a 5.6 GB traced ESM-2 3B from a different URL), all at
+`$CHPC_LAB/data/chai1` and all fetched by `fetch-weights.sh`; `chpc-tool
+doctor chai1` checks that the directory exists and is writable. The ESM trace
+is the part a hand-built cache misses, and `--use-esm-embeddings` is on by
+default (Traps, "Weights").
+
+**Output** lands in the directory you named: `pred.model_idx_<i>.cif` for
+each of the `--num-diffn-samples` draws, and its scores in
+`scores.model_idx_<i>.npz`. **The index is the raw sample index, not a rank.**
+`pred.model_idx_0.cif` is an arbitrary draw; the aggregate score is in the
+`.npz`, and ranking is your job. Boltz is the opposite (`_model_0` is its
+best), so "index 0" across the two tools compares a ranked best against a
+random sample.
+
+Before trusting a number: ipTM penalises beta-strand addition, so never filter
+substrate poses on it; and for a covalent run, assert the bond geometry of
+every draw you keep with the checker in `../covalent-bonds.md`. A bond that
+landed 13.59 Å from the warhead cost about 0.01 of ipTM.
+
+## Do not miss
+
+- **Output is not ranked.** `pred.model_idx_0.cif` is an arbitrary draw. Rank on `scores.model_idx_<i>.npz` yourself.
+- **`--gres=gpu:nvidia_l40s:1` or `nvidia_h100_nvl:1`, never a bare `gpu:1`.** No `sm_120` in this image; `chpc-tool exec` refuses a Blackwell node up front, but only the `--gres` line decides where a job lands.
+- **The restraints file is comma-delimited with a header; the m8 template table is tab-delimited with none.** The same tool, two delimiters. The wrong one gives a file chai parses into zero restraints, and it folds anyway, exit 0 (job 1976695).
+- **A failing kalign is silent.** The hit is dropped and the fold exits zero having used no templates. Max 4 templates per chain; it raises rather than truncating.
+- **The FASTA header is `>protein|name=...`**, not `>seq`.
+- **Do not filter substrate poses on ipTM.** Beta-strand addition is confidence-penalised, so the filter preferentially discards the correct extended geometry.
+
+---
+
+## Provenance
+
+`chai1_1.sif` (3.47 GB) was built 2026-09-18 by kanderson6 on the CoreHPC
+login node (716 s) and verified on an L40S with a one-case self-test.
+`chai1_2.sif` was rebuilt 2026-09-24 to add kalign, without which templates
+cannot run at all; STATUS dropped back to `built` because that is the registry
+ladder (a different image is a different claim), and it was verified again
+2026-09-25.
+
+`chpc-tool test chai1` (job 1986672, `ggpu1-06`, NVIDIA L40S, compute
+capability 8.9, 87 s, exit 0) proves two things, and the second is the one
+that earns the word:
+
+1. **A 31-mer folds.** At `--num-trunk-recycles 1 --num-diffn-timesteps 20
+   --num-diffn-samples 1`, then 31 CA records, numeric coordinates in every
+   Cartesian column, and a CA radius of gyration above 3 Å: 12.91 Å measured.
+   The spread check is the one that matters; it separates "wrote a CIF" from
+   "ran the diffusion module". ESM embeddings are left **on** (the default),
+   because that path is what needs the 5.6 GB trace and is the most likely
+   thing to be missing. The earlier one-case test, recorded when `chai1_1.sif`
+   was the image, measured on an L40S: 47 s, 17.3 GB peak RSS, spread
+   12.91 Å, pLDDT 82–89.
+2. **A declared covalent bond lands where it was declared.** A 15-mer with one
+   cysteine at position 6 and the Michael acceptor `C=CC(=O)NC`, restraint
+   `A,C6@SG,B,@C1`, 40 diffusion timesteps; then the shared geometry checker
+   ([`check_covalent_bond.sh`](../_template/check_covalent_bond.sh)), by
+   connectivity rather than by name: SG–C1_1 at 1.83 Å, one ligand contact
+   inside 2.10 Å, furthest ligand atom 5.86 Å, and the bonded carbon's single
+   heavy neighbour is C2_1, a terminal Michael-acceptor CH2. Then the name,
+   separately: the ligand's heavy atoms came back `C1_1 C2_1 C3_1 O1_1 N1_1
+   C4_1`, element plus 1-based per-element ordinal in RDKit atom order, which
+   is the vocabulary every restraint the consuming project renders addresses
+   by name. A rebuild can renumber a SMILES ligand's atoms without moving a
+   bond, so the assertion is made against this image at qualification time.
+
+Case 2 was added on the day of qualification because case 1 alone cannot
+support the word: HA-ADAPT's chai1 corpus is quarantined over a bond that
+landed 13.59 Å from the warhead, and case 1 would have passed on every one of
+those structures. The story, once:
+[`../covalent-bonds.md`](../covalent-bonds.md). The fixture chemistry is not
+the campaign's; the programme's hapten lives in the data repo and never in a
+tool registry.
+
+`GPU_MAX_CC=9.0` is measured, not inferred: `chai_lab` requires `torch<2.7`,
+so this image is torch 2.6.0+cu124, and inside it
+`torch._C._cuda_getArchFlags()` reports `sm_50 sm_60 sm_70 sm_75 sm_80 sm_86
+sm_90`, no `sm_120`.
+
+Licence: the old non-commercial Chai Community License was replaced. v0.6.1 is
+Apache-2.0 for the weights as well as the code (checked against the repo's
+LICENSE file 2026-09-17), so this is usable commercially and nothing here
+needs `chpc-assets`.
+
+## Build notes
+
+Base is `python:3.12-slim` and not a pytorch tag because `chai_lab` 0.6.1
+pins `torch>=2.3.1,<2.7` and `numpy~=1.21`; pip resolves torch 2.6.x with
+cu124 wheels inside a 3.12 base, and no current `pytorch/pytorch` tag is that
+old (`chai1_2.def`). The same pin is the hardware limit in the header.
+
+`chai1_2.def` adds **kalign 3.4.0** from Debian trixie, because `chai_lab`'s
+m8 hit parser asserts on the binary and `chai1_1.sif` had none. The rebuild
+invalidates this tool's prediction cache by design (`spec_id` folds in
+`container_digest`). Which kalign, and why the major version is load-bearing,
+is under Traps, "Templates".
+
+## Traps
+
+- **`CHAI_DOWNLOADS_DIR` must arrive as `APPTAINERENV_CHAI_DOWNLOADS_DIR`.**
+  The image sets it as a `/tmp` fallback in `%environment`, and a plain host
+  `export` loses to that — even though the image writes it defensively as
+  `${VAR:-default}` (doc 07). `chpc-tool` emits both forms. This silently put
+  1.3 GB in `/tmp` before it was found.
+- Chai's downloader is `requests` with no retry and no resume, and it writes
+  to a temp name it only renames on success — so a broken connection near the
+  end of the 5.6 GB trace discards the lot. `fetch-weights.sh` uses `curl -C -`
+  for that file and chai's own API for the small ones.
+- **Do not filter substrate poses on ipTM.** Beta-strand addition is
+  confidence-penalised, so an ipTM filter preferentially discards the correct
+  extended geometry. ipTM is fine for Track 3 binder designs.
+- **Do not use `torch.cuda.get_arch_list()` to check the arch flags on a CPU
+  node:** on torch 2.6 it returns `[]` when no GPU is present, which is
+  indistinguishable from a CPU-only build (doc 05). Ask
+  `torch._C._cuda_getArchFlags()` instead.
+
+### Weights: three parts, and the third is easy to miss
 
 `fetch-weights.sh` gets all of it, ~6.2 GB:
 
@@ -62,22 +213,7 @@ internet. It is easy to miss because chai-lab does **not** depend on
 environment for an ESM dependency finds nothing. It ships its own trace.
 The registry's `esm` entry is unrelated and does not satisfy this.
 
-## Traps
-
-- **`CHAI_DOWNLOADS_DIR` must arrive as `APPTAINERENV_CHAI_DOWNLOADS_DIR`.**
-  The image sets it as a `/tmp` fallback in `%environment`, and a plain host
-  `export` loses to that — even though the image writes it defensively as
-  `${VAR:-default}` (doc 07). `chpc-tool` emits both forms. This silently put
-  1.3 GB in `/tmp` before it was found.
-- Chai's downloader is `requests` with no retry and no resume, and it writes
-  to a temp name it only renames on success — so a broken connection near the
-  end of the 5.6 GB trace discards the lot. `fetch-weights.sh` uses `curl -C -`
-  for that file and chai's own API for the small ones.
-- **Do not filter substrate poses on ipTM.** Beta-strand addition is
-  confidence-penalised, so an ipTM filter preferentially discards the correct
-  extended geometry. ipTM is fine for Track 3 binder designs.
-
-## Templates: fixed in chai1_2, and the hit range is kalign's to decide
+### Templates: fixed in chai1_2, and the hit range is kalign's to decide
 
 Measured 2026-09-24, in both images, with networking disabled.
 
@@ -126,7 +262,7 @@ installed package rather than from documentation:
   at all and therefore takes commas. The two files this one tool consumes
   disagree, and getting the restraints one wrong is what killed job 1976695.
 
-### The hit range is a fixpoint of kalign's alignment, not a span you choose
+#### The hit range is a fixpoint of kalign's alignment, not a span you choose
 
 `subject_start`/`subject_end` are counted over the template chain's **modelled**
 residues — the loader strips gap characters out of gemmi's polymer sequence

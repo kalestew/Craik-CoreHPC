@@ -2,50 +2,75 @@
 
 | | |
 |---|---|
-| Status | **planned** — nothing built, nothing run |
-| Recipe | [`dockq_2.def`](dockq_2.def) — written, never executed |
-| Upstream | <https://github.com/bjornwallner/DockQ> |
+| Status | planned — recipe and a four-case `test.sh` written, never executed |
+| Image to be | `dockq_2.sif` from [`dockq_2.def`](dockq_2.def); around 200 MB on a `python:3.12-slim` base (untested) |
+| GPU | none. CPU only, and that is a fact about the tool: no `--nv`, no `GPU_MAX_CC` |
+| Weights | none. DockQ is arithmetic over two structure files |
 | Licence | MIT |
-| GPU | **no** — CPU only, no weights, no `GPU_MAX_CC` |
+| Upstream | <https://github.com/bjornwallner/DockQ>, pip `DockQ`; the exact version is pinned at build time |
 | Citation | Mirabello & Wallner, *Bioinformatics* **40**(10), 2024, [btae586](https://doi.org/10.1093/bioinformatics/btae586) |
 
 DockQ v2 scores a predicted complex against a reference: a single DockQ value
 plus iRMSD, LRMSD, fnat, fnonnat, F1 and a clash count, for protein multimers,
-nucleic acids and — with `--small_molecule` — small-molecule poses.
+nucleic acids and — with `--small_molecule` — small-molecule poses. **This is
+not a predictor, and that is why it is here.** Every other entry in the
+co-folding family produces structures; none of them can tell you whether those
+structures are right.
 
-**This is not a predictor, and that is why it is here.** Every other entry in
-the co-folding family produces structures; none of them can tell you whether
-those structures are right. A confidence score cannot: HA-ADAPT's quarantined
-Chai-1 corpus moved ipTM by 0.012 between a wrong covalent attachment and the
-right one. Scoring against a native is a different kind of evidence, and it is
-the kind that says whether a predictor is any good on *this* family of
-complexes rather than on the PDB in general.
+## Not built yet
 
-## `--mapping` is load-bearing
+Nothing to fetch: no weights, no databases, no GPU, nothing to stage on FAC.
+The image is the only missing piece and the recipe is written.
 
-Model chains and native chains are **different alphabets**. A predictor emits
-`A`, `B`, `C` in whatever order its input listed them; a native from the PDB
-uses whatever the depositor chose. DockQ will **search chain permutations and
-report the best one it finds** — upstream's own example output says so on its
-face:
-
-```
-Total DockQ over 3 native interfaces: 0.653 with BAC:ABC model:native mapping
-Native chains: A, B
-	Model chains: B, A
+```bash
+chpc-tool build dockq       # login node only; /usr/bin/apptainer 1.5.2,
+                            # --fakeroot UNAVAILABLE, no `module load apptainer`
+chpc-tool publish dockq
+chpc-tool test dockq        # CPU -- this is what `verified` means
 ```
 
-A wrong mapping therefore **does not error. It produces a plausible number.**
-In bulk scoring that is indistinguishable from a result, and it is the failure
-mode this entry exists to warn about: not a crash, not a `nan`, just a column
-of numbers that are quietly about the wrong correspondence. Pass
-`--mapping MODELCHAINS:NATIVECHAINS` explicitly — wildcards are allowed
-(`A*:W*`, `:WX`) — and never let a pipeline rely on the search.
+The intended command, read from [`test.sh`](test.sh):123 and **untested**:
 
-`test.sh` asserts this as behaviour, in case 4, rather than leaving it as a
-warning someone may read.
+```bash
+salloc -p cpu -c 8 --mem 16G -t 2:00:00     # or -p community_short --qos=cmnt_short for a 30 s job
+chpc-tool exec dockq -- DockQ model.pdb native.pdb --mapping MODELCHAINS:NATIVECHAINS --json dq.json   # (untested)
+```
 
-## What the test proves, and why a self-comparison is not enough
+Send it to the `cpu` partition, or to `community_short` — 1 h, and it
+**requires `--qos=cmnt_short`**. It has no business queueing behind the `gpu`
+partition's 8-GPU, 21-job per-user cap for a 30-second job.
+
+Build and publish: [`../README.md`, Add a tool](../README.md#add-a-tool).
+
+## Do not miss
+
+- **`--mapping` is load-bearing.** Model chains and native chains are different
+  alphabets, and DockQ searches chain permutations and reports the best one it
+  finds. A wrong mapping therefore does not error: it returns a plausible
+  number with exit 0. Pass `--mapping MODELCHAINS:NATIVECHAINS` explicitly —
+  wildcards are allowed (`A*:W*`, `:WX`) — and never let a pipeline rely on the
+  search. The full story is in Traps.
+- **CAPRI thresholds**, from upstream: below 0.23 Incorrect, 0.23–0.49
+  Acceptable, 0.49–0.80 Medium, 0.80 and above High quality. Upstream documents
+  them as a *legend*; that the text report prints a category per interface is
+  unconfirmed, so `test.sh` derives the category from the score instead of
+  parsing one.
+- **`--small_molecule` needs the ligand on its own chain identifier** in the
+  PDB or mmCIF you hand it.
+- **A confidence score is not a check, which is the point of scoring against a
+  native.** HA-ADAPT's quarantined Chai-1 corpus moved ipTM by 0.012 between a
+  wrong covalent attachment and the right one:
+  [`../covalent-bonds.md`](../covalent-bonds.md).
+
+---
+
+## Provenance
+
+**Never run.** `STATUS=planned`, there is no image, and `test.sh` has never
+executed. Everything below is what the test *will* prove once someone builds
+the entry.
+
+### What `test.sh` will prove, and why a self-comparison is not enough
 
 `DockQ x x` returns the perfect score from a tool that has silently mapped
 every chain to itself — the one case in which a broken chain mapping cannot
@@ -82,62 +107,7 @@ not decoration — a pure helix is one 3Di state and poly-alanine is one residue
 type, and a fixture that degenerate fails to match *itself*, which reads as a
 broken tool (see `../foldseek`).
 
-## No `fetch-weights.sh`, no `assets.tsv`, no `GPU_MAX_CC`
-
-Three deliberate absences, because in a directory where every sibling has them
-an absence looks like an omission:
-
-- **No weights.** DockQ is arithmetic over two structure files. A fetch script
-  that fetches nothing would be a lie about the shape of the tool, and the next
-  person to read the directory would go looking for the payload it implies.
-  `../foldseek` and `../mmseqs2` have the same shape for the same reason.
-- **No `GPU_MAX_CC`.** That field stops a CUDA binary landing on a device it
-  has no kernels for (doc 05). A CPU tool has no kernels, no device and no
-  ceiling; `chpc-tool` only consults the field when `GPU=1` in any case. The
-  three GPU entries added alongside this one each carried
-  `GPU_MAX_CC=UNMEASURED` until they were measured (they now hold 9.0, 9.0 and
-  12.0); this one carries nothing at all, and the difference is meaningful —
-  unmeasured means "ask later", absent means "there is nothing to ask".
-- **`GPU=0` is written out explicitly** even though it is the default, so that
-  nobody adds `--nv` to match the neighbours.
-
-Send it to the `cpu` partition, or to `community_short` — 1 h, and it
-**requires `--qos=cmnt_short`**. It has no business queueing behind the `gpu`
-partition's 8-GPU, 21-job per-user cap for a 30-second job.
-
-## The C-compiler trap does not apply here, and here is why
-
-Boltz's image is built from `python:3.12-slim` with no compiler; its
-cuequivariance kernels are Triton, which JIT-compiles at first use, so every
-prediction above ~128 total tokens dies four seconds in with
-`RuntimeError: Failed to find C compiler` from `triton/runtime/build.py`,
-having written nothing. Job array 1928395 in a sibling project lost all five
-tasks in under a minute each to exactly that.
-
-**Decision for DockQ: no compiler installed.** The trap belongs to tools whose
-GPU kernels are JIT-compiled at first use. DockQ has no GPU kernels at all and
-no JIT path that could be found — it is numpy and Biopython. Installing a
-toolchain would double the image for nothing.
-
-What `%post` does instead is *report*: it prints whether `numba`, `cython` and
-`triton` are present, so that if a future DockQ grows a fast path, the build
-log says so rather than a job finding out. `%environment` also sets
-`NUMBA_CACHE_DIR` defensively — it costs nothing, and if numba ever does arrive
-it is the difference between working inside a read-only squashfs and refusing
-at *import* (doc 07, and boltz's four-second failure before any input).
-
-## When someone builds it
-
-```bash
-chpc-tool build dockq          # login node only; /usr/bin/apptainer 1.5.2,
-                               # --fakeroot UNAVAILABLE, no `module load apptainer`
-chpc-tool publish dockq
-chpc-tool test dockq           # CPU -- this is what `verified` means
-```
-
-Nothing to fetch and nothing to stage on FAC.
-
-## What was verified, and what was taken on trust
+### What was verified against upstream, and what was taken on trust
 
 Verified against upstream on 2026-09-24:
 
@@ -150,7 +120,7 @@ Verified against upstream on 2026-09-24:
   in the PDB/mmCIF with their own chain identifiers);
 - the reported metrics: DockQ, iRMSD, LRMSD, fnat, fnonnat, F1, clashes;
 - the example report showing DockQ searching the mapping and printing the one
-  it chose — quoted above;
+  it chose — quoted in Traps;
 - the CAPRI thresholds: `<0.23` Incorrect, `0.23–0.49` Acceptable,
   `0.49–0.80` Medium, `≥0.80` High quality;
 - nucleic-acid interfaces scored alongside protein ones;
@@ -174,3 +144,57 @@ Verified against upstream on 2026-09-24:
   interfaces, tighten the 7.0 Å offset — the contact count climbs steeply.
 - whether `DockQ` is pure Python in the pinned version — `%post` prints what
   it finds.
+
+## Build notes
+
+`python:3.12-slim` rather than a CUDA base keeps the image around 200 MB
+instead of several GB, which matters because this is the one tool in the
+covalent family that will be invoked thousands of times per campaign rather
+than dozens.
+
+Three deliberate absences, because in a directory where every sibling has them
+an absence looks like an omission. **No weights**, so no `fetch-weights.sh` and
+no `assets.tsv`: a fetch script that fetches nothing would be a lie about the
+shape of the tool, and `../foldseek` and `../mmseqs2` have the same shape for
+the same reason. **No `GPU_MAX_CC`**, because that field stops a CUDA binary
+landing on a device it has no kernels for (doc 05) and a CPU tool has no
+kernels, no device and no ceiling; `chpc-tool` only consults it when `GPU=1` in
+any case. As of 2026-09-25 the GPU entries added alongside this one do carry a
+measured ceiling — `protenix` and `intellifold` at 9.0, `openfold3` at 12.0 —
+so nothing here is waiting on a measurement. **`GPU=0` is written out
+explicitly** even though it is the default, so that nobody adds `--nv` to match
+the neighbours.
+
+No C compiler either: DockQ has no GPU kernels and no JIT path that could be
+found — it is numpy and Biopython — so a toolchain would double the image for
+nothing. `%post` *reports* instead, printing whether `numba`, `cython` and
+`triton` are present, so that if a future DockQ grows a fast path the build log
+says so rather than a job finding out; `%environment` sets `NUMBA_CACHE_DIR`
+defensively for the same reason. The trap itself is documented once, in
+[`../../docs/07-containers-apptainer.md`](../../docs/07-containers-apptainer.md),
+"A kernel that compiles at first use".
+
+## Traps
+
+- **A wrong `--mapping` does not error. It produces a plausible number.** Model
+  chains and native chains are different alphabets: a predictor emits `A`, `B`,
+  `C` in whatever order its input listed them; a native from the PDB uses
+  whatever the depositor chose. DockQ will search chain permutations and report
+  the best one it finds — upstream's own example output says so on its face:
+
+  ```
+  Total DockQ over 3 native interfaces: 0.653 with BAC:ABC model:native mapping
+  Native chains: A, B
+  	Model chains: B, A
+  ```
+
+  In bulk scoring that is indistinguishable from a result: not a crash, not a
+  `nan`, just a column of numbers quietly about the wrong correspondence.
+  `test.sh` asserts this as behaviour, in case 4, rather than leaving it as a
+  warning someone may read.
+- **A perfect score proves nothing on its own.** `DockQ x x` is the one
+  comparison in which a broken chain mapping cannot show, so it is never
+  evidence that an installation works. The four cases above are.
+- **Do not send it to the `gpu` partition.** A 30-second scoring job behind the
+  8-GPU, 21-job per-user cap is an own goal; `cpu`, or `community_short` with
+  `--qos=cmnt_short`.
