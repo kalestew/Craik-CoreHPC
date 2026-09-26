@@ -73,7 +73,10 @@ Where things are: inputs and outputs on `/mnt/scratch/user/$USER` (purged at
 30 days); weights and databases at `$CHPC_LAB/data/<tool>`, already fetched
 for every built tool, and `doctor` says so if one is missing; images at
 `$CHPC_LAB/containers` with a faster copy on group scratch, chosen per image;
-final results at `$CHPC_LAB/results/<project>/`. A CPU tool (foldseek,
+final results at `$CHPC_LAB/results/<project>/`. Between a laptop and any of
+those it is Globus: `chpc-globus.sh push ./p1 "$CHPC_USER_SCRATCH/boltz/p1"`
+in, `chpc-globus.sh pull "$CHPC_LAB/results/myproject/p1" ./` out (doc 02);
+`scp` through the bastion is not permitted. A CPU tool (foldseek,
 mmseqs2, hhsuite, dockq, pymol; rosetta and foldx are native installs) is the
 same sequence from `salloc -p cpu -c 8 --mem 16G -t 2:00:00`.
 
@@ -91,7 +94,8 @@ squeue -u $USER
 ls logs/
 ```
 
-Stage the inputs into the work directory the script names before you submit.
+Stage the inputs into the work directory the script names before you submit
+(from a laptop, `chpc-globus.sh push`; on the cluster, `cp` from FAC).
 The job sources `chpc.env` itself, runs the same `eval` and the same
 `chpc-tool exec`, and prints which GPU it landed on at the top of its log. See
 `docs/04-batch-jobs.md` for sizing, arrays and monitoring.
@@ -296,7 +300,9 @@ someone does the build, not before.
    `$CHPC_REFDATA/mytool` (`_refdata mytool`). Freely licensed weights: a
    `fetch-weights.sh` that does `eval "$(chpc-tool export mytool)"` and
    downloads to that path, run once on the login node. Licensed payloads:
-   `assets.tsv` and `chpc-assets install mytool --from <dir>`. Then a
+   `assets.tsv` and `chpc-assets install mytool --from <dir>`, where `<dir>`
+   is on the cluster: from a laptop, `chpc-globus.sh push` it to your scratch
+   first (doc 02). Then a
    `tool_doctor` that checks the payload is there, so `doctor` can say so
    after the next purge.
 

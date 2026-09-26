@@ -160,6 +160,26 @@ class Route(unittest.TestCase):
         # it is copying INTO it -- and the question is where the buffer is.
         self.assertEqual(re.findall(r"/mnt/fac\S*globus-staging", whole), [], whole)
 
+    def test_a_destination_directory_that_does_not_exist_is_repaired_before_the_copy(
+        self,
+    ) -> None:
+        """A directory created at the share root inherits the owner DENY.
+
+        The mkdir then succeeds and the cp into it fails, for the person who
+        ran it (seen 2026-09-26 creating $CHPC_LAB/lib). So the remote leg
+        walks up to the topmost directory it will create, repairs that one
+        first, and only then copies; what landed is repaired last, as before.
+        """
+        lines = self.compose("push", str(self.source), "/mnt/fac/TEST_SHARE/newproj/incoming")
+        remote = next(line for line in lines if line.startswith("SSH"))
+        walk = remote.index("d=/mnt/fac/TEST_SHARE/newproj")
+        ancestor = remote.index('chpc-fac-fixacl "$new"')
+        copy = remote.index("cp -a ")
+        landed = remote.index("chpc-fac-fixacl /mnt/fac/TEST_SHARE/newproj/incoming")
+        self.assertLess(walk, ancestor, remote)
+        self.assertLess(ancestor, copy, remote)
+        self.assertLess(copy, landed, remote)
+
     # ── refusals ─────────────────────────────────────────────────────────────
 
     def test_a_path_outside_its_collection_root_is_refused_and_names_the_root(self) -> None:

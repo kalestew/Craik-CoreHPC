@@ -13,6 +13,9 @@
 # CPU-only tool (foldseek, mmseqs2, hhsuite, dockq, pymol; rosetta and foldx
 # are native): --partition=cpu, delete the --gres line and the nvidia-smi line.
 #
+# Inputs reach WORKDIR over Globus from a laptop (chpc-globus.sh push, doc 02)
+# or by cp from FAC on the cluster; scp through the bastion is not an approved path.
+#
 # Verified 2026-09-25 as shipped: job 1997496, ggpu1-08 (NVIDIA L40S), 36 s,
 # submitted from a shell that had not sourced env.sh, with CHPC_ENV pointing at
 # a checkout; wrote in_model_0.cif and its confidence files under out_1997496.

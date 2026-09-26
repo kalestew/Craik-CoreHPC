@@ -46,6 +46,17 @@ the registry from it; see "Using it from a project" below.
 
 7. On that node, `chpc-tool doctor`: one row per tool, OK or FAIL, and where
    it lives. That is the check that steps 4 to 6 worked.
+8. Data moves over Globus, never `scp` or `rsync` through the bastion (the
+   AUP). On your laptop: `source env.sh` in a checkout of this repo, set up
+   Globus Connect Personal once (`chpc.env.local.example` walks through it),
+   then `chpc-globus.sh doctor` and
+
+   ```bash
+   chpc-globus.sh push ./inputs "$CHPC_USER_SCRATCH/myproj/inputs"   # to scratch: one leg; to FAC: two, the script takes both
+   chpc-globus.sh pull "$CHPC_LAB/results/myproj" ./results
+   ```
+
+   `docs/02-storage-and-data.md` has the route and its traps.
 
 ## Run a tool
 
@@ -59,10 +70,10 @@ chpc-tool exec boltz -- boltz --help        # run a program inside it. Always `-
 chpc-tool exec boltz -- bash                # a shell inside it
 ```
 
-Put inputs on `/mnt/scratch/user/$USER`; the same path is valid inside the
-container, so a command that works at the shell works unchanged through
-`chpc-tool exec`. Weights are already on the share and `exec` hands the tool
-their location.
+Put inputs on `/mnt/scratch/user/$USER` (from a laptop, `chpc-globus.sh
+push`, step 8); the same path is valid inside the container, so a command that
+works at the shell works unchanged through `chpc-tool exec`. Weights are
+already on the share and `exec` hands the tool their location.
 
 For a full example on your own input, the one idiom you need before writing a
 tool's variables on a command line (`eval "$(chpc-tool export boltz)"`), which
@@ -77,7 +88,8 @@ inputs"](tools/README.md#run-a-tool-on-your-inputs).
 - One tool's run block, inputs, traps and build record: `tools/<tool>/README.md`.
 - Batch jobs: `docs/04-batch-jobs.md`; ready-to-copy scripts in
   `templates/slurm/` (`tool-gpu.sbatch` is the one for registry tools).
-- Storage, quotas, moving data in and out: `docs/02-storage-and-data.md`.
+- Storage, quotas, moving data in and out with `chpc-globus.sh`:
+  `docs/02-storage-and-data.md`.
 - Partitions, GPU models, why `--gres=gpu:1` is a gamble:
   `docs/05-partitions-and-hardware.md`.
 - What `chpc-tool exec` does underneath, and building images:
@@ -130,7 +142,7 @@ Then, on a laptop or on the cluster:
 ```bash
 source corehpc/env.sh                      # any path, bash or zsh
 chpc-prime.sh                              # Duo once; scripts/ and lab/bin/ are now on PATH
-chpc-globus.sh push ./inputs "$CHPC_LAB/myproj/inputs"   # Globus; two legs to FAC, one to scratch
+chpc-globus.sh push ./inputs "$CHPC_USER_SCRATCH/myproj/inputs"   # Globus, one leg; a FAC destination is two (doc 02)
 cp corehpc/templates/slurm/gpu.sbatch jobs/train.sbatch   # copy templates out; edit the copy
 sbatch jobs/train.sbatch                   # the job sources the pinned chpc.env through $CHPC_ENV
 chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your project, not the submodule
@@ -148,6 +160,7 @@ chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your
 | `CHPC_TOOLS` | path of `tools/` in this checkout: the registry `chpc-tool` reads |
 | `CHPC_ON_CLUSTER` | `1` on a CoreHPC node, `0` elsewhere |
 | `CHPC_*` paths | FAC, group scratch, user scratch, containers (from `lab/chpc.env`) |
+| `CHPC_GLOBUS_*` | the two CoreHPC collections, the scratch root and the staging buffer (site facts, from `lab/chpc.env`); your machine's collection, root and staging directory (from `chpc.env.local`, empty until set) |
 
 Off-cluster only the paths are set. The cache and conda redirections in
 `lab/chpc.env` apply on cluster nodes, so sourcing it on a laptop leaves
@@ -209,7 +222,7 @@ say so and give the CoreHPC-specific version.
 | `lab/README.md` | The shared FAC directory: layout, bootstrap, keeping the share's copy current, publishing |
 | `templates/slurm/` | Ready-to-copy job scripts; `tool-gpu.sbatch` for a registry tool |
 | `docs/01-access-and-ssh.md` | Accounts, VPN, Duo, bastion + ProxyJump, passwordless SSH, ControlMaster, Open OnDemand, VS Code |
-| `docs/02-storage-and-data.md` | Home, scratch (user/group), FAC, local NVMe, quotas, purge policy, approved transfer paths (Globus, FAC share, OnDemand), internet access |
+| `docs/02-storage-and-data.md` | Home, scratch (user/group), FAC, local NVMe, quotas, purge policy, approved transfer paths (Globus, FAC share, OnDemand) and `chpc-globus.sh`, the scripted one; internet access |
 | `docs/03-interactive-jobs.md` | `salloc` / `srun --pty`, GPU shells, tmux/screen, attaching to a running job |
 | `docs/04-batch-jobs.md` | `sbatch` anatomy, resource requests, arrays, dependencies, GPUs, MPI, monitoring, cancelling, `sacct` |
 | `docs/05-partitions-and-hardware.md` | Every partition, node type, GPU, time limit and per-user limit |
@@ -226,7 +239,7 @@ say so and give the CoreHPC-specific version.
 
 ```
 env.sh                      Source me: CHPC_* variables, scripts on PATH, tab completion; standalone or submodule
-chpc.env.local.example      Copy to <your project>/chpc.env.local: username, share, SSH alias
+chpc.env.local.example      Copy to <your project>/chpc.env.local: username, share, SSH alias, Globus staging directory
 ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
@@ -256,6 +269,10 @@ tests/                      python3 -m unittest discover -s tests   (runs on a l
   is wiped at quarterly maintenance. Persistent data lives on FAC.
 - FAC (`/mnt/fac/<share>`) is capacity storage: read inputs and write final
   results there, but do not run I/O-heavy jobs against it.
+- Data moves over Globus: `chpc-globus.sh push` / `pull` from a checkout on
+  your laptop. `scp`/`rsync` through the bastion is not an approved path, and
+  there is no FAC collection, so a share destination is two legs, which the
+  script takes for you.
 - Our account is `hpc_core` with QoS for `cpu`, `gpu`, `community` and
   `community_short` (verified with `sacctmgr`). `pod` and `large_gpu` are
   restricted to named accounts; jobs naming them are rejected.

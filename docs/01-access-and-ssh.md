@@ -52,8 +52,8 @@ ssh chpc-ucsf-login-vm1
 
 1. `ProxyJump` so `ssh chpc` tunnels through the bastion transparently.
 2. `ControlMaster`/`ControlPersist` so the first connection to the bastion
-   answers Duo once and every later `ssh`, `scp`, `rsync`, VS Code session
-   for the next 10 hours reuses that socket with no prompt.
+   answers Duo once and every later `ssh`, VS Code session and `chpc-*.sh`
+   script for the next 10 hours reuses that socket with no prompt.
 3. Key-based auth to both hosts.
 
 ### Setup steps
@@ -91,7 +91,9 @@ ssh chpc 'squeue -u $USER'
 Data does **not** travel over this alias. The AUP's approved transfer paths are
 Globus, the FAC share and Open OnDemand (doc 02); `scp`/`rsync` through the
 bastion is not among them and the CoreHPC training stated it is not permitted.
-The master socket is for interactive shells and remote commands.
+The master socket is for interactive shells and remote commands. The scripted
+route is `scripts/chpc-globus.sh` (doc 02): the bytes go over Globus, and its
+FAC leg uses this socket only for the cluster-local copy.
 
 ### GlobalProtect will not connect while on `UCSFwpa`
 

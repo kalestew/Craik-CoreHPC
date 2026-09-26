@@ -121,7 +121,9 @@ chpc-tool doctor foldx                       # run it, read the banner
 
 A lab member with share access needs none of this — `FOLDX_BINARY` already
 resolves for them. Someone outside the share gets an exact list: ask the lab
-for the licensed copy, or register your own at the URL above.
+for the licensed copy, or register your own at the URL above. A copy on a
+laptop reaches the cluster with `chpc-globus.sh push <dir>
+"$CHPC_USER_SCRATCH/foldx-payload"` (doc 02), and that is the `--from` directory.
 
 **Renewal is one command.** When the 2027-01-31 copy lapses, download the new
 build, edit the first row of `assets.tsv` to its filename, set the sha256 to

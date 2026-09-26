@@ -152,7 +152,7 @@ x86_64).
 ```bash
 docker buildx build --platform linux/amd64 -t mytool:1.0 .
 docker save mytool:1.0 -o mytool_1.0.tar
-scripts/chpc-stage.sh mytool_1.0.tar /mnt/scratch/user/$USER/apptainer/
+chpc-globus.sh push mytool_1.0.tar "$CHPC_USER_SCRATCH/apptainer/mytool_1.0.tar"   # Globus, one leg (doc 02)
 # on the login node:
 apptainer build mytool_1.0.sif docker-archive:///mnt/scratch/user/$USER/apptainer/mytool_1.0.tar
 ```

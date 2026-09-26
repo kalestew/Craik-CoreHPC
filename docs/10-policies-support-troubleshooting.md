@@ -81,4 +81,5 @@ Wynton fully retires by February 2027. PI submits one transition request
 per lab at <https://tiny.ucsf.edu/transition>; details at
 <https://ars.ucsf.edu/wynton-transition-keeping-you-informed>. FAC/CoreHPC
 is entirely separate from Wynton: nothing (storage, accounts, backups)
-carries over. Move data via Globus (doc 02); translate scripts with doc 09.
+carries over. Move data via Globus (`chpc-globus.sh`, doc 02); translate
+scripts with doc 09.

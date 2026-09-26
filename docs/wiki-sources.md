@@ -45,4 +45,4 @@ Other official links:
 - FAC cost calculator (VPN): https://fac-calc.ucsf.edu/
 - Wynton transition: https://ars.ucsf.edu/wynton-transition-keeping-you-informed and https://ars.ucsf.edu/wynton-transition-project-faqs
 - Duo enrollment: https://it.ucsf.edu/how-to/enrolling-your-first-device-duo
-- Globus: https://www.globus.org/ and https://docs.globus.org/globus-connect-personal/install/
+- Globus: https://www.globus.org/ and https://docs.globus.org/globus-connect-personal/install/ ; the CLI `scripts/chpc-globus.sh` drives: https://docs.globus.org/cli/

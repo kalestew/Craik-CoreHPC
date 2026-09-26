@@ -27,7 +27,9 @@
 # So a push to FAC is: one Globus transfer into $CHPC_GLOBUS_STAGING, then a
 # cluster-local `cp` into place, then `chpc-fac-fixacl` -- because a new file on
 # the share inherits a DENY entry for its own owner and is otherwise unreadable
-# by the person who just wrote it. A pull from FAC is the same trip backwards.
+# by the person who just wrote it. A destination directory that does not exist
+# yet is created and repaired before the copy, for the same reason: the copy
+# into an unrepaired one fails. A pull from FAC is the same trip backwards.
 #
 # A transfer to or from scratch itself is one leg, and this script says which it
 # did rather than leaving you to infer it.
@@ -262,8 +264,15 @@ cmd_push() {
       dst_rel=$(collection_path "$CHPC_GLOBUS_SCRATCH_ROOT" "$buffer" staging)
       transfer "$CHPC_GLOBUS_LOCAL_COLLECTION" "$src_rel" \
                "$CHPC_GLOBUS_SCRATCH_COLLECTION" "$dst_rel" "$recursive"
-      run_remote "$(printf 'set -e; mkdir -p %q; cp -a %q %q; command -v chpc-fac-fixacl >/dev/null && chpc-fac-fixacl %q || echo "chpc-fac-fixacl not on PATH; %q may be unreadable by its own owner" >&2' \
-                    "$(dirname "$dst")" "$buffer" "$dst" "$dst" "$dst")"
+      # The destination's parent may not exist yet, and a directory created at
+      # the share root inherits the owner DENY (docs/02): the mkdir succeeds
+      # and the cp into it then fails with "Permission denied" for the very
+      # person running it (seen 2026-09-26, creating $CHPC_LAB/lib). So the
+      # topmost directory the mkdir creates is repaired BEFORE the copy, and
+      # what landed is repaired after it. Repairing only the new directory,
+      # not the parent, keeps this off an existing tree's every file.
+      run_remote "$(printf 'set -e; d=%q; new=; while [ ! -e "$d" ] && [ "$d" != / ]; do new=$d; d=$(dirname "$d"); done; mkdir -p %q; if command -v chpc-fac-fixacl >/dev/null; then [ -z "$new" ] || chpc-fac-fixacl "$new"; else echo "chpc-fac-fixacl not on PATH; %q may be unreadable by its own owner" >&2; fi; cp -a %q %q; ! command -v chpc-fac-fixacl >/dev/null || chpc-fac-fixacl %q' \
+                    "$(dirname "$dst")" "$(dirname "$dst")" "$dst" "$buffer" "$dst" "$dst")"
       echo "landed at $dst; the copy in $buffer is a buffer and scratch is purged at 30 days" >&2
       ;;
   esac

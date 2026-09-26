@@ -15,6 +15,8 @@
 #   CHPC_TOOLS     path of tools/ in this checkout: the tool registry that
 #                  chpc-tool and chpc-assets read.
 #   CHPC_*         cluster paths from lab/chpc.env
+#   CHPC_GLOBUS_*  Globus collections and staging: site facts from lab/chpc.env,
+#                  your machine's side from chpc.env.local (scripts/chpc-globus.sh)
 #   PATH           += $CHPC_REPO/scripts and $CHPC_REPO/lab/bin
 #
 # Overrides: the first existing file of $CHPC_ENV_LOCAL,

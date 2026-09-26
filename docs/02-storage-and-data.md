@@ -85,6 +85,7 @@ Notes:
 /mnt/scratch/user/$USER/
    envs/ pkgs/  conda (see doc 06)
    apptainer/   APPTAINER_CACHEDIR, APPTAINER_TMPDIR
+   globus-staging/  chpc-globus.sh's buffer for the FAC leg; purged like the rest
    <project>/   personal working dirs
 $HOME
    .ssh, .bashrc, .condarc, small scripts only
@@ -116,8 +117,13 @@ CoreHPC training on 2026-09-10/11 said so explicitly -- transferring files
 through the bastion "is not allowed ... mainly because of security reasons",
 and an attendee's `scp` to the UCSF bastion failed on the call. Treat it as
 unsanctioned wherever it still happens to succeed, and do not build a workflow
-on it. `scripts/chpc-stage.sh` predates that finding; see the warning in its
-header.
+on it. `scripts/chpc-stage.sh` predates that finding and `scripts/chpc-globus.sh`
+replaces it.
+
+The lab's route is `chpc-globus.sh` (next section): it drives the same Globus
+collections from a shell and knows that a share destination takes two legs. A
+one-off file can go through the Globus web app; anything a pipeline depends on
+goes through the script.
 
 - Globus web app for files under ~1 GB: log in at <https://www.globus.org/>
   with the "University of California San Francisco" org login, File Manager,
@@ -127,7 +133,9 @@ header.
   <https://docs.globus.org/globus-connect-personal/install/>, log in with your
   UCSF CILogon identity (it ends in `@ucsf.edu` with six leading digits of
   your UCID), create a personal collection, then transfer collection-to-
-  collection. Choose "High Assurance" if the data is PHI / P3 / P4.
+  collection -- by hand in the web app, or with `chpc-globus.sh`, which drives
+  that same collection; `chpc.env.local.example` walks through the one-time
+  setup. Choose "High Assurance" if the data is PHI / P3 / P4.
 - FAC shares are also mounted elsewhere (lab workstations, per the FAC team),
   so the FAC share itself can be the transfer medium for lab data.
 
@@ -153,20 +161,28 @@ in a document. `scripts/chpc-globus.sh` is the replacement for
 ```bash
 chpc-globus.sh doctor                            # what is set up, what is not
 chpc-globus.sh env                               # the resolved settings
-chpc-globus.sh push ./outputs "$CHPC_LAB/proj/outputs"
-chpc-globus.sh pull "$CHPC_LAB/proj/results" ~/results
-chpc-globus.sh push ./big "$CHPC_LAB/x" --dry-run   # print the route, run nothing
+chpc-globus.sh push ./inputs "$CHPC_USER_SCRATCH/proj/inputs"     # one leg: scratch is a collection
+chpc-globus.sh push ./outputs "$CHPC_LAB/results/proj/outputs"    # two legs: FAC is not
+chpc-globus.sh pull "$CHPC_LAB/results/proj" ~/proj-results
+chpc-globus.sh push ./big "$CHPC_LAB/data/x" --dry-run   # print the route, run nothing
+chpc-globus.sh push ./big "$CHPC_LAB/data/x" --wait 0    # queue it, print the task id, return
 ```
 
 **Two legs, and it says which it took.** Because there is no FAC collection, a
 push to the share is one Globus transfer into `$CHPC_GLOBUS_STAGING` on user
 scratch, then a cluster-local `cp`, then `chpc-fac-fixacl` on what landed --
 without that last step the files are unreadable by the person who just wrote
-them. A pull is the same trip backwards, and it fills the buffer *before* it
-transfers: a transfer of an unfilled staging path does not fail, it delivers an
-empty directory and reports `SUCCEEDED`.
+them. A destination directory that does not exist yet is created and repaired
+*before* the copy, because a directory made at the share root inherits that
+same DENY and the copy into it fails (the ACL note above); aim a push inside
+the layout all the same, `results/<project>/` or `data/`. A pull is the same
+trip backwards, and it fills the buffer *before* it transfers: a transfer of an
+unfilled staging path does not fail, it delivers an empty directory and reports
+`SUCCEEDED`.
 
-A transfer to or from scratch itself is one leg and needs no ssh at all.
+A transfer to or from scratch itself is one leg and needs no ssh at all. The
+FAC leg runs over the primed master session (`chpc-prime.sh`, doc 01), and
+`doctor` says whether one is open.
 
 **What is a site fact and what is yours.** `lab/chpc.env` holds both collection
 UUIDs and derives `CHPC_GLOBUS_SCRATCH_ROOT` from `CHPC_USER` -- the scratch
