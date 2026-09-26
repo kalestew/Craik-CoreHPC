@@ -12,6 +12,10 @@
 #
 # CPU-only tool (foldseek, mmseqs2, hhsuite, dockq, pymol; rosetta and foldx
 # are native): --partition=cpu, delete the --gres line and the nvidia-smi line.
+#
+# Verified 2026-09-25 as shipped: job 1997496, ggpu1-08 (NVIDIA L40S), 36 s,
+# submitted from a shell that had not sourced env.sh, with CHPC_ENV pointing at
+# a checkout; wrote in_model_0.cif and its confidence files under out_1997496.
 #SBATCH --job-name=tool_gpu
 #SBATCH --partition=gpu
 #SBATCH --gres=gpu:nvidia_l40s:1     # EDIT 1. Safe for every tool. gpu:1 (any node) only for the tools tools/README.md "Which GPU" lists as any
