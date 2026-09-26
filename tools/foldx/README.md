@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified 2026-09-21 on the CoreHPC **login node**: `chpc-tool doctor foldx` ran the binary and the banner was clean. No `test.sh`, so no compute-node self-test yet (Provenance) |
+| Status | verified 2026-09-26 on `gcpu2-34` (CPU): `chpc-tool test foldx`, RepairPDB then BuildModel with one point mutation on a generated 40-mer, ddG written, 11 s. Before that, 2026-09-21 on the login node, the banner only (Provenance) |
 | Installs to | `$CHPC_SOFTWARE/foldx5.1/foldx_20270131` (`$FOLDX_BINARY`), 88 MB — ELF 64-bit x86-64, **statically linked**. Native, no image |
 | Payload | [`assets.tsv`](assets.tsv) — binary + 15 `molecules/*.json`, on the share, not in git |
 | GPU | CPU (`salloc -p cpu`) |
@@ -16,14 +16,14 @@
 
 ```bash
 salloc -p cpu -c 8 --mem 16G -t 2:00:00
-mkdir -p /mnt/scratch/user/$USER/foldx/run1 && cd "$_"   # in.pdb and individual_list.txt here; FoldX writes beside them (untested)
+mkdir -p /mnt/scratch/user/$USER/foldx/run1 && cd "$_"   # in.pdb and individual_list.txt here; FoldX writes beside them
 eval "$(chpc-tool export foldx)"                          # FOLDX_BINARY: the dated binary, found by glob
-"$FOLDX_BINARY" --command=RepairPDB --pdb=in.pdb          # (untested) once per structure; upstream's first step, writes in_Repair.pdb
-"$FOLDX_BINARY" --command=BuildModel --pdb=in_Repair.pdb --mutant-file=individual_list.txt   # (untested)
+"$FOLDX_BINARY" --command=RepairPDB --pdb=in.pdb          # once per structure; upstream's first step, writes in_Repair.pdb
+"$FOLDX_BINARY" --command=BuildModel --pdb=in_Repair.pdb --mutant-file=individual_list.txt
 ```
 
-There is no `test.sh`, so none of these lines has been run through this
-registry; the flags are FoldX's own. `chpc-tool exec foldx -- foldx ...` does
+Those are the two commands `test.sh` runs, on a generated backbone with a
+one-line mutant list; the flags are FoldX's own. `chpc-tool exec foldx -- foldx ...` does
 **not** work: for a native entry `exec` puts `$PREFIX/bin` on `PATH`, and this
 install has no `bin/` and no program called `foldx`. The binary sits directly
 under `$PREFIX` as `foldx_20270131` and `tool.conf` names no `ENTRY`, so `exec`
@@ -38,15 +38,18 @@ with the `"$FOLDX_BINARY"` call above. The method and the `eval` idiom:
 
 Input is a PDB and, for `BuildModel`, `individual_list.txt`: one mutant per
 line, each a comma-separated list of `<wt><chain><pdbnumber><mut>` labels
-ending in `;`, so `GA193F;` is one single mutant and `GA193F,LA25I;` one
-double (untested here). The residue number is the PDB's own, chain included,
-and the wild-type letter must match the structure (Do not miss).
+ending in `;`, so `GA193F;` is one single mutant (the self-test's `DA10A;` is
+that grammar) and `GA193F,LA25I;` one double (untested here). The residue
+number is the PDB's own, chain included, and the wild-type letter must match
+the structure (Do not miss).
 
-Output lands in the working directory (untested): `Dif_<pdb>.fxout` is the
-ddG per mutant in kcal/mol, positive destabilising, in the order of
-`individual_list.txt`, not ranked; `Raw_<pdb>.fxout` and `Average_<pdb>.fxout`
-carry the energy terms; `<pdb>_1.pdb` and `WT_<pdb>_1.pdb` are the mutant and
-the re-relaxed wild type for the first mutant.
+Output lands in the working directory: `Dif_<pdb>.fxout` is the ddG per
+mutant in kcal/mol, positive destabilising, in the order of
+`individual_list.txt`, not ranked, one tab-separated row per mutant with the
+model's file name in column 1 and the total in column 2 (what `test.sh`
+reads); `Raw_<pdb>.fxout` and `Average_<pdb>.fxout` carry the energy terms
+(untested); `<pdb>_1.pdb` and `WT_<pdb>_1.pdb` are the mutant and the
+re-relaxed wild type for the first mutant.
 
 Before trusting a number: FoldX is deterministic per run but its ddG carries
 an error on the order of the effects people look for, so upstream's practice
@@ -80,17 +83,23 @@ wild-type letter or a Rosetta-style number is not caught by FoldX itself.
 Installed 2026-09-21 by kanderson6, staged from a licensed local copy through
 `chpc-assets install foldx`.
 
-`verified` for this entry means exactly this: on 2026-09-21, on the CoreHPC
-login node, `chpc-tool doctor foldx` found `foldx_20270131` under
-`$CHPC_SOFTWARE/foldx5.1`, ran it with `-h`, and the banner was clean — no
-expiry message, valid to 2027-01-31. That is a run of the binary, not a
-computation: there is no `test.sh`, so `chpc-tool test foldx` dies with `no
-test.sh in ... (required for STATUS=verified)`, and no FoldX command has been
-run on a compute node through this registry.
+`chpc-tool test foldx`, 2026-09-26 on `gcpu2-34` (CPU, 11 s): reads the
+banner, generates a 40-residue backbone with
+[`../_template/make_test_pdb.sh`](../_template/make_test_pdb.sh), runs
+`RepairPDB` (which has to build every side chain, the fixture has none), reads
+the wild type of residue A10 out of the repaired structure, writes `DA10A;`
+and runs `BuildModel`, then asserts a numeric ddG in column 2 of
+`Dif_t_Repair.fxout` (0.062 kcal/mol, meaningless on an idealised backbone
+and not looked at) and 40 CA atoms in the mutant model.
 
-Follow-up: write a `test.sh` that runs `BuildModel` on a small structure with
-a one-line `individual_list.txt` and asserts a non-empty `Dif_*.fxout`, run
-`chpc-tool test foldx` on a compute node, and record the date and node here.
+Until that day `verified` had meant less: on 2026-09-21, on the login node,
+`chpc-tool doctor foldx` found `foldx_20270131` under `$CHPC_SOFTWARE/foldx5.1`,
+ran it with `-h`, and the banner was clean. The first attempt at the
+self-test failed with `FOLDX_BINARY is empty` on a share where doctor had just
+run the binary: `chpc-tool exec` and `test` called `tool_exports` with
+globbing switched off, so the `foldx_*` glob stayed a literal, while
+`chpc-tool export foldx` never did. Fixed in `chpc-tool` the same day, with a
+regression test.
 
 ## Build notes
 
