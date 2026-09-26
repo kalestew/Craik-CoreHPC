@@ -10,8 +10,10 @@
 #   chpc-tool doctor [<tool>...]            is it really there, and really working
 #   chpc-tool test <tool>...                run the entry's test.sh (what STATUS=verified means)
 #   chpc-tool build <tool>                  build the container from its .def
-#   chpc-tool publish <tool>                the eight publish steps from lab/README.md
+#   chpc-tool publish <tool>                copy a built image to the share: sif, .def, wrapper, README row, mirror
 #   chpc-tool wrapper <tool>                write $CHPC_LAB/bin/<tool>
+#
+#   Guide: tools/README.md -- "Run a tool on your inputs", "The CLI", "Add a tool".
 #
 # The registry is ../../tools relative to this script (or ../tools when this
 # script has been copied to $CHPC_LAB/bin). $CHPC_TOOLS overrides it. Resolving
@@ -296,14 +298,27 @@ cmd_show() {
       container)
         printf 'image       %s\n' "$(_image_path)"
         printf 'gpu (--nv)  %s\n' "$([ "$GPU" = 1 ] && echo yes || echo no)"
+        [ -n "${GPU_MAX_CC:-}" ] && printf 'gpu max cc  %s  (ask for --gres=gpu:nvidia_l40s:1 or nvidia_h100_nvl:1, never a bare gpu:1)\n' "$GPU_MAX_CC"
+        [ "${WRITABLE_TMPFS:-0}" = 1 ] && printf 'tmpfs       --writable-tmpfs\n'
         [ -n "${APPDIR:-}" ] && printf 'appdir      %s  (inside the image)\n' "$APPDIR" ;;
+      module)
+        [ -n "${MODULE:-}" ]  && printf 'module      %s\n' "$MODULE" ;;
       *)
         [ -n "${PREFIX:-}" ]  && printf 'prefix      %s\n' "$PREFIX"
         [ -n "${ENV_YML:-}" ] && printf 'recipe      %s\n' "$ENV_YML" ;;
     esac
+    # The default program, and the one rule about it that costs people a run:
+    # `exec <tool> predict x` runs a program called predict. Always -- <program>.
+    [ -n "${ENTRY:-}" ] && printf 'entry       %s  (used when exec is given no command or a leading flag; otherwise write it after --)\n' "$ENTRY"
     if type tool_exports >/dev/null 2>&1; then
       printf 'exports\n'
       tool_exports | sed 's/^/            /'
+    fi
+    # The runtime caveats. Printed here and nowhere else: --env omits NOTE on
+    # purpose (see _show_env), and a person reading the entry is who it is for.
+    if [ -n "${NOTE:-}" ]; then
+      printf 'note\n'
+      printf '%s\n' "$NOTE" | fold -s -w 72 | sed 's/ *$//; s/^/            /'
     fi
     return 0
   fi
@@ -338,7 +353,7 @@ cmd_export() {
       # registry resolved -- BOLTZ_CACHE, RFDIFFUSION_MODELS -- reaches the
       # software inside only if it was exported; a bare assignment in
       # site.conf stops at the job script, and the tool then falls back to its
-      # own default, which for Boltz means trying to download 3 GB of weights
+      # own default, which for Boltz means trying to download 5 GB of weights
       # from a compute node that has no internet. And a stage script that
       # shells out gets the same value the job script had.
       # This is still an UNCONDITIONAL assignment, so site.conf continues to
@@ -764,25 +779,25 @@ cmd_publish() {
   _def=$(_deffile)
   echo "publishing $NAME $VERSION"
   mkdir -p "$CHPC_LAB/containers/defs"
-  cp "$_built" "$CHPC_LAB/containers/$IMAGE"          # 3
+  cp "$_built" "$CHPC_LAB/containers/$IMAGE"
   chmod 644 "$CHPC_LAB/containers/$IMAGE"
-  [ -n "$_def" ] && cp "$_def" "$CHPC_LAB/containers/defs/"   # 4
-  cmd_wrapper "$NAME"                                          # 5
+  [ -n "$_def" ] && cp "$_def" "$CHPC_LAB/containers/defs/"
+  cmd_wrapper "$NAME"
   # Must match the six-column header already in that file:
   #   | Image | What | Source / def | Built by | Date | Run |
   if [ -n "$_def" ]; then _srccol="defs/$(basename "$_def")"; else _srccol="${UPSTREAM:--}"; fi
   printf '| `%s` | %s %s | %s | %s | %s | `chpc-tool exec %s -- ...` |\n' \
     "$IMAGE" "$NAME" "${VERSION:--}" "$_srccol" \
     "${CHPC_USER:-$USER}" "$(date -u +%Y-%m-%d)" "$NAME" \
-    >> "$CHPC_LAB/containers/README.md"                        # 6
-  "$SELF_DIR/chpc-stage-containers"                            # 7
+    >> "$CHPC_LAB/containers/README.md"
+  "$SELF_DIR/chpc-stage-containers"
   echo
-  echo "Done 3-7. Still yours to do:"
-  echo "  2. test it in an interactive job:  chpc-tool exec $NAME -- <something cheap>"
-  echo "  8. set STATUS=verified and UPSTREAM_REF in $TOOLDIR/tool.conf, and commit"
+  echo "Published. Still yours to do (tools/README.md, Add a tool):"
+  echo "  - if it has not run on a compute node yet:  chpc-tool test $NAME"
+  echo "  - STATUS=verified and UPSTREAM_REF in $TOOLDIR/tool.conf, the README, and commit"
 }
 
-usage() { sed -n '2,20p' "$_self" | sed 's/^# \{0,1\}//'; }
+usage() { sed -n '2,22p' "$_self" | sed 's/^# \{0,1\}//'; }
 
 # --- dispatch ------------------------------------------------------------------
 [ $# -ge 1 ] || { usage; exit 2; }

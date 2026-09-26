@@ -192,6 +192,21 @@ class ShowEnvTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("name        boltz", result.stdout)
 
+    def test_the_human_form_prints_what_a_first_run_needs(self) -> None:
+        """NOTE is the entry's runtime caveats and ENTRY is the default program;
+        neither is in --env (see test_note_is_not_emitted), so `show` is the
+        only place a person sees them. GPU_MAX_CC decides which --gres to ask
+        for, which is the first thing that goes wrong on this cluster."""
+        result = self.run_cli("show", "boltz")
+        self.assertIn("entry       boltz", result.stdout)
+        self.assertIn("note\n", result.stdout)
+        self.assertIn("--no_kernels", result.stdout)
+        result = self.run_cli("show", "protenix")
+        self.assertIn("gpu max cc  9.0", result.stdout)
+        self.assertIn("nvidia_l40s", result.stdout)
+        result = self.run_cli("show", "dssp")
+        self.assertIn("module      Sali dssp/2.2.1", result.stdout)
+
 
 if __name__ == "__main__":
     unittest.main()
