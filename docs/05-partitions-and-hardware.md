@@ -120,10 +120,13 @@ chpc-tool exec <tool> -- python -c \
 |---|---|---|---|
 | `esm`, `proteinmpnn`, `ligandmpnn` | 2.14 / cu132 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
 | `boltz` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
+| `openfold3` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` (built, not yet verified) |
 | `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
+| `protenix` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion3` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
 | `rfdiffusion`, `placer` | 2.3.1 / cu121 | `sm_50 … sm_86 sm_90` | **no** |
 | `colabfold` | jax / cu12.2 | — (upstream image, cuda 12.2 predates `sm_120`) | **no** |
+| `intellifold` | jax / cu12.8, no torch | — (9.0 rests on a real 658-token fold on an H100 NVL, 2026-09-25; Blackwell untested) | **no** |
 
 `sm_120` present means the image is safe on every `gpu` node. Absent, it needs
 `--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`.
@@ -145,8 +148,9 @@ rfdiffusion cannot run on this GPU.
 
 It costs one `nvidia-smi` call, needs no torch, and stays silent when there is
 no GPU or no declared limit — so it cannot affect a tool that has not opted in.
-Declared today by: `chai1`, `colabfold`, `placer`, `rfdiffusion`,
-`rfdiffusion3`. It is a backstop for interactive use and copied commands, not
+Declared today (2026-09-25) at 9.0 by `chai1`, `colabfold`, `intellifold`,
+`placer`, `protenix`, `rfdiffusion` and `rfdiffusion3`, and at 12.0 by
+`openfold3`. It is a backstop for interactive use and copied commands, not
 a replacement for the header.
 
 Verified on an L40S (`ggpu1-06`, compute capability 8.9), job 1899113, with

@@ -245,10 +245,11 @@ Two habits that avoid the class entirely:
   baked into the image. `CHPC_REFDATA` exists for exactly this, and a share
   path compiled into a recipe makes that recipe wrong for the next lab.
 
-## Three more ways a green build produces a broken image
+## Four more ways a green build produces a broken image
 
-Added 2026-09-25 from building `tools/protenix`, `tools/intellifold` and
-`tools/openfold3`. Each cost a rebuild; none was visible in `%post`.
+Three added 2026-09-25 from building `tools/protenix`, `tools/intellifold` and
+`tools/openfold3`; the fourth consolidates what four entries had each written
+about the same failure. Each cost a rebuild; none was visible in `%post`.
 
 ### `pip install --upgrade pip` cannot work on an Ubuntu 24.04 base
 
@@ -337,6 +338,39 @@ The same shape applies to anything that JIT-compiles on first use.
 image and not merely `cc` -- and a `-slim` base passes a plain
 `import protenix` and dies on the first real job.
 
+### A kernel that compiles at first use needs a compiler in the image
+
+`boltz_2.sif` is built from `python:3.12-slim` with only `git` and
+`ca-certificates`. Its cuequivariance kernels are Triton, which JIT-compiles
+them at first use, so every prediction above about 128 total tokens dies four
+seconds in with `RuntimeError: Failed to find C compiler` from
+`triton/runtime/build.py`, having written nothing. The self-test passed the
+entire time, because a 31-mer never reaches the kernel path. Measured
+2026-09-22 on an L40S: 31 and 71 residues predict, 142 fail, and so does every
+larger input. Job array 1928395 in a sibling project lost all five tasks in
+under a minute each to exactly that error.
+
+The trap has more than one form, and which one an image has decides what it
+must carry:
+
+| Form | Compiles with | Needs in the image | Registry examples |
+|---|---|---|---|
+| Triton kernels (cuequivariance) | `cc` shelled out at first use | a C compiler, or a documented off switch | boltz: no compiler, `--no_kernels` in its `NOTE` |
+| `torch.utils.cpp_extension` on a `.cu` source | `nvcc` at import | a `-devel` base, not `-runtime` | protenix: `build-essential` plus nvcc, asserted in `%post` and `%test` |
+| DeepSpeed JIT ops | `nvcc`, a C++ compiler, `ninja` at first use | the same | openfold3: full toolchain, `-devel` base |
+| XLA (jax) | LLVM in-process, but reaches for `ptxas`/`nvlink` | the CUDA toolkit, so `-devel` | intellifold: toolchain kept, `XLA_FLAGS` default set in `%environment` |
+| nothing | -- | nothing; `%post` prints whether numba, cython or triton are present so a future fast path shows up in the build log | dockq |
+
+Three rules follow. Assert `cc` (and `nvcc` where an import needs it) in
+`%post` **and** `%test`, and have `tool_doctor` probe the built image for it,
+so a rebuild from a slimmer base is noticed rather than discovered by a job.
+Point `NUMBA_CACHE_DIR`, `TRITON_CACHE_DIR`, `TORCHINDUCTOR_CACHE_DIR` and
+`TORCH_EXTENSIONS_DIR` at `/tmp` in `%environment`, because a `.sif` is a
+read-only squashfs and anything that caches beside its own source refuses at
+import time inside one. And size the self-test to reach the kernel path: the
+check that catches this is a real prediction above the token threshold, not an
+import, not `--help`, not a short peptide.
+
 ## `%post` writing to `/tmp` is writing to the build machine
 
 Apptainer binds the **host's** `/tmp` into `%post`. So a recipe that stages
@@ -420,6 +454,10 @@ applied to one package. A rule that lives in a comment next to one install
 line is not a rule.
 
 ## Running containers
+
+For a tool in the registry, `chpc-tool exec <tool> -- <program> <args>` does
+everything in this section for you (`tools/README.md`, "Run a tool on your
+inputs"). What follows is the raw form it wraps.
 
 ```bash
 apptainer exec image.sif <command>             # run one command
@@ -538,13 +576,17 @@ Rules:
    wrapper's default.
 3. Every image gets a `.def` (or the `docker://` URL in the README) so it
    can be rebuilt after a CVE or when the image is lost.
-4. Wrappers live in `$CHPC_LAB/bin` and are used the same way on the login
-   node, in `salloc`, and in `sbatch`: `mytool --help`.
+4. The supported way to run a tool is `chpc-tool exec <tool> -- <program>`
+   (`tools/README.md`). `publish` also writes a `$CHPC_LAB/bin/<tool>` wrapper
+   that prepends the tool's default program and does nothing else: no exports,
+   no GPU guard, no per-image fallback, no `--writable-tmpfs`.
 5. Jobs read the sif from group scratch when present (fast VAST), falling
    back to FAC. `lab/bin/chpc-stage-containers` refreshes the scratch copy;
    run it after publishing and after each quarterly purge.
-6. Reference data used by the containers goes in `$CHPC_LAB/data/` and is
-   bound read-only: `--bind $CHPC_LAB/data:/refdata:ro`.
+6. Reference data goes in `$CHPC_LAB/data/<tool>` (`$CHPC_REFDATA`) and is
+   reached at the same path inside the container through the plain `/mnt/fac`
+   bind. It is bound read-write, because rfdiffusion, boltz and chai populate
+   caches there on first use; the NFSv4 ACL and file modes are what protect it.
 
 `lab/README.md` and `lab/bin/` implement this.
 
