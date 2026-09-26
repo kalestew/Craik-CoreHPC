@@ -1,7 +1,9 @@
 # 4. Batch jobs with sbatch
 
-Ready-to-edit templates live in `templates/slurm/`. This doc explains the
-pieces. Wiki sources: Access Primer, Submission Examples, Advanced Topics.
+Ready-to-edit templates live in `templates/slurm/`; `tool-gpu.sbatch` is the
+one for a registry tool (`tools/README.md`, "As a batch job"). This doc
+explains the pieces. Wiki sources: Access Primer, Submission Examples,
+Advanced Topics.
 
 ## Anatomy of a job script
 

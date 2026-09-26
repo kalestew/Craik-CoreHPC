@@ -35,6 +35,9 @@ module load nvidia-hpc                    # CUDA toolkit / compilers if needed
 ```
 
 Pick a GPU model: `--gres=gpu:nvidia_h100_nvl:1` (see doc 05 for names).
+For a registry tool, `tools/README.md` "Which GPU" says whether you must:
+seven of the lab's images have no kernels for the Blackwell nodes, and
+`--gres=gpu:nvidia_l40s:1` is safe for every tool.
 
 `pod` and `large_gpu` are not enabled for the lab.
 

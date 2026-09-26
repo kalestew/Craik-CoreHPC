@@ -1,7 +1,9 @@
 #!/bin/bash
+# For an image of your own that is NOT in the registry. For a registry tool
+# use tool-gpu.sbatch, which goes through chpc-tool exec (exports, GPU guard).
 #SBATCH --job-name=container_gpu
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1
+#SBATCH --gres=gpu:1                 # any GPU; name a model (gpu:nvidia_l40s:1) if the image predates CUDA 12.8 -- doc 05
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=08:00:00
