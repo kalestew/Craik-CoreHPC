@@ -137,10 +137,17 @@ _refdata() { printf '%s/%s' "$CHPC_REFDATA" "${1:-${NAME:-}}"; }
 # knowable from tool.conf.
 _export_tool_vars() {
   type tool_exports >/dev/null 2>&1 || return 0
-  # set -f: a value is a path and must not be globbed.
+  # Run tool_exports BEFORE globbing is switched off. foldx's finds its binary
+  # by glob, because the filename carries an expiry date, and under `set -f`
+  # that glob stayed a literal: FOLDX_BINARY came out empty from `exec` and
+  # `test` while `chpc-tool export foldx`, which never sets -f, found it.
+  # Measured 2026-09-26, as a self-test that said the payload was missing.
+  # Then `set -f` for the split below: a VALUE is a path and must not be
+  # globbed.
+  _lines=$(tool_exports)
   set -f; _ifs=$IFS; IFS='
 '
-  for _l in $(tool_exports); do
+  for _l in $_lines; do
     case "$_l" in
       [A-Za-z_]*=*) eval "export $_l"; eval "export APPTAINERENV_$_l" ;;
     esac
