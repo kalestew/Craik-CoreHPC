@@ -87,4 +87,8 @@ for _chpc_d in "$CHPC_REPO/lab/bin" "$CHPC_REPO/scripts"; do
   case ":$PATH:" in *":$_chpc_d:"*) ;; *) PATH=$_chpc_d:$PATH ;; esac
 done
 export PATH
+
+# --- tab completion, interactive shells only ---------------------------------
+case $- in *i*) [ -r "$CHPC_REPO/lab/bin/chpc-completion.bash" ] && . "$CHPC_REPO/lab/bin/chpc-completion.bash" ;; esac
+
 unset _chpc_src _chpc_dir _chpc_super _chpc_f _chpc_d
