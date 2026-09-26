@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified — `chpc-tool test esm` passed on ccpu1-01 (a CPU node); the date of that run is not recorded in this entry |
+| Status | verified 2026-09-26 on an L40S (`ggpu1-08`, job 2000973), 12 s, and 2026-09-26 on `gcpu2-33` (CPU, job 2000974), 11 s: `chpc-tool test esm`, logits (1, 33, 33), mean logP -0.440 on both. An earlier pass on `ccpu1-01` went undated |
 | Image | `esm_2.sif`, 5.15 GB — weights included; recipe [`esm_2.def`](esm_2.def) |
 | GPU | `--gres=gpu:1`, any node (CUDA 13.2 base, `sm_120` present); CPU works, slower |
 | Weights | in the image at `/opt/torch/hub/checkpoints/`: `esm2_t33_650M_UR50D`, `esm2_t30_150M_UR50D` and their contact-regression heads. Nothing under `$CHPC_LAB/data`, nothing fetched at run time |

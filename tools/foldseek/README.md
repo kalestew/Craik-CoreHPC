@@ -2,10 +2,10 @@
 
 | | |
 |---|---|
-| Status | verified — `chpc-tool test foldseek` passed (self-hit identity 1.000 over 60 residues, E = 1.06e-09); the date and node of that run are not recorded in this entry |
+| Status | verified 2026-09-26 on `gcpu2-33` (CPU, job 2000974): `chpc-tool test foldseek`, self-hit identity 1.000 over 60 residues, E = 1.06e-09, under a second |
 | Image | `foldseek_10.sif`, 46 MB; recipe [`foldseek_10.def`](foldseek_10.def) |
 | GPU | CPU (`salloc -p cpu`) |
-| Weights | none. Databases belong under `$CHPC_LAB/data/foldseek`; **none is installed yet** |
+| Weights | none. Databases: one directory each under `$FOLDSEEK_DB_DIR` (`$CHPC_LAB/data/foldseek`), fetched on the login node by [`fetch-db.sh`](fetch-db.sh); `$FOLDSEEK_DB_PDB` is the PDB. **None is installed as of 2026-09-26**; `chpc-tool doctor foldseek` says |
 | Licence | GPL-3.0 |
 | Upstream | release `10-941cd33`, prebuilt `foldseek-linux-avx2` |
 | Base | `debian:12-slim` |
@@ -16,11 +16,13 @@
 ```bash
 salloc -p cpu -c 8 --mem 16G -t 2:00:00
 mkdir -p /mnt/scratch/user/$USER/foldseek/run1 && cd "$_"   # query.pdb here; the same path is valid inside the container
-chpc-tool exec foldseek -- foldseek easy-search query.pdb "$CHPC_LAB/data/foldseek/<db>" res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"   # (untested: no database is installed yet)
+eval "$(chpc-tool export foldseek)"                          # $FOLDSEEK_DB_PDB, the PDB as a Foldseek database
+chpc-tool exec foldseek -- foldseek easy-search query.pdb "$FOLDSEEK_DB_PDB" res.m8 tmp --threads "$SLURM_CPUS_PER_TASK"   # (untested against the PDB: not fetched yet)
 ```
 
-The program and its arguments are what `test.sh` runs; the database path is
-where one will live once someone builds it (Do not miss). As a job: copy
+The program and its arguments are what `test.sh` runs; `$FOLDSEEK_DB_PDB` is
+where `fetch-db.sh` puts the PDB, and until someone has run that on the login
+node `chpc-tool doctor foldseek` warns and the search dies (Do not miss). As a job: copy
 `templates/slurm/tool-gpu.sbatch`, switch it to `--partition=cpu` and drop
 the `--gres` and `nvidia-smi` lines as its header says, and set the tool, the
 work directory and the command after `--` to the values above. The method,
@@ -50,13 +52,15 @@ is not comparable to one against the PDB.
 
 ## Do not miss
 
-- **No database is installed.** Nothing under `$CHPC_LAB/data/foldseek` yet,
-  so the first real search waits on someone building one on the **login
+- **No database is installed (2026-09-26).** `chpc-tool doctor foldseek`
+  warns until someone runs [`fetch-db.sh`](fetch-db.sh) on the **login
   node**, the only node with internet
-  ([`docs/02`](../../docs/02-storage-and-data.md#internet-access)):
-  `chpc-tool exec foldseek -- foldseek databases PDB "$CHPC_LAB/data/foldseek/pdb" tmp`
-  (untested), after checking the share has room. Point `easy-search` at that
-  prefix.
+  ([`docs/02`](../../docs/02-storage-and-data.md#internet-access)): with no
+  arguments it fetches the PDB (about 1.5 GB) to `$FOLDSEEK_DB_PDB`; with a
+  name from `foldseek databases` (`Alphafold/Swiss-Prot`, `Alphafold/Proteome`
+  for the human proteome, ...) it lands beside it under `$FOLDSEEK_DB_DIR`.
+  `test.sh` searches the PDB too once it exists, so the next `chpc-tool test
+  foldseek` after the fetch is the check.
 - **`--exhaustive-search 1` is not a production flag.** `test.sh` passes it
   because a synthetic 60-residue fixture cannot clear the prefilter; against a
   real database it disables the prefilter and aligns everything. Leave it out.
@@ -72,9 +76,8 @@ Built 2026-09-17 by kanderson6 on the CoreHPC login node (86 s).
 `chpc-tool test foldseek`: generates a 60-residue mixed-topology backbone and
 searches it against itself, asserting identity 1.000 over 60 residues
 (E = 1.06e-09). Exercises PDB parsing, 3Di conversion, structural alignment and
-output conversion. The date and node of the passing run were not recorded in
-this entry; whoever next runs it on a compute node should add them to the
-Status row.
+output conversion. Passed 2026-09-26 on `gcpu2-33` (CPU, job 2000974), under a second; an earlier
+pass went unrecorded.
 
 ## Traps
 

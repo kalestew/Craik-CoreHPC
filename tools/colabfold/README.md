@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified on an L40S (`chpc-tool test colabfold`: a 31-mer at mean pLDDT 91.3; date not recorded) |
+| Status | verified 2026-09-26 on an L40S (`ggpu1-08`, job 2000973): `chpc-tool test colabfold`, a 31-mer at mean pLDDT 91.3, 39 s |
 | Image | `colabfold_1.5.5.sif`, 3.10 GB, no weights; recipe [`colabfold_1.5.5.def`](colabfold_1.5.5.def) |
 | GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`: cuda12.2 has no `sm_120`). Never a bare `gpu:1` |
 | Weights | 5.0 GB at `$COLABFOLD_DATA` (`$CHPC_LAB/data/colabfold`): `alphafold2_ptm` and `alphafold2_multimer_v3`, fetched on the login node by [`fetch-weights.sh`](fetch-weights.sh) |

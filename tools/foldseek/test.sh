@@ -27,3 +27,20 @@ case "$fid" in
   *) echo "self-hit identity is $fid, expected 1.000"; exit 1 ;;
 esac
 echo "ok: self-hit identity $fid over $(awk 'NR==1{print $4}' res.m8) residues, E=$(awk 'NR==1{print $11}' res.m8)"
+
+# --- against the PDB, when it has been fetched ------------------------------
+# fetch-db.sh puts the PDB at $FOLDSEEK_DB_PDB; without it the case is skipped
+# and says so, because the image is whole without a database. With it, the
+# prefilter is on (no --exhaustive-search: that is the fixture's crutch, not a
+# production flag) and the assertion is that the search RUNS and writes its
+# table. A synthetic backbone is not owed a hit, so the count is reported,
+# not required.
+if [ -f "${FOLDSEEK_DB_PDB:-}" ]; then
+    "$CHPC_TOOL" exec foldseek -- foldseek easy-search q.pdb "$FOLDSEEK_DB_PDB" res_pdb.m8 tmp_pdb \
+        --threads 2 > fs_pdb.log 2>&1 || {
+        echo "foldseek exited non-zero against $FOLDSEEK_DB_PDB:"; tail -15 fs_pdb.log; exit 1; }
+    [ -f res_pdb.m8 ] || { echo "no res_pdb.m8 from the PDB search"; tail -15 fs_pdb.log; exit 1; }
+    echo "ok: PDB search ran against $FOLDSEEK_DB_PDB, $(wc -l < res_pdb.m8 | tr -d ' ') hits for the synthetic fixture"
+else
+    echo "skipped: no PDB database at ${FOLDSEEK_DB_PDB:-<unset>} (tools/foldseek/fetch-db.sh, on the login node)"
+fi

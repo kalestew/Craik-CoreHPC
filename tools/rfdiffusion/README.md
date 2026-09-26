@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified — `chpc-tool test rfdiffusion` passes (a 20-residue backbone, CA–CA spacing in range). The entry records no date, GPU model or job id for that run; add them at the next one. |
+| Status | verified 2026-09-26 on an L40S (`ggpu1-08`, job 2000973): `chpc-tool test rfdiffusion`, a 20-residue backbone with CA–CA spacing in range, 20 s |
 | Image | `rfdiffusion_1.1.sif`, 4.19 GB — no weights; recipe [`rfdiffusion_1.1.def`](rfdiffusion_1.1.def) |
 | GPU | `--gres=gpu:nvidia_l40s:1` (or `nvidia_h100_nvl:1`), never a bare `gpu:1` — `GPU_MAX_CC=9.0`: the image is cu121 and emits no `sm_120`, so a Blackwell node dies at the first kernel launch ([`../README.md`](../README.md#which-gpu)) |
 | Weights | 3.7 GiB over 9 files at `$RFDIFFUSION_MODELS` (`$CHPC_LAB/data/rfdiffusion/models`), fetched by [`fetch-weights.sh`](fetch-weights.sh) |
@@ -89,9 +89,9 @@ sm_90` — no `sm_120`, which is where `GPU_MAX_CC=9.0` comes from.
 (`diffuser.T=15`, the floor) and asserts 20 CA atoms, finite coordinates in
 the x/y/z columns and CA–CA spacing in range — the difference between "wrote a
 PDB" and "diffused a protein". It proves the whole path: hydra config,
-checkpoint load, the SE3Transformer forward, PDB output. The date and GPU
-model of the passing run were not recorded; the test refuses to be meaningful
-anywhere but an L40S or H100/H200.
+checkpoint load, the SE3Transformer forward, PDB output. Passed
+2026-09-26 on an L40S (`ggpu1-08`, job 2000973), 20 s; an earlier pass went unrecorded. The
+test is meaningful only on an L40S or H100/H200 (`GPU_MAX_CC`).
 
 ## Build notes
 

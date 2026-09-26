@@ -98,19 +98,27 @@ repo root on the login node, after every change to `lab/`, `tools/` or
 `templates/slurm/`:
 
 ```bash
+mkdir -p "$CHPC_LAB/lib" "$CHPC_LAB/tools"
+lab/bin/chpc-fac-fixacl "$CHPC_LAB/lib" "$CHPC_LAB/tools"   # BEFORE the first copy into a new directory
 cp lab/chpc.env "$CHPC_LAB/chpc.env"
 cp lab/bin/* "$CHPC_LAB/bin/"
-mkdir -p "$CHPC_LAB/lib" && cp lab/lib/* "$CHPC_LAB/lib/"
+cp lab/lib/* "$CHPC_LAB/lib/"
 rsync -a --delete --exclude='*.sif' --exclude='*.tar' tools/ "$CHPC_LAB/tools/"
 cp templates/slurm/* "$CHPC_LAB/slurm/"
+for t in $(ls "$CHPC_LAB/bin" | grep -v '^chpc-\|^run-in-container$'); do "$CHPC_LAB/bin/chpc-tool" wrapper "$t"; done
 ```
 
 `tools/` and `lib/` are what the published `chpc-tool` and `chpc-jobstats`
 resolve beside themselves (`../tools`, `../lib`); without them the share's
-`chpc-tool` dies with "no tool registry found". Whether both exist on the
-share today has not been checked from a laptop: `ls "$CHPC_LAB"/{tools,lib}`
-on the login node, and if either is missing, the block above creates it,
-followed by `chpc-fac-fixacl` on each new top-level directory (above).
+`chpc-tool` dies with "no tool registry found". Both were created 2026-09-26,
+and the order above is the order that worked: a `mkdir` on the share
+inherits the owner DENY, so the `cp` on the same line as the `mkdir` failed
+with `Permission denied` until `chpc-fac-fixacl` had run. The last line
+rewrites every published wrapper, which matters after a change to
+`lab/bin/run-in-container`. Run all of it on a compute node (`srun -p cpu
+... bash sync.sh`) on a day the login node has lost its `/mnt/fac` autofs
+mount, as it had on 2026-09-26; the share is still there from every other
+node.
 
 ## Publishing a container
 

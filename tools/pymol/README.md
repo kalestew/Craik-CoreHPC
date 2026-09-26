@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified (`chpc-tool test pymol`: a headless render writes a non-empty PNG; CPU, date not recorded) |
+| Status | verified 2026-09-26 on `gcpu2-33` (CPU, job 2000974): `chpc-tool test pymol`, a headless render writes a 2412-byte PNG, 1 s |
 | Image | `pymol_opensource.sif`, 177 MB; recipe [`pymol_opensource.def`](pymol_opensource.def) |
 | GPU | CPU (`-p cpu`) |
 | Weights | none |

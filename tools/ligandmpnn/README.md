@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified — `chpc-tool test ligandmpnn` passed (3 FASTA records, 3 distinct sequences); the date and node of that run are not recorded in this entry |
+| Status | verified 2026-09-26 on an L40S (`ggpu1-08`, job 2000973): `chpc-tool test ligandmpnn`, 3 FASTA records, 3 distinct sequences, 10 s |
 | Image | `ligandmpnn_1.sif`, 3.49 GB — weights included (~1 GB); recipe [`ligandmpnn_1.def`](ligandmpnn_1.def) |
 | GPU | `--gres=gpu:1`, any node (cu132, `sm_120` present); passes on CPU too, slower |
 | Weights | in the image at `/opt/LigandMPNN/model_params/` (`$LIGANDMPNN_DIR/model_params`), fetched at build by upstream's `get_model_params.sh`. Nothing under `$CHPC_LAB/data` |
@@ -78,8 +78,8 @@ Built 2026-09-19 by kanderson6 on the CoreHPC login node (977 s).
 `chpc-tool test ligandmpnn`: designs sequences for a generated 40-residue
 backbone with `--model_type ligand_mpnn`, asserting ≥ 3 FASTA records and
 that at least two are *distinct*. Measured: 3 records, 3 distinct sequences.
-The date and node of the passing run were not recorded in this entry; whoever
-next runs it on a compute node should add them to the Status row.
+Passed 2026-09-26 on an L40S (`ggpu1-08`, job 2000973), 10 s; an earlier pass went
+unrecorded.
 
 The distinctness check matters — a temperature-0.1 run returning the same
 string twice usually means the model never loaded and something echoed the

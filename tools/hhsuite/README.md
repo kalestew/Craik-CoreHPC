@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | verified (`chpc-tool test hhsuite`: `hhalign` hit at Probab=100.00 over 73 aligned columns; CPU, date not recorded) |
+| Status | verified 2026-09-26 on `gcpu2-33` (CPU, job 2000974): `chpc-tool test hhsuite`, `hhalign` hit at Probab=100.00 over 73 aligned columns, 1 s |
 | Image | `hhsuite_3.sif`, 102 MB; recipe [`hhsuite_3.def`](hhsuite_3.def) |
 | GPU | CPU (`-p cpu`) |
 | Weights | none. Databases for `hhsearch`/`hhblits` (UniRef30, PDB70): none on the share; they would go in `$CHPC_LAB/data/hhsuite` |

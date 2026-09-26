@@ -255,9 +255,10 @@ Files in an entry:
 |---|---|---|
 | `tool.conf` | always | the declaration. Plain shell, sourced. Every key is in "Reference: tool.conf". |
 | `README.md` | once `STATUS` leaves `planned` | the build record, in the shape "Reading a tool's README" describes; start from `_template/README.md` |
-| `<name>_<version>.def` | containers | the Apptainer recipe; `chpc-tool build` uses the first `.def` in the directory |
+| `<name>_<version>.def` | containers | the Apptainer recipe, named after `IMAGE`; `chpc-tool build` pairs the two and refuses to guess when several `.def` files match none |
 | `test.sh` | for `verified` | a self-test of about 30 seconds, run by `chpc-tool test` in a scratch directory with the entry's exports set |
 | `fetch-weights.sh` | tools with freely licensed weights | downloads them to the path `tool_exports` names, on the login node (8 entries have one; copy `boltz/fetch-weights.sh`) |
+| `fetch-db.sh` | search tools | the same for a database: `foldseek/fetch-db.sh` and `mmseqs2/fetch-db.sh` take a database name from the tool's own `databases` list and land it where `tool_exports` points |
 | `assets.tsv` | licensed payloads | files by sha256, installed by `chpc-assets`; the payload itself never enters git |
 
 A `planned` entry needs no README: `UPSTREAM`, `LICENSE` and a `NOTE=` line in

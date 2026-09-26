@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | verified 2026-09-25 on an L40S (`chpc-tool test chai1`, job 1986672, `ggpu1-06`, 87 s, two cases) |
-| Image | `chai1_2.sif`, no weights (size not recorded); recipe [`chai1_2.def`](chai1_2.def), rebuilt 2026-09-24 to add kalign |
+| Image | `chai1_2.sif`, 3.48 GB, no weights; recipe [`chai1_2.def`](chai1_2.def), rebuilt 2026-09-24 to add kalign |
 | GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`, measured: no `sm_120`). Never a bare `--gres=gpu:1`. |
 | Weights | 6.2 GB at `$CHAI_DOWNLOADS_DIR` (`$CHPC_LAB/data/chai1`), fetched by [`fetch-weights.sh`](fetch-weights.sh); three parts, see Traps |
 | Licence | Apache-2.0, code **and** weights |
