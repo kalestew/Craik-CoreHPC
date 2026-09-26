@@ -683,11 +683,32 @@ cmd_test() {
   [ "$_fails" -eq 0 ] || die "$_fails of $# failed"
 }
 
+# Which .def builds this entry. Pairs it with IMAGE rather than taking
+# whatever sorts first, which is what this used to do and was wrong the moment
+# an entry was rebuilt: `ls -1 *.def | head -1` picks chai1_1.def next to
+# chai1_2.def and protenix_1.def next to protenix_2.def, so `chpc-tool build`
+# compiled the OLD recipe and wrote it under the NEW image name. An image that
+# is a version behind its own name is not a failure anyone reads as a build
+# bug -- it is a tool that mysteriously still has the defect the rebuild was
+# for, which is how chai1_2 would have shipped without kalign.
+#
+# An entry with a single .def whose name does not match IMAGE still uses it:
+# that is the old behaviour and there is nothing ambiguous to protect. Several
+# .def files and no match is the case that must not guess.
+_deffile() {
+  _d="$TOOLDIR/${IMAGE%.sif}.def"
+  if [ -f "$_d" ]; then echo "$_d"; return 0; fi
+  _n=$(ls -1 "$TOOLDIR"/*.def 2>/dev/null | wc -l)
+  if [ "$_n" -eq 1 ]; then ls -1 "$TOOLDIR"/*.def; return 0; fi
+  if [ "$_n" -eq 0 ]; then return 0; fi
+  die "$NAME: IMAGE=$IMAGE wants $(basename "$_d"), which is not in $TOOLDIR, and $_n .def files are. Name the recipe after the image, or fix IMAGE."
+}
+
 cmd_build() {
   [ $# -ge 1 ] || die "usage: chpc-tool build <tool>"
   _load "$1"
   [ "$KIND" = container ] || die "$NAME: KIND=$KIND, nothing to build. See $TOOLDIR/README.md"
-  _def=$(ls -1 "$TOOLDIR"/*.def 2>/dev/null | head -1 || true)
+  _def=$(_deffile)
   [ -n "$_def" ] || die "$NAME: no .def in $TOOLDIR"
   _bld="$SELF_DIR/../../templates/apptainer/build.sh"
   [ -x "$_bld" ] || die "no build helper at $_bld (is this a full checkout?)"
@@ -735,7 +756,12 @@ cmd_publish() {
   [ "$KIND" = container ] || die "$NAME: publish is for containers"
   _built="${CHPC_USER_SCRATCH:-/mnt/scratch/user/${CHPC_USER:-$USER}}/apptainer/$IMAGE"
   [ -r "$_built" ] || die "no built image at $_built -- run: chpc-tool build $NAME"
-  _def=$(ls -1 "$TOOLDIR"/*.def 2>/dev/null | head -1 || true)
+  # The same pairing as the build, because this line is what gets COPIED into
+  # containers/defs/ and recorded in the provenance table. Publishing the
+  # wrong recipe beside the right image is a worse outcome than building it:
+  # the image is at least testable, while the record of how it was made is
+  # only ever read long after anyone could check.
+  _def=$(_deffile)
   echo "publishing $NAME $VERSION"
   mkdir -p "$CHPC_LAB/containers/defs"
   cp "$_built" "$CHPC_LAB/containers/$IMAGE"          # 3

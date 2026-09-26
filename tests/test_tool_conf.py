@@ -121,6 +121,45 @@ class ToolConfTests(unittest.TestCase):
                         literal(body),
                         f"{path.parent.name}/tool.conf:{number} {name} is rewritten by the shell",
                     )
+    def test_every_container_entry_names_the_recipe_that_builds_its_image(self) -> None:
+        """`chpc-tool build` pairs the .def with IMAGE. Both must therefore exist.
+
+        This used to be `ls -1 "$TOOLDIR"/*.def | head -1`, which takes whatever
+        sorts FIRST while naming the output from IMAGE. That is correct for an
+        entry with one recipe and silently wrong for a rebuilt one: chai1_1.def
+        sorts before chai1_2.def and protenix_1.def before protenix_2.def, so
+        a build compiled the OLD recipe and wrote it under the NEW image name.
+
+        Nothing about that failure looks like a build bug. It looks like a tool
+        that still has the defect the rebuild was for -- chai1_2 without
+        kalign, templates silently dropped, the fold exiting zero. The pairing
+        is the fix and this is what holds it.
+
+        An entry with NO .def is not a defect: several here are pulled from an
+        upstream image rather than built, and `chpc-tool build` already refuses
+        them by name. An entry with a single .def under another name is the old
+        behaviour and still resolves -- there is nothing ambiguous to protect.
+        """
+        for path in confs():
+            tool = path.parent.name
+            kind = source(path, "KIND").stdout
+            if kind != "container":
+                continue
+            defs = sorted(p.name for p in path.parent.glob("*.def"))
+            if not defs:
+                continue
+            image = source(path, "IMAGE").stdout
+            with self.subTest(tool=tool):
+                self.assertTrue(image.endswith(".sif"), f"{tool}: IMAGE={image!r}")
+                wanted = image[: -len(".sif")] + ".def"
+                if len(defs) == 1:
+                    continue
+                self.assertIn(
+                    wanted,
+                    defs,
+                    f"{tool} has {len(defs)} recipes {defs} and IMAGE={image} names "
+                    f"none of them, so a build would have to guess which one made it",
+                )
 
 
 if __name__ == "__main__":

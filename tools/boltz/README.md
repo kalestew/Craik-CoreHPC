@@ -2,20 +2,87 @@
 
 | | |
 |---|---|
-| Built | 2026-09-19, kanderson6, CoreHPC login node (747 s) |
-| Image | `boltz_2.sif`, 4.08 GB — no weights |
-| Verified | 2026-09-19 on an H100 NVL (cc 9.0) **and** an RTX PRO 6000 (cc 12.0) |
-| Recipe | [`boltz_2.def`](boltz_2.def) |
+| Built | `boltz_2` 2026-09-19, kanderson6, CoreHPC login node (747 s) · `boltz_2_gcc` **not yet built** |
+| Image | `boltz_2_gcc.sif` — `boltz_2.sif` was 4.08 GB, no weights; gcc adds ~130 MB |
+| Verified | `boltz_2` 2026-09-19 on an H100 NVL (cc 9.0) **and** an RTX PRO 6000 (cc 12.0), **kernels off in all but name** — see below · `boltz_2_gcc` **not yet** |
+| Recipe | [`boltz_2_gcc.def`](boltz_2_gcc.def) · previous [`boltz_2.def`](boltz_2.def) |
 | Upstream | `boltz[cuda]==2.2.1` (PyPI) |
 | Weights | 5.0 GB on FAC, via [`fetch-weights.sh`](fetch-weights.sh) |
 | Base | `python:3.12-slim` (torch 2.14.0+cu130) |
 | Licence | MIT |
-| GPU | yes — `sm_120` present, so **any** `gpu` node |
+| GPU | any `gpu` node **without** the kernels (measured on all three classes). With them: **never run on any device**, because until this rebuild no image could compile them. |
 
 Base is `python:3.12-slim` rather than a `pytorch/pytorch` tag because boltz
 2.2.1 pins `numpy<2.0` *and* `python<3.13`, and the current pytorch images
 ship 3.13. Letting pip resolve torch inside a 3.12 base is the only
 combination that satisfies all three.
+
+## The 2026-09-25 rebuild: a C compiler
+
+`boltz_2.sif` has no C compiler, and boltz's cuequivariance kernels are
+**Triton**, which JIT-compiles them at first use — inside the job, on the
+compute node. So any prediction large enough to reach the kernel path died in
+about four seconds with
+
+```
+triton/runtime/build.py
+  RuntimeError: Failed to find C compiler.
+```
+
+having written nothing. Measured on an L40S 2026-09-22: 31 aa and 71 aa fold,
+142 aa does not, one chain or two — the boundary is total token count and lies
+between them. Corroborated independently by array `1928395` in IgGase-eng,
+which lost all five tasks in under a minute each to the same error.
+`--no_kernels` is the supported escape hatch, costs speed only, and is what
+every Boltz-2 fold in this lab has used so far.
+
+`boltz_2_gcc.def` adds `gcc` and `libc6-dev`. Not `build-essential`: Triton
+compiles a C launcher, not C++, and `cc` is what it looks for. (openfold3 needs
+the bigger set because DeepSpeed's op builder also wants `nvcc` and `ninja`.)
+
+Two things come with it, both learned from openfold3, which hit this first:
+
+- **`%post` builds a real shared object**, rather than checking `command -v
+  gcc`. Triton compiles its launcher *against `Python.h`*, so a base that ships
+  the interpreter without its headers fails at exactly the same place, at
+  exactly the same point in a job, as a base with no compiler at all.
+- **`TRITON_CACHE_DIR=/tmp/triton-cache`**, for the same reason
+  `NUMBA_CACHE_DIR` exists. The default is `~/.triton/cache`: one directory on
+  a 20 GiB shared home that every concurrent array task writes into at once.
+  The `gpu` partition allows 8 GPUs per user and array tasks count
+  individually, so that is the normal case, not the edge one. `/tmp` is
+  node-local NVMe, so it is also the cache that actually gets *reused* — eight
+  tasks on one node compile once between them instead of eight times.
+
+### What "verified on Blackwell" does and does not mean
+
+The `any gpu node` claim on this entry has always rested on job `1899088`
+(`ggpu1-19`, compute capability 12.0). That job folded **the 31-mer** — below
+the boundary above, so it never reached a Triton kernel. It measured *torch* on
+sm_120, which is real and still true, and it measured nothing about
+cuequivariance.
+
+That is not a Blackwell-specific gap, and it is worth being exact about how
+wide it is: because 31 aa and 71 aa never reach a kernel and 142 aa died
+building one, **the cuequivariance Triton path has never successfully run on
+any device here** — not on an L40S, not on an H100. No image that could
+compile it existed until this one. So `test.sh` case 2 is the first evidence of
+any kind, and the Blackwell run is the second. `test.sh` case 2 on
+`--gres=gpu:nvidia_rtx_pro_6000:1` settles it. If it fails, this entry gains
+its first `GPU_MAX_CC` and boltz stops being the one tool in the registry that
+runs anywhere — which is a real cost under a 21-job cap, and is why it is worth
+measuring before a campaign rather than during one.
+
+### The baseline to beat
+
+Job `1986189`, L40S: the full 658-token covalent peptide-MHC plus Fv at
+`--use_potentials --no_kernels --diffusion_samples 5 --recycling_steps 3
+--sampling_steps 200 --seed 1`, MSAs from disk, **240 s wall**, exit 0.
+
+Kernels on is a *different computation*, not simply a faster one — it rides
+inside this project's `computation_digest` — so a fold made with them cannot be
+cited for one planned without them. Measure the speedup against that number
+before re-folding anything against it.
 
 ## The `[cuda]` extra is not optional
 
@@ -90,3 +157,10 @@ the three `cuequivariance` wheels.
   string you supply. Map back to EU numbering explicitly.
 - numba caches JIT output beside its source, which a squashfs forbids;
   `NUMBA_CACHE_DIR` is set in `%environment` (doc 07).
+- **Triton's cache has the same problem one layer down**, and a worse blast
+  radius under an array. `TRITON_CACHE_DIR` is set in `%environment` for the
+  reasons above. If a job dies on `libcuda` rather than on a missing compiler,
+  that is Triton failing to *link* its launcher, not to build it: a driver bind
+  often provides `libcuda.so.1` without the `libcuda.so` symlink. Point
+  `TRITON_LIBCUDA_PATH` at the driver directory, or fall back to
+  `--no_kernels`.

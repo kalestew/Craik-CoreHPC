@@ -1,0 +1,195 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# Boltz-2 -- structure prediction / restrained refinement.
+#
+# REBUILD of boltz_2 with a C compiler, 2026-09-25. Everything below the
+# compiler paragraph is boltz_2.def unchanged; that file is kept beside this
+# one because it is what every Boltz-2 number this project holds was produced
+# with, and a recipe you can no longer read is provenance you no longer have.
+#
+# WHY THE REBUILD. boltz turns the cuequivariance kernels ON by default
+# (main.py:1321 is `use_kernels = not no_kernels`) and they are Triton, which
+# JIT-COMPILES them at first use and so needs a C compiler INSIDE the image at
+# RUN time, on the compute node. boltz_2.sif is python:3.12-slim with git and
+# ca-certificates and has none, so any prediction big enough to reach the
+# kernel path dies four seconds in with
+#   RuntimeError: Failed to find C compiler.
+# from triton/runtime/build.py, having written nothing. Measured on an L40S
+# 2026-09-22: 31 aa and 71 aa fold, 142 aa does not, one chain or two -- the
+# boundary is total token count and lies between them. `--no_kernels` is the
+# supported escape hatch and costs speed only, and it is what every fold this
+# project has run so far used. This image removes the need for it.
+#
+# The name. `boltz_2` is the TOOL version, not a build counter, so the
+# chai1_1 -> chai1_2 form would read as Boltz-3. The suffix names what changed
+# instead, which is what a reader of this directory actually needs.
+#
+# Base is a plain python:3.12-slim rather than a pytorch/pytorch tag, because
+# boltz 2.2.1 pins `numpy<2.0` and `python<3.13` and the current pytorch images
+# ship 3.13. Letting pip resolve torch inside a 3.12 base is the only
+# combination that satisfies all three. The torch wheel it pulls from PyPI
+# bundles its own CUDA runtime. Measured in the built image: torch
+# 2.14.0+cu130, whose arch flags are sm_75..sm_100 plus sm_120 -- so unlike
+# chai1, rfdiffusion and placer, this one runs on EVERY gpu node and takes a
+# bare --gres=gpu:1. Note what that measures: TORCH's arch flags. The Triton
+# kernel path this image enables has never run on a Blackwell node, because no
+# image that could compile it existed until this one. See README.md.
+#
+# Build:  chpc-tool build boltz
+
+%labels
+    Tool         boltz
+    Version      2.2.1
+    Upstream     https://github.com/jwohlwend/boltz
+    UpstreamRef  boltz==2.2.1 (PyPI)
+    Licence      MIT
+    Base         python:3.12-slim
+    Maintainer   Craik Lab, UCSF
+    Rebuild      2026-09-25, adds gcc for the Triton kernel path
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    # gcc and libc6-dev are the rebuild. Not build-essential: Triton compiles
+    # a C launcher, not C++, and `cc` is what it looks for. openfold3 needs the
+    # bigger set because DeepSpeed's op builder wants nvcc, ninja and a C++
+    # compiler too; boltz needs exactly this much.
+    apt-get install -y --no-install-recommends git ca-certificates gcc libc6-dev
+    rm -rf /var/lib/apt/lists/*
+
+    # boltz[cuda], not bare boltz. The cuda extra is
+    #   cuequivariance_ops_cu12  cuequivariance_ops_torch_cu12  cuequivariance_torch
+    # and boltz turns those kernels ON BY DEFAULT -- main.py:1321 is
+    # `use_kernels=not no_kernels`. Without the extra, every GPU run dies
+    # partway through the first batch with
+    #   ModuleNotFoundError: No module named 'cuequivariance_torch'
+    # from boltz/model/layers/triangular_mult.py, which is not caught and
+    # not fallen back from. A plain `pip install boltz` therefore produces an
+    # image that imports cleanly, passes --help, and cannot predict anything.
+    pip install --no-cache-dir "boltz[cuda]==2.2.1"
+
+    # Assert the three constraints that made this base necessary, so a future
+    # bump that quietly breaks one fails here and not in a two-day GPU job.
+    python - <<'PY'
+import numpy, sys, torch
+assert sys.version_info[:2] == (3, 12), sys.version
+assert numpy.__version__.startswith("1."), numpy.__version__
+print("python", sys.version.split()[0], "numpy", numpy.__version__, "torch", torch.__version__)
+
+# The cuda extra ships cu12 wheels while this torch is cu13. Importing here
+# is the check that matters: if the pairing does not work, fail the build
+# rather than a GPU job. If it ever does break, `boltz predict --no_kernels`
+# is the documented escape hatch and only costs speed.
+import cuequivariance_torch
+print("cuequivariance_torch", getattr(cuequivariance_torch, "__version__", "?"))
+from boltz.model.layers.triangular_mult import kernel_triangular_mult   # noqa: F401
+print("triangular_mult kernel path imports")
+PY
+
+    # The point of this rebuild, asserted rather than assumed. `command -v gcc`
+    # would not settle it: Triton compiles a C launcher AGAINST Python.h and
+    # links it, so a base that ships the interpreter without its headers fails
+    # at exactly the same place, at exactly the same point in a job, as a base
+    # with no compiler at all. Three things are proven here -- a compiler Triton
+    # will find, headers to compile against, and the two working together on a
+    # real shared object.
+    python - <<'PY'
+import os, pathlib, shutil, subprocess, sysconfig, tempfile
+
+# Triton's own search order, triton/runtime/build.py.
+cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+assert cc, "no C compiler on PATH: Triton cannot build the cuequivariance kernels"
+
+include = sysconfig.get_paths()["include"]
+header = pathlib.Path(include, "Python.h")
+assert header.is_file(), f"no Python.h under {include}: Triton's launcher will not compile"
+
+with tempfile.TemporaryDirectory() as work:
+    source = pathlib.Path(work, "probe.c")
+    source.write_text("#include <Python.h>\nint probe(void) { return PY_MINOR_VERSION; }\n")
+    subprocess.run(
+        [cc, "-std=c99", "-shared", "-fPIC", "-I", include, str(source),
+         "-o", str(pathlib.Path(work, "probe.so"))],
+        check=True,
+    )
+print("C toolchain ok:", cc, "headers:", include)
+PY
+    command -v boltz
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # Boltz decorates its MSA featurizer with @numba.njit(cache=True), and
+    # numba's default cache location is a __pycache__ beside the source file.
+    # A .sif is a read-only squashfs, so numba cannot find anywhere to put it
+    # and refuses at IMPORT time -- before any weights, any GPU, any input:
+    #
+    #   RuntimeError: cannot cache function '_prepare_msa_arrays_inner':
+    #   no locator available for file '.../boltz/data/feature/featurizer.py'
+    #
+    # NUMBA_CACHE_DIR switches numba to a user-wide locator rooted wherever
+    # this points. /tmp is right on this cluster: apptainer binds the host's,
+    # every compute node has local NVMe there, and it is per-node so two jobs
+    # cannot fight over one cache file. Overridable, because a site whose /tmp
+    # is tiny or noexec will want it elsewhere.
+    export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/tmp/numba-cache}"
+    # The same answer for the same reason, one layer down. Triton JIT-compiles
+    # the cuequivariance triangle kernels at first use, IN THE JOB, and caches
+    # what it built. Its default is ~/.triton/cache, which is wrong here twice:
+    # home is a 20 GiB quota shared with everything else, and it is ONE
+    # directory on shared storage that every concurrent array task writes into
+    # at once. The gpu partition allows 8 GPUs per user and array tasks count
+    # individually, so "at once" is the normal case, not the edge one.
+    #
+    # /tmp is node-local NVMe, so the cache is also the one that gets REUSED:
+    # eight tasks landing on one node compile once between them instead of
+    # eight times. Matches openfold3, which hit this first.
+    export TRITON_CACHE_DIR="${TRITON_CACHE_DIR:-/tmp/triton-cache}"
+
+    # BOLTZ_CACHE is deliberately NOT set here. Boltz's --cache reads it, and
+    # it has to point at this cluster's FAC share -- which is a site fact, not
+    # a property of Boltz. The registry owns site facts: chpc-tool resolves it
+    # from CHPC_REFDATA and exports it. Baking a share path into the image
+    # would make the image wrong for the next lab that builds from this recipe.
+
+%test
+    set -eu
+    # This runs against the BUILT image, which is read-only -- and that is the
+    # point. `boltz predict --help` imports boltz.main, which imports the
+    # featurizer, which runs @numba.njit(cache=True) at module scope. On a
+    # writable filesystem that always works, so %post cannot catch it; only a
+    # read-only test can. It is the reason NUMBA_CACHE_DIR exists above.
+    test -n "${NUMBA_CACHE_DIR:-}" || { echo "NUMBA_CACHE_DIR unset"; exit 1; }
+    test -n "${TRITON_CACHE_DIR:-}" || { echo "TRITON_CACHE_DIR unset"; exit 1; }
+    boltz predict --help > /dev/null
+    python -c "import boltz, torch; print('boltz ok, torch', torch.__version__)"
+    # Prove the cache was actually written somewhere, rather than numba having
+    # silently fallen back to not caching.
+    test -d "$NUMBA_CACHE_DIR" || { echo "numba wrote no cache at $NUMBA_CACHE_DIR"; exit 1; }
+    # The rebuild, re-checked in the read-only image. %post proved the compiler
+    # works on a writable layer; this proves it is still on PATH in the .sif a
+    # job actually runs. Cheap, and it is the whole reason this image exists.
+    sh -c 'command -v cc >/dev/null || command -v gcc >/dev/null' \
+      || { echo "no C compiler on PATH in the built image -- this rebuild did nothing"; exit 1; }
+
+%runscript
+    exec boltz "$@"
+
+%help
+    Boltz-2, pinned at PyPI 2.2.1, built WITH a C compiler so the
+    cuequivariance Triton kernels can JIT-compile. boltz_2.sif could not, and
+    needed `--no_kernels` on anything above ~128 tokens.
+
+      chpc-tool exec boltz -- boltz predict input.yaml --use_msa_server --cache "$BOLTZ_CACHE"
+
+    Weights and the CCD live on FAC at $CHPC_LAB/data/boltz (BOLTZ_CACHE), not
+    inside the image, and not on scratch. Fetch them once from the login node:
+    compute nodes have no internet, so a job that has to download is a job that
+    hangs until it times out.
+
+    Do NOT rank peptide substrates with the affinity head: it is ligand-only
+    and capped at 128 atoms. Boltz also renumbers every chain from 1 and its
+    constraint references are 1-based offsets into the sequence you supply --
+    map back to EU numbering explicitly, Boltz will not carry it.

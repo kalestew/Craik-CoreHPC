@@ -97,11 +97,21 @@ class ShowEnvTests(unittest.TestCase):
         self.assertNotIn("\nNOTE=", "\n" + result.stdout)
 
     def test_an_export_carries_its_value_not_its_source_text(self) -> None:
-        """tool_exports emits `SIF_BOLTZ="/a/b.sif"`. The value is /a/b.sif."""
+        """tool_exports emits `SIF_BOLTZ="/a/b.sif"`. The value is /a/b.sif.
+
+        The image NAME is read back from the record rather than written in
+        here. This line used to say `endswith("boltz_2.sif")`, and a rebuild
+        moved it -- boltz_2_gcc.sif, 2026-09-25 -- so the test failed for a
+        reason that had nothing to do with what it is for. A filename is the
+        one thing on this entry that is SUPPOSED to change when an image is
+        rebuilt; what must not change is that the export resolves to a path
+        instead of carrying the literal `$(_image_path)` back out.
+        """
         result = self.run_cli("show", "--env", "boltz")
         self.assertEqual(result.returncode, 0, result.stderr)
         record = parse(result.stdout)[0]
-        self.assertTrue(record["EXPORT_SIF_BOLTZ"].endswith("boltz_2.sif"))
+        self.assertTrue(record["IMAGE"].endswith(".sif"), record["IMAGE"])
+        self.assertTrue(record["EXPORT_SIF_BOLTZ"].endswith(record["IMAGE"]))
         self.assertFalse(record["EXPORT_SIF_BOLTZ"].startswith('"'))
         self.assertEqual(record["EXPORT_SIF_BOLTZ"], record["IMAGE_PATH"])
 
