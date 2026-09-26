@@ -1,42 +1,96 @@
 # UCSF CoreHPC — Craik Lab Field Guide
 
-Everything the lab needs to use the UCSF CoreHPC cluster: getting in, moving
-data, running interactive and batch SLURM jobs, using the right storage, and
-packaging software as Apptainer containers that the whole lab can share from
-our FAC storage.
+How the Craik Lab uses the UCSF CoreHPC cluster. Three things live here:
 
-Sources: the CoreHPC Confluence wiki (see `docs/wiki-sources.md`, captured
-2026-09-16) plus our own working notes. Where the wiki is thin or generic
-we say so and give the CoreHPC-specific version.
+- A tool registry, `tools/`: one entry per piece of software the lab runs
+  (Boltz-2, ColabFold, RFdiffusion, Rosetta and 29 more) and the `chpc-tool`
+  command that runs any of them from the lab's shared FAC storage, with the
+  weights, bind mounts and GPU constraints already sorted out.
+- Slurm job templates, `templates/slurm/`, and the lab environment file they
+  source, `lab/chpc.env`.
+- A field guide to the cluster itself, `docs/`: access, storage, jobs,
+  partitions, containers.
 
-## Quick start (new lab member)
+Other lab projects embed this repo as a git submodule at `corehpc/` and read
+the registry from it; see "Using it from a project" below.
 
-1. Get an account: your PI submits a request at <https://tiny.ucsf.edu/Gethpc>.
-   You need a UCSF campus account, Duo enrolled, and the lab FAC share.
-2. Connect to the UCSF VPN (recommended even on campus Wi-Fi).
-3. Install `ssh/config.example` into `~/.ssh/config`, create a key, and follow
-   `docs/01-access-and-ssh.md`. After that, `ssh chpc` gets you to the login
-   node with one Duo push per session.
-4. Our FAC share is `/mnt/fac/CX500146_DS1` (5 TB). `source /mnt/fac/CX500146_DS1/chpc.env`
-   on the cluster (copy of `lab/chpc.env`).
-5. Never compute on the login node or against `/mnt/fac`. Work in
-   `/mnt/scratch/user/$USER` or `/mnt/scratch/group/CX500146_DS1` (both exist).
-6. Get a shell on a compute node: `salloc -p cpu -c 4 --mem 8G -t 2:00:00`
-   (see `docs/03-interactive-jobs.md`).
-7. Submit batch work from `templates/slurm/` (see `docs/04-batch-jobs.md`).
-8. Run lab software through the tool registry: `chpc-tool list` to see what
-   exists, `chpc-tool doctor` to see what actually works, `chpc-tool exec
-   <tool> -- <cmd>` to run it (see `tools/README.md`, and
-   `docs/07-containers-apptainer.md` for what it is doing underneath).
+## First hour on CoreHPC
 
-From any checkout, `source env.sh` (bash or zsh, any path) puts the
-`chpc-*.sh` scripts and `lab/bin` on `PATH` and exports the `CHPC_*`
-variables. It is also how other repos use this one, see below.
+1. Get an account: your PI submits <https://tiny.ucsf.edu/Gethpc>. You need a
+   UCSF campus account, Duo, and membership of the lab FAC share
+   (`sec_fac_cx500146_ds1`).
+2. Connect to the UCSF VPN, even on campus Wi-Fi (`docs/01-access-and-ssh.md`
+   has the GlobalProtect caveats).
+3. Install `ssh/config.example` as `~/.ssh/config`, create a key, follow
+   `docs/01-access-and-ssh.md`. After that `ssh chpc` reaches the login node
+   with one Duo push per session.
+4. On the login node, once, add this line to `~/.bashrc` and run it:
 
-## Using it from another repo (git submodule)
+   ```bash
+   [ -f /mnt/fac/CX500146_DS1/chpc.env ] && source /mnt/fac/CX500146_DS1/chpc.env
+   ```
+
+   It puts `chpc-tool` on `PATH` with Tab completion, moves the Apptainer,
+   pip and conda caches off your 20 GiB home, and makes scratch and FAC
+   visible inside containers.
+5. Work in `/mnt/scratch/user/$USER` (purged after 30 days). Final results
+   go to `/mnt/fac/CX500146_DS1/results/<project>/`. Never compute on the
+   login node, and never run heavy I/O against `/mnt/fac`.
+6. Get a compute node. Every partition defaults to a one-hour limit, so
+   always pass `-t`:
+
+   ```bash
+   salloc -p cpu -c 4 --mem 8G -t 2:00:00                                        # CPU
+   srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l  # GPU, safe for every tool
+   ```
+
+7. On that node, `chpc-tool doctor`: one row per tool, OK or FAIL, and where
+   it lives. That is the check that steps 4 to 6 worked.
+
+## Run a tool
+
+On a compute node, after step 4 above:
+
+```bash
+chpc-tool list                              # every tool; STATUS verified = it has run on a compute node here
+chpc-tool doctor boltz                      # image and weights really present?
+chpc-tool show boltz                        # image path, GPU yes/no, the variables it exports, and its note
+chpc-tool exec boltz -- boltz --help        # run a program inside it. Always `-- <program> <args>`
+chpc-tool exec boltz -- bash                # a shell inside it
+```
+
+Put inputs on `/mnt/scratch/user/$USER`; the same path is valid inside the
+container, so a command that works at the shell works unchanged through
+`chpc-tool exec`. Weights are already on the share and `exec` hands the tool
+their location.
+
+For a full example on your own input, the one idiom you need before writing a
+tool's variables on a command line (`eval "$(chpc-tool export boltz)"`), which
+GPU model to ask for (seven tools cannot use the Blackwell nodes), and the
+batch template: [`tools/README.md`, "Run a tool on your
+inputs"](tools/README.md#run-a-tool-on-your-inputs).
+
+## Where to go next
+
+- Run the lab's software on your inputs, interactively or as a job:
+  [`tools/README.md`](tools/README.md).
+- One tool's run block, inputs, traps and build record: `tools/<tool>/README.md`.
+- Batch jobs: `docs/04-batch-jobs.md`; ready-to-copy scripts in
+  `templates/slurm/` (`tool-gpu.sbatch` is the one for registry tools).
+- Storage, quotas, moving data in and out: `docs/02-storage-and-data.md`.
+- Partitions, GPU models, why `--gres=gpu:1` is a gamble:
+  `docs/05-partitions-and-hardware.md`.
+- What `chpc-tool exec` does underneath, and building images:
+  `docs/07-containers-apptainer.md`.
+- The shared FAC directory and publishing to it (maintainers):
+  [`lab/README.md`](lab/README.md).
+
+## Using it from a project (git submodule)
 
 This repo is built to be embedded. Nothing in it depends on where it is
-checked out, and per-project settings live in the project, not here.
+checked out, and per-project settings live in the project, not here. From
+any checkout, `source env.sh` (bash or zsh, any path) puts the `chpc-*.sh`
+scripts and `lab/bin` on `PATH` and exports the `CHPC_*` variables.
 
 ```bash
 # in your project
@@ -132,10 +186,28 @@ myproject/
 Do not edit files inside the submodule from a project; change them here and
 bump the pin.
 
+A project reads the registry in one line. `IgGase_eng` does this in its
+`site.conf`:
+
+```bash
+eval "$("$REPO/corehpc/lab/bin/chpc-tool" export rosetta proteinmpnn boltz placer)"
+```
+
+which sets `ROSETTA_BIN`, `SIF_PROTEINMPNN`, `BOLTZ_CACHE` and the rest, by
+explicit path out of the pinned submodule, so the definitions are the ones the
+project's commit says.
+
 ## Contents
+
+Sources: the CoreHPC Confluence wiki (see `docs/wiki-sources.md`, captured
+2026-09-16) plus our own working notes. Where the wiki is thin or generic we
+say so and give the CoreHPC-specific version.
 
 | Doc | What it covers |
 |-----|----------------|
+| `tools/README.md` | Run any registry tool on your inputs, the `chpc-tool` CLI, which GPU to ask for, adding a tool |
+| `lab/README.md` | The shared FAC directory: layout, bootstrap, keeping the share's copy current, publishing |
+| `templates/slurm/` | Ready-to-copy job scripts; `tool-gpu.sbatch` for a registry tool |
 | `docs/01-access-and-ssh.md` | Accounts, VPN, Duo, bastion + ProxyJump, passwordless SSH, ControlMaster, Open OnDemand, VS Code |
 | `docs/02-storage-and-data.md` | Home, scratch (user/group), FAC, local NVMe, quotas, purge policy, approved transfer paths (Globus, FAC share, OnDemand), internet access |
 | `docs/03-interactive-jobs.md` | `salloc` / `srun --pty`, GPU shells, tmux/screen, attaching to a running job |
@@ -153,47 +225,26 @@ bump the pin.
 ## Repo layout
 
 ```
-env.sh                      Source me: CHPC_* variables, scripts on PATH; standalone or submodule
+env.sh                      Source me: CHPC_* variables, scripts on PATH, tab completion; standalone or submodule
 chpc.env.local.example      Copy to <your project>/chpc.env.local: username, share, SSH alias
 ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
 scripts/chpc-stage.sh       rsync files to group scratch through the master session
 tools/<tool>/tool.conf      THE TOOL REGISTRY: one entry per piece of software
-tools/README.md             What an entry must declare, and how to add one
-templates/slurm/*.sbatch    Ready-to-edit job scripts (cpu, community, gpu, multi-gpu, array, mpi, container, local-nvme)
+tools/README.md             Run a tool, the CLI, which GPU, add a tool; then the tool.conf reference
+tools/covalent-bonds.md     How each co-folding tool addresses a covalent bond, and why only geometry checks one
+templates/slurm/*.sbatch    Ready-to-edit job scripts (tool-gpu for a registry tool; cpu, community, gpu, multi-gpu, array, fork, mpi, container-gpu, local-nvme)
 templates/apptainer/*.def   Example definition files + build helper
 lab/chpc.env                Lab-specific variables (FAC share name, paths); copied to the FAC share
-lab/README.md               Layout of our shared FAC directory
+lab/README.md               Layout of our shared FAC directory, and keeping its copy of this repo current
 lab/bin/chpc-tool           Resolve, run, build and publish anything in the registry
 lab/bin/chpc-assets         Install and verify licensed binaries and model weights
-lab/bin/*                   Wrapper scripts lab members call from job scripts
+lab/bin/chpc-jobstats       What a finished job should have asked for (sacct; login node)
+lab/bin/chpc-completion.bash  Tab completion; sourced by env.sh and chpc.env in interactive shells
+lab/lib/jobstats.awk        The accounting maths behind chpc-jobstats
+tests/                      python3 -m unittest discover -s tests   (runs on a laptop; no cluster needed)
 ```
-
-## The tool registry
-
-Containers, native builds, conda environments and licensed binaries are each
-declared once, in [`tools/`](tools/README.md), so that a project gets the whole
-catalogue by adding this submodule rather than restating tool paths of its own.
-
-```bash
-chpc-tool list                     # every tool, and whether it is actually built
-chpc-tool show proteinmpnn         # where one resolves to, and what it exports
-chpc-tool doctor                   # what is really on the share, and really working
-chpc-tool build proteinmpnn        # login node
-chpc-tool publish proteinmpnn      # image, recipe, wrapper, README row, staging
-chpc-assets install foldx --from ~/Downloads/foldx   # licensed payloads, by sha256
-```
-
-A project consumes it in one line. `IgGase_eng` does this in its `site.conf`:
-
-```bash
-eval "$("$REPO/corehpc/lab/bin/chpc-tool" export rosetta proteinmpnn boltz placer)"
-```
-
-which sets `ROSETTA_BIN`, `SIF_PROTEINMPNN` and the rest. Most entries are
-`STATUS=planned` — described, not yet built. That is deliberate and `list`
-shows it; nothing here ever implies an image exists when it does not.
 
 ## Key facts to remember
 

@@ -7,25 +7,48 @@ read/write), with a hot mirror on group scratch
 2026-09-17. The share already contains `software/moe2024.0601` and
 `moejobs/`; the layout below adds to that rather than moving it.
 
+## Using the tools
+
+If you only want to run the lab's software, add this line to `~/.bashrc` on
+the cluster and read [`tools/README.md`](../tools/README.md):
+
+```bash
+[ -f /mnt/fac/CX500146_DS1/chpc.env ] && source /mnt/fac/CX500146_DS1/chpc.env
+```
+
+That puts `$CHPC_LAB/bin` (and so `chpc-tool`, with Tab completion) on `PATH`,
+points the Apptainer and conda caches at scratch, and sets `APPTAINER_BIND` so
+containers see scratch and FAC. A project that carries this repo as a
+submodule can instead `source <project>/corehpc/env.sh` and get the pinned
+copy of `chpc.env` and the pinned registry, without touching the FAC copy. The
+rest of this file is about the share itself: what is on it, how it was made,
+and how a maintainer publishes to it.
+
+## Layout
+
 ```
 /mnt/fac/CX500146_DS1/                      $CHPC_LAB  (persistent, canonical; 5 TB)
 ├── chpc.env                                copy of lab/chpc.env; everyone sources it
 ├── software/                               native installs (already holds moe2024.0601)
 ├── moejobs/                                existing MOE job directory
-├── bin/                                    wrappers; add to PATH via chpc.env
-│   ├── chpc-tool                           resolve/run/build/publish from the tool registry
+├── bin/                                    on PATH via chpc.env
+│   ├── chpc-tool                           resolve/run/build/publish from the tool registry (reads ../tools)
 │   ├── chpc-assets                         install and verify licensed payloads and weights
+│   ├── chpc-jobstats                       what a finished job should have asked for (reads ../lib/jobstats.awk)
 │   ├── chpc-stage-containers               rsync containers/ -> group scratch
 │   ├── chpc-fac-fixacl                     repair the owner-deny ACL on things created at the share root
-│   └── <tool>                              one per container (chpc-tool wrapper writes these)
+│   ├── chpc-completion.bash                tab completion; chpc.env sources it in interactive shells
+│   ├── run-in-container                    the generic wrapper `chpc-tool wrapper` instantiates
+│   └── <tool>                              one per published container; prepends ENTRY and nothing else -- prefer chpc-tool exec
+├── lib/jobstats.awk                        needed by bin/chpc-jobstats
+├── tools/<tool>/tool.conf                  copy of the registry; what bin/chpc-tool reads when no checkout is sourced
 ├── containers/
 │   ├── README.md                           table of images
 │   ├── <tool>_<ver>.sif                    immutable images (644)
 │   └── defs/<tool>_<ver>.def               recipes (copies; the originals are in git)
-├── software/                               native installs (already holds moe2024.0601)
 ├── licenses/<tool>/                        licence files, mode 640, group only
 ├── envs/<name>.yml                         conda exports
-├── data/<tool>/                            model weights and databases, read-only in jobs
+├── data/<tool>/                            model weights and databases. Bound READ-WRITE in jobs (chpc.env); the ACL and file modes protect them, not the bind
 ├── slurm/                                  shared job templates (copy of templates/slurm)
 └── results/<project>/                      final outputs only
 
@@ -67,38 +90,38 @@ nothing outside the lab can read it. The directory is group-writable because
 lab members need to add licences to it; the **files** inside are what get the
 tighter mode, 640, and `chpc-assets install` sets that.
 
-## Every lab member
+### Keeping the share's copy current
 
-Add to `~/.bashrc` on the cluster:
+Nothing syncs the checkout to the share. `chpc-tool doctor` warns when the
+share's `chpc.env` differs from the checkout's; the rest is by hand, from the
+repo root on the login node, after every change to `lab/`, `tools/` or
+`templates/slurm/`:
 
 ```bash
-[ -f /mnt/fac/CX500146_DS1/chpc.env ] && source /mnt/fac/CX500146_DS1/chpc.env
+cp lab/chpc.env "$CHPC_LAB/chpc.env"
+cp lab/bin/* "$CHPC_LAB/bin/"
+mkdir -p "$CHPC_LAB/lib" && cp lab/lib/* "$CHPC_LAB/lib/"
+rsync -a --delete --exclude='*.sif' --exclude='*.tar' tools/ "$CHPC_LAB/tools/"
+cp templates/slurm/* "$CHPC_LAB/slurm/"
 ```
 
-That puts `$CHPC_LAB/bin` on `PATH`, points Apptainer caches and conda at
-scratch, and sets `APPTAINER_BIND` so containers see scratch and FAC.
+`tools/` and `lib/` are what the published `chpc-tool` and `chpc-jobstats`
+resolve beside themselves (`../tools`, `../lib`); without them the share's
+`chpc-tool` dies with "no tool registry found". Whether both exist on the
+share today has not been checked from a laptop: `ls "$CHPC_LAB"/{tools,lib}`
+on the login node, and if either is missing, the block above creates it,
+followed by `chpc-fac-fixacl` on each new top-level directory (above).
 
-A project that carries this repo as a submodule can instead
-`source <project>/corehpc/env.sh` on the login node and get the pinned copy
-of `chpc.env`, plus the `chpc-*` scripts, without touching the FAC copy.
+## Publishing a container
 
-## Publishing a new container
-
-Every tool is declared once, in the registry at [`../tools/`](../tools/README.md),
-and `chpc-tool` does the mechanical parts from that declaration. The eight
-steps below are still what happens; steps 3 to 7 are now one command.
-
-1. Write the entry: `cp -r ../tools/_template ../tools/mytool`, then edit
-   `tool.conf` and drop `mytool_1.2.def` beside it.
-2. `chpc-tool build mytool` — on the login node, the only one with internet.
-3. Test it in an interactive job: `chpc-tool exec mytool -- mytool --version`.
-4. `chpc-tool publish mytool` — copies the image to `$CHPC_LAB/containers/` at
-   mode 644, copies the `.def` into `defs/`, writes the `$CHPC_LAB/bin/mytool`
-   wrapper from `bin/run-in-container`, adds a row to the container README and
-   runs `chpc-stage-containers`.
-5. Set `STATUS=verified` and fill in `UPSTREAM_REF` in `tool.conf`, write the
-   entry's `README.md`, and commit **to this repo**.
-6. In each project that wants it, bump the submodule pin.
+The full sequence, from `tool.conf` to `STATUS=verified`, is
+[`tools/README.md`, "Add a tool"](../tools/README.md#add-a-tool). On this
+share, `chpc-tool publish <tool>` does the mechanical part in one command:
+copies the built image from `$CHPC_USER_SCRATCH/apptainer/` to
+`$CHPC_LAB/containers/` at mode 644, copies the `.def` into
+`containers/defs/`, writes the `$CHPC_LAB/bin/<tool>` wrapper from
+`bin/run-in-container`, appends a row to `containers/README.md`, and runs
+`chpc-stage-containers`.
 
 Doing it by hand instead is fine, and doc 07 spells the raw commands out. The
 rules that matter either way: never modify a published `sif` (a new version is
