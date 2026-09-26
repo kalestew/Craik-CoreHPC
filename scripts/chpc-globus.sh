@@ -271,8 +271,14 @@ cmd_push() {
       # topmost directory the mkdir creates is repaired BEFORE the copy, and
       # what landed is repaired after it. Repairing only the new directory,
       # not the parent, keeps this off an existing tree's every file.
-      run_remote "$(printf 'set -e; d=%q; new=; while [ ! -e "$d" ] && [ "$d" != / ]; do new=$d; d=$(dirname "$d"); done; mkdir -p %q; if command -v chpc-fac-fixacl >/dev/null; then [ -z "$new" ] || chpc-fac-fixacl "$new"; else echo "chpc-fac-fixacl not on PATH; %q may be unreadable by its own owner" >&2; fi; cp -a %q %q; ! command -v chpc-fac-fixacl >/dev/null || chpc-fac-fixacl %q' \
-                    "$(dirname "$dst")" "$(dirname "$dst")" "$dst" "$buffer" "$dst" "$dst")"
+      #
+      # chpc-fac-fixacl is named by path, $CHPC_LAB/bin, with PATH as the
+      # fallback: a plain `ssh host cmd` shell has sourced no chpc.env and has
+      # no $CHPC_LAB/bin on its PATH (verified 2026-09-26, in a login shell
+      # too), and the repair is not optional for a new directory.
+      _fix="$CHPC_LAB/bin/chpc-fac-fixacl"
+      run_remote "$(printf 'set -e; fix=%q; [ -x "$fix" ] || fix=$(command -v chpc-fac-fixacl 2>/dev/null || true); d=%q; new=; while [ ! -e "$d" ] && [ "$d" != / ]; do new=$d; d=$(dirname "$d"); done; mkdir -p %q; if [ -n "$fix" ]; then [ -z "$new" ] || "$fix" "$new"; else echo "chpc-fac-fixacl not at %q and not on PATH; %q may be unreadable by its own owner" >&2; fi; cp -a %q %q; [ -z "$fix" ] || "$fix" %q' \
+                    "$_fix" "$(dirname "$dst")" "$(dirname "$dst")" "$_fix" "$dst" "$buffer" "$dst" "$dst")"
       echo "landed at $dst; the copy in $buffer is a buffer and scratch is purged at 30 days" >&2
       ;;
   esac

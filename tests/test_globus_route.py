@@ -128,7 +128,10 @@ class Route(unittest.TestCase):
         remote = next(line for line in lines if line.startswith("SSH"))
         self.assertIn("mkdir -p /mnt/fac/TEST_SHARE/proj", remote)
         self.assertIn("cp -a /mnt/scratch/user/testuser/globus-staging/incoming", remote)
-        self.assertIn("chpc-fac-fixacl /mnt/fac/TEST_SHARE/proj/incoming", remote)
+        # Named by path under the share, because a plain `ssh host cmd` shell has
+        # not sourced chpc.env and has no $CHPC_LAB/bin on PATH.
+        self.assertIn("fix=/mnt/fac/TEST_SHARE/bin/chpc-fac-fixacl", remote)
+        self.assertIn('"$fix" /mnt/fac/TEST_SHARE/proj/incoming', remote)
 
     def test_a_pull_from_the_share_fills_the_buffer_before_transferring_it(self) -> None:
         """The order that distinguishes a retrieval from a success over nothing.
@@ -173,9 +176,9 @@ class Route(unittest.TestCase):
         lines = self.compose("push", str(self.source), "/mnt/fac/TEST_SHARE/newproj/incoming")
         remote = next(line for line in lines if line.startswith("SSH"))
         walk = remote.index("d=/mnt/fac/TEST_SHARE/newproj")
-        ancestor = remote.index('chpc-fac-fixacl "$new"')
+        ancestor = remote.index('"$fix" "$new"')
         copy = remote.index("cp -a ")
-        landed = remote.index("chpc-fac-fixacl /mnt/fac/TEST_SHARE/newproj/incoming")
+        landed = remote.index('"$fix" /mnt/fac/TEST_SHARE/newproj/incoming')
         self.assertLess(walk, ancestor, remote)
         self.assertLess(ancestor, copy, remote)
         self.assertLess(copy, landed, remote)
