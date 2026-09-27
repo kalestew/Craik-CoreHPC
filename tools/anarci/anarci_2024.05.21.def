@@ -1,0 +1,131 @@
+Bootstrap: docker
+From: condaforge/miniforge3:24.11.3-2
+
+# ANARCI -- antibody variable-domain numbering (IMGT, Kabat, Chothia, Martin).
+#
+# A CONTAINER, THOUGH THE PACKAGE IS CONDA. The entry was declared
+# KIND=conda because ANARCI comes from bioconda, and that is a fact about
+# where the package lives, not about how the lab should carry it. A conda
+# environment under $CHPC_USER_SCRATCH/envs is per-user and sits on scratch,
+# which is purged at 30 days and wiped entirely at quarterly maintenance --
+# so a lab-wide numbering tool delivered that way needs recreating by every
+# person, repeatedly, forever. An image on FAC is built once, is immutable,
+# is shared, and survives the purge. python-bio stays KIND=conda because its
+# pins genuinely belong to each project; this does not.
+#
+# Build:  chpc-tool build anarci        (login node; needs bioconda)
+
+%labels
+    Tool         anarci
+    Version      2024.05.21
+    Upstream     https://github.com/oxpig/ANARCI
+    UpstreamRef  bioconda anarci 2024.05.21 (noarch, pyhdfd78af_0)
+    Licence      BSD-3-Clause
+    Base         condaforge/miniforge3:24.11.3-2
+    Citation     Dunbar & Deane, Bioinformatics 2016, 10.1093/bioinformatics/btv552
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+
+    # -c bioconda IS MANDATORY, and not only for anarci itself: HMMER does not
+    # exist on conda-forge at all, and ANARCI shells out to the `hmmscan`
+    # BINARY rather than linking a library. Drop the channel and the solve
+    # either fails or silently produces an environment whose every numbering
+    # call dies with FileNotFoundError: 'hmmscan'.
+    mamba create -y -p /opt/env -c conda-forge -c bioconda \
+        "python=3.11" "anarci=2024.05.21" "hmmer>=3.3.2" biopython
+    mamba clean -afy
+
+    export PATH=/opt/env/bin:$PATH
+
+    # --- the payload a pip install does not have -----------------------------
+    # ANARCI numbers by running hmmscan against a 128-column profile set built
+    # from IMGT germlines. A source install builds those at install time:
+    # setup.py's post-install hook downloads the germlines from the IMGT
+    # WEBSITE, aligns them with a bundled muscle, then runs `hmmbuild --hand`
+    # and `hmmpress`. That is why upstream's own bioconda recipe notes that
+    # `pip install .` "fails to build the HMMs", and why this image must never
+    # try to rebuild them: `--hand` is required because otherwise hmmbuild
+    # deletes mostly-gap columns and the result is not 128 wide, which is a
+    # shape ANARCI cannot use.
+    #
+    # The conda package ships them pre-built. Assert all five files, because
+    # hmmscan needs the PRESSED companions and not just the profile: with only
+    # ALL.hmm present every call fails at run time.
+    HMMDIR=$(/opt/env/bin/python -c 'import anarci, os; print(os.path.join(os.path.dirname(anarci.__file__), "dat", "HMMs"))')
+    echo "HMM directory: $HMMDIR"
+    for f in ALL.hmm ALL.hmm.h3f ALL.hmm.h3i ALL.hmm.h3m ALL.hmm.h3p; do
+        test -s "$HMMDIR/$f" || { echo "FATAL: missing pressed profile $f" >&2; exit 1; }
+    done
+    command -v hmmscan
+    hmmscan -h > /dev/null
+
+    # --- assert the numbering, not the import --------------------------------
+    # `import anarci` touches neither the profile set nor hmmscan -- those are
+    # reached only when a sequence is actually numbered -- so an import test
+    # passes against an installation that cannot number anything. The sequence
+    # below is upstream's own README example (the 12e8 heavy chain) and the four
+    # positions are IMGT's conserved anchors, which is what makes this an
+    # assertion about the numbering rather than about the plumbing.
+    /opt/env/bin/python - <<'CHECK'
+from anarci import number
+seq = ("EVQLQQSGAEVVRSGASVKLSCTASGFNIKDYYIHWVKQRPEKGLEWIGWIDPEIGDTEY"
+       "VPKFQGKATMTADTSSNTAYLQLSSLTSEDTAVYYCNAGHDYDRGRFPYWGQGTLVTVSA")
+numbering, chain_type = number(seq, scheme="imgt")
+assert chain_type == "H", chain_type
+assert len(numbering) == 128, ("IMGT is 128 positions wide, got", len(numbering))
+d = dict(numbering)
+anchors = {23: "C", 41: "W", 104: "C", 118: "W"}   # 1st-CYS, CONSERVED-TRP, 2nd-CYS, J-TRP
+for pos, aa in anchors.items():
+    got = d[(pos, " ")]
+    assert got == aa, ("IMGT %d should be %s, got %s" % (pos, aa, got))
+print("ok: 12e8 heavy chain numbered IMGT, 128 positions, anchors 23C 41W 104C 118W")
+CHECK
+
+    chmod -R a+rX /opt/env
+
+%environment
+    export PATH=/opt/env/bin:$PATH
+    export PYTHONNOUSERSITE=1
+    export LC_ALL=C.UTF-8
+
+%test
+    set -eu
+    # On the finished read-only squashfs. hmmscan writes its output to a file,
+    # so this also proves ANARCI's temporary-file handling survives a read-only
+    # image -- it uses the system temp directory, which apptainer binds.
+    /opt/env/bin/python -c "
+from anarci import number
+n, ct = number('EVQLQQSGAEVVRSGASVKLSCTASGFNIKDYYIHWVKQRPEKGLEWIGWIDPEIGDTEYVPKFQGKATMTADTSSNTAYLQLSSLTSEDTAVYYCNAGHDYDRGRFPYWGQGTLVTVSA', scheme='imgt')
+assert ct == 'H' and len(n) == 128, (ct, len(n))
+assert dict(n)[(104, ' ')] == 'C'
+print('numbering works on the squashfs')"
+    ANARCI --help > /dev/null
+    hmmscan -h > /dev/null
+
+%runscript
+    exec ANARCI "$@"
+
+%help
+    ANARCI 2024.05.21, from bioconda, with HMMER and the pre-built IMGT
+    profile set baked in. No network, no per-user setup.
+
+      chpc-tool exec anarci -- ANARCI -i seqs.fasta --scheme imgt
+      chpc-tool exec anarci -- ANARCI -i EVQLQQSGAE... --scheme chothia
+
+    Schemes: imgt (default here), kabat, chothia, martin, aho, wolfguy.
+    Add --restrict heavy or --restrict light to number one chain class.
+
+    From python:
+
+      from anarci import number, run_anarci
+      numbering, chain_type = number(seq, scheme="imgt")
+
+    IMGT numbering is 128 positions wide, gaps included, and `number` returns
+    a list of ((position, insertion_code), residue) pairs with '-' for a gap.
+    The conserved anchors are 23 CYS, 41 TRP, 104 CYS, 118 TRP.
+
+    Do not rebuild the HMM profiles. They are built with `hmmbuild --hand` from
+    IMGT germlines scraped off the IMGT website, and a rebuild without --hand
+    collapses the alignment to fewer than 128 columns, which ANARCI cannot use.
