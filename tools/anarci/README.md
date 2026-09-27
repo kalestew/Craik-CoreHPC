@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | planned — recipe, entry and a six-case `test.sh` written; not yet built |
-| Image to be | `anarci_2024.05.21.sif` from [`anarci_2024.05.21.def`](anarci_2024.05.21.def), on a `condaforge/miniforge3` base |
+| Status | **verified** 2026-09-26 — built, published, and `test.sh`'s six cases passed on `ccpu1-01` (CPU, `community_short`) |
+| Image | `anarci_2024.05.21.sif` from [`anarci_2024.05.21.def`](anarci_2024.05.21.def); 292 MB on a `condaforge/miniforge3` base |
 | GPU | none. Pure python plus HMMER; there is no CUDA anywhere in the image |
 | Weights | none. What it needs instead is a **pressed** IMGT profile set, baked in |
 | Licence | BSD-3-Clause |
@@ -20,25 +20,33 @@ numbering for IgG against three protease conventions, and ANARCI is what does
 the antibody half without a hand-maintained map. A hand-maintained map is fine
 until the first insertion in a CDR, and then it is silently wrong.
 
-## Not built yet
+## Run it
 
-Nothing to fetch and nothing to stage: the profile set ships inside the conda
-package and goes into the image.
-
-```bash
-chpc-tool build anarci              # login node; needs the bioconda channel
-chpc-tool publish anarci
-chpc-tool test anarci               # CPU -- this is what `verified` means
-```
-
-The intended command, from [`test.sh`](test.sh) and **not yet run**:
+Nothing to fetch and nothing staged on FAC: the pressed IMGT profile set and
+HMMER are inside the image.
 
 ```bash
 salloc -p community_short --qos=cmnt_short -c 4 --mem 8G -t 0:30:00
-chpc-tool exec anarci -- ANARCI -i seqs.fasta --scheme imgt        # (untested)
+chpc-tool exec anarci -- ANARCI -i seqs.fasta --scheme imgt
+chpc-tool exec anarci -- ANARCI -i EVQLQQSGAE... --scheme chothia --restrict heavy
 ```
 
-Build and publish: [`../README.md`, Add a tool](../README.md#add-a-tool).
+Schemes: `imgt`, `kabat`, `chothia`, `martin`, `aho`, `wolfguy`. The published
+wrapper `anarci` is the same thing under a shorter name, so it works on the
+login node too.
+
+From python, which is what a pipeline wants:
+
+```bash
+chpc-tool exec anarci -- python -c "
+from anarci import number
+numbering, chain_type = number(seq, scheme='imgt')"
+```
+
+It is CPU-only and fast. Send it to `community_short` — 1 h, and it
+**requires `--qos=cmnt_short`** — or to `cpu` for a long batch.
+
+Rebuild and republish: [`../README.md`, Add a tool](../README.md#add-a-tool).
 
 ## Why this is a container and not a conda entry
 
@@ -87,23 +95,42 @@ because there is nothing project-specific about IMGT numbering.
 
 ## Provenance
 
-**Never run.** `STATUS=planned`; the image is not built. Everything below is
-what the test will prove.
+**Run 2026-09-26** on `ccpu1-01` (`community_short`), against bioconda
+`anarci` 2024.05.21 with HMMER 3.4, through the scratch build and again through
+the share's published copy. All six cases passed.
 
-### What `test.sh` will prove
+### What `test.sh` proves
 
 The fixture is the **12e8 heavy chain**, taken from upstream's own README —
 the same sequence bioconda's recipe tests with — so the expected numbering is
 not something invented here.
 
-| # | Asserted |
-|---|---|
-| 1 | IMGT gives 128 positions, chain type `H`, and the anchors 23 C, 41 W, 104 C, 118 W |
-| 2 | the frame is padded: gap positions exist, and the numbered residues are a subsequence of the input |
-| 3 | **Kabat returns a different position list from IMGT** — so the `scheme` argument is not being ignored |
-| 4 | `run_anarci` reports a species and an hmmscan bitscore above 50, so the pressed profiles were really searched |
-| 5 | a non-antibody sequence (a lysozyme fragment) returns `None` |
-| 6 | the `ANARCI -i` command-line entry point numbers a FASTA and prints the 23 CYS anchor |
+| # | Asserted | Measured 2026-09-26 |
+|---|---|---|
+| 1 | IMGT gives 128 positions, chain type `H`, and the anchors 23 C, 41 W, 104 C, 118 W | all four anchors correct |
+| 2 | the frame is padded: gap positions exist, and the numbered residues are a subsequence of the input | **8 gap positions** |
+| 3 | **Kabat returns a different position list from IMGT** — so the `scheme` argument is not being ignored | differs |
+| 4 | `run_anarci` reports a species and an hmmscan bitscore above 50, so the pressed profiles were really searched | **species mouse, bitscore 176.2, e-value 4.5e-55** |
+| 5 | a non-antibody sequence (a lysozyme fragment) is refused | returns **`False`** |
+| 6 | the `ANARCI -i` command-line entry point numbers a FASTA and prints the 23 CYS anchor | yes |
+
+Case 4's `mouse` is a good sign rather than a curiosity: 12e8 *is* a murine
+antibody, so the germline assignment is not merely non-empty, it is right.
+
+### A refusal is `False`, not `None`
+
+Case 5 was written asserting `numbering is None` and **failed against a working
+installation**: `number()` returns `False` for a sequence that is not a variable
+domain. The distinction is not cosmetic, which is why the test now asserts the
+exact value as well as falsiness. A caller written as
+
+```python
+if numbering is None:        # WRONG -- a refusal is False, not None
+    skip()
+```
+
+treats a refusal as a successful numbering and carries `False` forward into
+whatever consumes it. Test falsiness.
 
 Case 3 is the one that cannot be faked by a cached or constant answer: IMGT and
 Kabat genuinely disagree about where the CDRs begin and how insertions are

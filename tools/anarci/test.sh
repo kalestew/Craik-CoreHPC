@@ -76,13 +76,23 @@ print("hmmscan  species=%s bitscore=%s evalue=%s"
       % (det["species"], det["bitscore"], det.get("evalue")))
 
 # --- 5: a non-antibody sequence must be REFUSED ------------------------------
-# The other half of "it discriminates". ANARCI returns None for something that
-# is not a variable domain, and a tool that numbered anything handed to it
-# would be worse than no tool: it would put IMGT positions on a lysozyme.
+# The other half of "it discriminates": a tool that numbered anything handed to
+# it would be worse than no tool, because it would put IMGT positions on a
+# lysozyme and nothing downstream would know.
+#
+# IT RETURNS False, NOT None. Measured 2026-09-26 against anarci 2024.05.21 --
+# an earlier version of this assertion tested `res is None` and failed against a
+# perfectly good installation. That distinction is not cosmetic: a caller
+# written as `if numbering is None: skip` treats a REFUSAL as a successful
+# numbering and carries `False` forward into whatever consumes it. Test
+# falsiness, which is what a caller has to do anyway.
 junk = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEVQAPILSRVGDGTQDNLSGAEKAVQVKVKALPDAQFEVVHSLAKWKR"
 res, ct = number(junk, scheme="imgt")
-assert res is None, ("a non-antibody sequence was numbered anyway: %r" % (res,))
-print("refusal  a non-antibody sequence returns None, as it should")
+assert not res, ("a non-antibody sequence was numbered anyway: %r" % (res,))
+assert res is False, (
+    "expected False for a non-antibody sequence, got %r. The value matters: "
+    "callers testing `is None` would mistake a refusal for a result." % (res,))
+print("refusal  a non-antibody sequence returns False (NOT None), as it should")
 PY
 then
     echo "anarci numbering failed:" >&2
