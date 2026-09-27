@@ -1,0 +1,170 @@
+Bootstrap: docker
+From: condaforge/miniforge3:24.11.3-2
+
+# AmberTools 26 -- system preparation, parameterisation and trajectory analysis.
+#
+# THE FREE HALF OF AMBER, AND A SEPARATE ENTRY FOR THAT REASON. Amber ships as
+# two pieces with two licences: AmberTools is open source (GPL-3.0-or-later AND
+# LGPL-3.0-or-later AND BSD-3-Clause AND MIT, per conda-forge) and the pmemd
+# engine -- including pmemd.cuda, the thing people mean when they say "run
+# Amber on a GPU" -- needs a paid site licence. Carrying both in one entry
+# meant the free 90% waited on the paid 10%: `amber` sat at STATUS=planned with
+# a tool_doctor that failed on a missing pmemd.cuda, so nothing in the
+# toolchain was available at all.
+#
+# So AmberTools is here, buildable today, and ../amber is the licensed engine.
+# What this gives the lab immediately is the whole preparation and analysis
+# path -- tleap, antechamber, parmchk2, parmed, cpptraj, pdb4amber, MMPBSA --
+# and Amber-parameterised systems that ../openmm can then integrate on a GPU
+# with no licence anywhere in the chain. That composition is the point.
+#
+# Build:  chpc-tool build ambertools        (login node)
+
+%labels
+    Tool         ambertools
+    Version      26
+    Upstream     https://ambermd.org/
+    UpstreamRef  conda-forge ambertools 26.0
+    Licence      GPL-3.0-or-later AND LGPL-3.0-or-later AND BSD-3-Clause AND MIT
+    Base         condaforge/miniforge3:24.11.3-2
+    Citation     Case et al., Amber 2024/2026; cite the AmberTools paper for the tools used
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+
+    # AmberTools pulls a large dependency tree (netcdf, fftw, boost, an MPI, a
+    # fortran runtime). Let conda resolve it rather than pinning pieces: the
+    # feedstock is the thing that knows which netcdf goes with which parmed.
+    mamba create -y -p /opt/env -c conda-forge "python=3.12" "ambertools=26.0"
+    mamba clean -afy
+
+    export PATH=/opt/env/bin:$PATH
+    export AMBERHOME=/opt/env
+
+    # --- the binaries this entry exists to provide ---------------------------
+    # A conda solve that quietly dropped a subpackage still leaves an
+    # environment that imports and a PATH that looks populated, so name them.
+    for b in tleap antechamber parmchk2 parmed cpptraj pdb4amber sander; do
+        command -v "$b" || { echo "FATAL: $b missing from the solve" >&2; exit 1; }
+    done
+
+    # --- assert the FORCE FIELD DATA, not just the binaries ------------------
+    # tleap is a script interpreter: it runs, prints a banner and exits 0 with
+    # nothing built if it cannot find its leaprc files. That is the failure
+    # worth catching here, because it looks exactly like success.
+    test -d "$AMBERHOME/dat/leap/cmd" \
+        || { echo "FATAL: no leap command directory under $AMBERHOME" >&2; exit 1; }
+    ls "$AMBERHOME/dat/leap/cmd" | head -20
+    for f in leaprc.protein.ff14SB leaprc.water.tip3p leaprc.gaff2; do
+        test -s "$AMBERHOME/dat/leap/cmd/$f" \
+            || { echo "FATAL: missing force field $f" >&2; exit 1; }
+    done
+
+    # --- build a real system, in %post, and count the atoms ------------------
+    # The end-to-end check: tleap must parameterise something and write a
+    # topology cpptraj can read back. An empty or truncated prmtop is still a
+    # file; the atom count is what distinguishes it.
+    cd /tmp
+    cat > build.leap <<'LEAP'
+source leaprc.protein.ff14SB
+source leaprc.water.tip3p
+peptide = sequence { ACE ALA ALA ALA NME }
+solvateBox peptide TIP3PBOX 8.0
+saveAmberParm peptide test.prmtop test.inpcrd
+quit
+LEAP
+    tleap -f build.leap > tleap.log 2>&1 || { cat tleap.log; exit 1; }
+    tail -20 tleap.log
+    test -s test.prmtop || { echo "FATAL: tleap wrote no topology" >&2; cat tleap.log; exit 1; }
+    test -s test.inpcrd || { echo "FATAL: tleap wrote no coordinates" >&2; exit 1; }
+
+    python - <<'CHECK'
+import parmed
+p = parmed.load_file("/tmp/test.prmtop", xyz="/tmp/test.inpcrd")
+n_atoms = len(p.atoms)
+n_res = len(p.residues)
+waters = sum(1 for r in p.residues if r.name in ("WAT", "HOH"))
+print("prmtop: %d atoms, %d residues, %d waters" % (n_atoms, n_res, waters))
+# A capped tetra-alanine is 5 residues; anything less means tleap built nothing
+# and the box is the only thing in the file.
+assert n_res - waters == 5, ("solute residues", n_res - waters)
+assert waters > 50, ("solvateBox produced almost no water", waters)
+# Charges must be assigned, not left at zero: a topology with no charges
+# parameterises and simulates and is physically meaningless.
+charges = [a.charge for a in p.atoms]
+assert any(abs(c) > 1e-6 for c in charges), "every partial charge is zero"
+# ff14SB gives a neutral capped polyalanine; the total must be ~0.
+total = sum(charges)
+assert abs(total) < 1e-3, ("net charge should be ~0 for capped polyalanine", total)
+print("charges assigned, net charge %.6f" % total)
+# And the box was actually set, which solvateBox is responsible for.
+assert p.box is not None, "no periodic box in the topology"
+print("box", [round(x, 2) for x in p.box])
+CHECK
+
+    # cpptraj reads the same pair, independently of parmed, and must agree.
+    cpptraj -p test.prmtop -y test.inpcrd -ec 'strip :WAT
+    rms first
+    go' > cpptraj.log 2>&1 || { cat cpptraj.log; exit 1; }
+    grep -qiE 'error|Error' cpptraj.log && { echo "FATAL: cpptraj reported an error" >&2; cat cpptraj.log; exit 1; }
+    tail -12 cpptraj.log
+
+    rm -f /tmp/build.leap /tmp/test.prmtop /tmp/test.inpcrd /tmp/*.log
+    chmod -R a+rX /opt/env
+
+    # --- say out loud what is NOT here --------------------------------------
+    # pmemd is the licensed half. Record its absence in the build log so a
+    # reader of the log is never left wondering whether the solve dropped it.
+    for b in pmemd pmemd.cuda pmemd.MPI; do
+        if command -v "$b" >/dev/null 2>&1; then
+            echo "UNEXPECTED: $b is present in a conda-forge ambertools build" >&2
+        else
+            echo "as expected, no $b -- licensed engine, see tools/amber"
+        fi
+    done
+
+%environment
+    export PATH=/opt/env/bin:$PATH
+    export AMBERHOME=/opt/env
+    export PYTHONNOUSERSITE=1
+    export LC_ALL=C.UTF-8
+    # cpptraj and sander parallelise with OpenMP and will otherwise grab every
+    # core they can see -- which on a shared node is every core on the machine,
+    # not the ones Slurm gave the job. Honour the allocation when there is one.
+    export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-${OMP_NUM_THREADS:-1}}"
+
+%test
+    set -eu
+    # On the finished read-only squashfs. tleap writes into the current
+    # directory, so this runs in /tmp, which apptainer binds writable.
+    cd /tmp
+    printf 'source leaprc.protein.ff14SB\nquit\n' > t.leap
+    /opt/env/bin/tleap -f t.leap > t.log 2>&1
+    grep -qi 'error' t.log && { cat t.log; exit 1; }
+    /opt/env/bin/cpptraj --version
+    /opt/env/bin/python -c "import parmed; print('parmed', parmed.__version__)"
+    test -s /opt/env/dat/leap/cmd/leaprc.protein.ff14SB
+    rm -f t.leap t.log
+    echo "AmberTools responds on the squashfs"
+
+%runscript
+    exec "$@"
+
+%help
+    AmberTools 26.0 from conda-forge: the OPEN SOURCE half of Amber.
+    AMBERHOME is /opt/env and the force field data is baked in.
+
+      chpc-tool exec ambertools -- tleap -f build.leap
+      chpc-tool exec ambertools -- antechamber -i lig.mol2 -fi mol2 -o lig.mol2 -fo mol2 -c bcc
+      chpc-tool exec ambertools -- cpptraj -p sys.prmtop -y traj.nc -i analyse.in
+      chpc-tool exec ambertools -- python -c "import parmed"
+
+    WHAT IS NOT HERE: pmemd and pmemd.cuda. Those are the licensed engine and
+    they live in tools/amber, which is blocked on a site licence. `sander` is
+    included and will run MD, but it is CPU-only and far slower.
+
+    THE ROUTE THAT NEEDS NO LICENCE AT ALL: prepare and parameterise here with
+    tleap and antechamber, then integrate on a GPU with tools/openmm, which
+    reads Amber prmtop/inpcrd directly through openmm.app.AmberPrmtopFile.
+    Analyse the trajectory back here with cpptraj.
