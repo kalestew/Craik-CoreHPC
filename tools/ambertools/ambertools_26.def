@@ -180,7 +180,13 @@ CPPTRAJ
     cd "$w"
     printf 'source leaprc.protein.ff14SB\nquit\n' > t.leap
     /opt/env/bin/tleap -f t.leap > t.log 2>&1
-    if grep -qi 'error' t.log; then cat t.log; exit 1; fi
+    # ASSERT SUCCESS, DO NOT SEARCH FOR THE WORD "error". tleap ends every run,
+    # including a perfectly clean one, with
+    #     Exiting LEaP: Errors = 0; Warnings = 0; Notes = 0.
+    # so `grep -qi error` matches ALWAYS and failed this %test on a healthy
+    # image. Same lesson as the cpptraj check in %post one screen up: match what
+    # the tool emits on the path you care about, which here is a zero count.
+    grep -q 'Errors = 0' t.log || { echo "tleap did not report zero errors:"; cat t.log; exit 1; }
     /opt/env/bin/cpptraj --version
     /opt/env/bin/python -P -c "import parmed; print('parmed', parmed.__version__)"
     test -s /opt/env/dat/leap/cmd/leaprc.protein.ff14SB
