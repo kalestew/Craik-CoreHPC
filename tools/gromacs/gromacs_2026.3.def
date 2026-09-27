@@ -45,7 +45,15 @@ From: nvidia/cuda:13.2.1-devel-ubuntu24.04
         libhwloc-dev libblas-dev liblapack-dev python3
     rm -rf /var/lib/apt/lists/*
 
-    cd /tmp
+    # Not /tmp: it is shared and world-writable on the login node, apptainer
+    # binds the host's, and python puts the working directory on sys.path -- so a
+    # file another user left there shadows a standard library module for anything
+    # the build runs. Measured on this cluster: /tmp/inspect.py, belonging to
+    # another user since July, broke a sibling recipe's numpy import from inside
+    # parmed. cmake invokes python for several of its checks, so GROMACS is
+    # exposed to the same thing.
+    mkdir -p /opt/build-src
+    cd /opt/build-src
     wget -q https://ftp.gromacs.org/gromacs/gromacs-2026.3.tar.gz
     # Upstream publishes the md5 beside the tarball. A truncated download is
     # still a file and cmake would configure a partial tree happily.
@@ -95,7 +103,7 @@ From: nvidia/cuda:13.2.1-devel-ubuntu24.04
 
     make -j"$(nproc)"
     make install
-    cd /tmp && rm -rf gromacs-2026.3 gromacs-2026.3.tar.gz gromacs.md5
+    cd / && rm -rf /opt/build-src
 
     . /opt/gromacs/bin/GMXRC
 

@@ -629,6 +629,41 @@ then
 fi
 ```
 
+**Never `cd /tmp` in `%post`, because another user's file will shadow a
+standard library module.** `/tmp` on the login node is shared and
+world-writable, apptainer binds the **host's** `/tmp` into the container, and
+python puts the working directory on `sys.path`. Put those three together and
+any file sitting in `/tmp` whose name matches a module becomes that module for
+everything your build runs.
+
+Measured here on 2026-09-26, building `ambertools`:
+
+```
+  File "/opt/env/lib/python3.12/site-packages/numpy/_core/overrides.py", line 4
+    import inspect
+  File "/tmp/inspect.py", line 3, in <module>
+    d=json.load(open(f"{B}/work/runs/case_error_flags.json"))
+FileNotFoundError: .../thzhou/project1_text_supervised/.../case_error_flags.json
+```
+
+`import inspect` — the standard library, reached from numpy, via parmed — 
+resolved to another user's analysis script, which has been sitting in `/tmp`
+since July and tries to read a file in *their* scratch. Nothing in that
+traceback suggests a shared directory: it reads as a broken numpy, and the path
+it names belongs to somebody you have never heard of.
+
+Two habits avoid it, and using both costs nothing:
+
+- **build in a private directory** — `mkdir -p /opt/build-check && cd /opt/build-check`
+  inside `%post`, which is writable during a build and removable at the end;
+- **run python with `-P`** (3.11 and newer: do not prepend the working directory
+  to `sys.path`), which makes the fix independent of where you happen to be.
+
+`chpc-tool test` is already safe here — it `mktemp -d`s a private subdirectory
+rather than using `/tmp` itself — so this is a `%post` problem specifically. It
+also applies to any tool whose build shells out to python without your noticing,
+which includes cmake.
+
 **A `%` at the start of a line inside a heredoc is an Apptainer SECTION
 HEADER.** Apptainer's definition parser looks only at the first non-whitespace
 character of each line, and it does not know or care that the line is inside a

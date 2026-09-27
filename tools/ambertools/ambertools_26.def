@@ -65,7 +65,24 @@ From: condaforge/miniforge3:24.11.3-2
     # The end-to-end check: tleap must parameterise something and write a
     # topology cpptraj can read back. An empty or truncated prmtop is still a
     # file; the atom count is what distinguishes it.
-    cd /tmp
+    # --- NEVER BUILD OR RUN PYTHON FROM /tmp IN %post -------------------------
+    # /tmp on the login node is shared and world-writable, apptainer binds the
+    # HOST /tmp into the container, and python puts the working directory on
+    # sys.path. So a file another user left in /tmp shadows a standard library
+    # module for anything built here.
+    #
+    # Measured, not hypothetical: this build died with
+    #   File "/tmp/inspect.py", line 3, in <module>
+    #   FileNotFoundError: .../thzhou/project1_text_supervised/.../case_error_flags.json
+    # because `import inspect` -- reached from numpy, via parmed -- resolved to
+    # another user's analysis script that has been sitting in /tmp since July.
+    # Nothing in that traceback suggests a shared directory; it reads as a
+    # broken numpy.
+    #
+    # A private directory under /opt fixes it, and `python -P` (3.11+, do not
+    # prepend the cwd to sys.path) makes the fix independent of the directory.
+    mkdir -p /opt/build-check
+    cd /opt/build-check
     cat > build.leap <<'LEAP'
 source leaprc.protein.ff14SB
 source leaprc.water.tip3p
@@ -79,9 +96,9 @@ LEAP
     test -s test.prmtop || { echo "FATAL: tleap wrote no topology" >&2; cat tleap.log; exit 1; }
     test -s test.inpcrd || { echo "FATAL: tleap wrote no coordinates" >&2; exit 1; }
 
-    python - <<'CHECK'
+    python -P - <<'CHECK'
 import parmed
-p = parmed.load_file("/tmp/test.prmtop", xyz="/tmp/test.inpcrd")
+p = parmed.load_file("test.prmtop", xyz="test.inpcrd")
 n_atoms = len(p.atoms)
 n_res = len(p.residues)
 waters = sum(1 for r in p.residues if r.name in ("WAT", "HOH"))
@@ -110,7 +127,7 @@ CHECK
     grep -qiE 'error|Error' cpptraj.log && { echo "FATAL: cpptraj reported an error" >&2; cat cpptraj.log; exit 1; }
     tail -12 cpptraj.log
 
-    rm -f /tmp/build.leap /tmp/test.prmtop /tmp/test.inpcrd /tmp/*.log
+    cd / && rm -rf /opt/build-check
     chmod -R a+rX /opt/env
 
     # --- say out loud what is NOT here --------------------------------------
@@ -138,14 +155,17 @@ CHECK
     set -eu
     # On the finished read-only squashfs. tleap writes into the current
     # directory, so this runs in /tmp, which apptainer binds writable.
-    cd /tmp
+    # Not /tmp: see the note in %post about another user's inspect.py. A
+    # writable per-invocation directory instead.
+    w=$(mktemp -d)
+    cd "$w"
     printf 'source leaprc.protein.ff14SB\nquit\n' > t.leap
     /opt/env/bin/tleap -f t.leap > t.log 2>&1
     grep -qi 'error' t.log && { cat t.log; exit 1; }
     /opt/env/bin/cpptraj --version
-    /opt/env/bin/python -c "import parmed; print('parmed', parmed.__version__)"
+    /opt/env/bin/python -P -c "import parmed; print('parmed', parmed.__version__)"
     test -s /opt/env/dat/leap/cmd/leaprc.protein.ff14SB
-    rm -f t.leap t.log
+    cd / && rm -rf "$w"
     echo "AmberTools responds on the squashfs"
 
 %runscript
