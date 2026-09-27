@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | planned — recipe, entry and a four-stage `test.sh` written; not yet built |
-| Image to be | `ambertools_26.sif` from [`ambertools_26.def`](ambertools_26.def), on a `condaforge/miniforge3` base |
+| Status | **verified** 2026-09-26 — built, published, and `test.sh`'s four stages passed on `ccpu1-01` (CPU, `community_short`) |
+| Image | `ambertools_26.sif` from [`ambertools_26.def`](ambertools_26.def); 894 MB on a `condaforge/miniforge3` base |
 | GPU | none, and that is the licence boundary rather than a technical one: the GPU engine is `pmemd.cuda`, which is not in this package |
 | Weights | none. Force field data (`ff14SB`, TIP3P, GAFF2) ships in the package and is baked in |
 | Licence | GPL-3.0-or-later AND LGPL-3.0-or-later AND BSD-3-Clause AND MIT — **nothing to obtain** |
@@ -15,31 +15,29 @@ parameterisation (`tleap`, `antechamber`, `parmchk2`, `pdb4amber`), topology
 manipulation (`parmed`), trajectory analysis (`cpptraj`), binding free energy
 (`MMPBSA.py`), and a CPU MD engine (`sander`).
 
-## Not built yet
+## Run it
 
-Nothing to fetch and nothing to stage: conda-forge carries the force field data
-and the image bakes it in.
-
-```bash
-chpc-tool build ambertools           # login node
-chpc-tool publish ambertools
-chpc-tool test ambertools            # CPU -- this is what `verified` means
-```
-
-The intended commands, from [`test.sh`](test.sh) and **not yet run**:
+Nothing to fetch and nothing staged on FAC: conda-forge carries the force field
+data and the image bakes it in.
 
 ```bash
 salloc -p community_short --qos=cmnt_short -c 8 --mem 16G -t 0:30:00
-chpc-tool exec ambertools -- tleap -f build.leap                            # (untested)
-chpc-tool exec ambertools -- cpptraj -p sys.prmtop -y traj.nc -i analyse.in  # (untested)
+chpc-tool exec ambertools -- tleap -f build.leap
+chpc-tool exec ambertools -- antechamber -i lig.mol2 -fi mol2 -o lig.mol2 -fo mol2 -c bcc
+chpc-tool exec ambertools -- cpptraj -p sys.prmtop -y traj.nc -i analyse.in
 ```
 
 There is no `ENTRY` for this entry, deliberately: the image is a toolbox of a
 dozen separately useful binaries rather than one program, so naming any of them
-would make `chpc-tool exec ambertools --help` mean something arbitrary. Spell
-the tool out after the `--`.
+would make `chpc-tool exec ambertools --help` mean something arbitrary. Spell the
+tool out after the `--`.
 
-Build and publish: [`../README.md`, Add a tool](../README.md#add-a-tool).
+**`cpptraj` takes its commands in a file, passed with `-i`.** There is no flag
+for inline commands, and given an unrecognised one it prints its entire usage
+screen, appends `Error: Error(s) occurred during execution.` and exits non-zero,
+so the real complaint sits at the bottom of fifty lines of help text.
+
+Rebuild and republish: [`../README.md`, Add a tool](../README.md#add-a-tool).
 
 ## Why this is a separate entry from `amber`
 
@@ -97,21 +95,32 @@ short, and orders of magnitude off for production.
 
 ## Provenance
 
-**Never run.** `STATUS=planned`; the image is not built. Everything below is
-what the recipe and test will establish.
+**Run 2026-09-26** on `ccpu1-01` (`community_short`), against conda-forge
+`ambertools` 26.0. All four stages passed.
 
-### What `test.sh` will prove
+### What `test.sh` proves
 
 Four stages, matching the three things the lab uses this image for —
 parameterise, inspect, integrate — plus the licence check.
 
-| Stage | Asserted |
-|---|---|
-| 1 | `tleap` builds a capped tetra-alanine in a TIP3P box and writes both files; a `FATAL` in its log fails the test **even though it exits 0** |
-| 2 | `parmed` reads it: exactly `ACE ALA ALA ALA NME` as solute, more than 50 waters, **non-zero partial charges summing to ~0**, bonds/angles/dihedrals present, and a periodic box over 15 Å |
-| 3 | `cpptraj` reads the same pair with its own parser and **agrees with parmed on the atom count** |
-| 4 | `sander` runs 50 steps of minimisation and the energy **falls**, ending below −100 kcal/mol |
-| — | `pmemd.cuda` is absent, as the licence story declares |
+| Stage | Asserted | Measured 2026-09-26 |
+|---|---|---|
+| 1 | `tleap` builds a capped tetra-alanine in a TIP3P box and writes both files; a `FATAL` in its log fails the test **even though it exits 0** | both files written |
+| 2 | `parmed` reads it: exactly `ACE ALA ALA ALA NME` as solute, more than 50 waters, **non-zero partial charges summing to ~0**, bonds/angles/dihedrals present, and a periodic box over 15 Å | **1782 atoms, 585 residues (5 solute, 580 water), net charge −0.000000, 1781 bonds, box 31.4 × 35.78 × 26.19 Å** |
+| 3 | `cpptraj` reads the same pair with its own parser and **agrees with parmed on the atom count** | 1782, agreeing |
+| 4 | `sander` runs 50 steps of minimisation and the energy **falls**, ending below −100 kcal/mol | **−4317.3 → −5627.4 kcal/mol**, a drop of 1310.1 |
+| — | `pmemd.cuda` is absent, as the licence story declares | absent |
+
+The per-water figure is the one with physical meaning: **−9.70 kcal/mol over 580
+waters**, against a known TIP3P value of about −9.9. That is the check that says
+the force field was really applied rather than merely parsed, and it is asserted
+with a wide band because 50 steps of minimisation on a freshly solvated box is
+not an equilibrated simulation.
+
+**Units here are kcal/mol.** Amber is kcal throughout, while
+[`openmm`](../openmm/README.md) and [`gromacs`](../gromacs/README.md) next door
+report kJ/mol. Worth remembering before comparing a number from one with a number
+from the other.
 
 Stage 3 is a second implementation agreeing rather than either matching a
 number written in the test file. Stage 4 is the one that proves the force field
@@ -129,8 +138,32 @@ contributed, which leaves an energy near zero.
 - that the conda package is the AmberTools distribution and does **not** carry
   `pmemd` or `pmemd.cuda`.
 
-**Not** verified, and left to the first build: the exact atom count of the
-solvated fixture (it depends on the water-placement algorithm and is not worth
-pinning), which `leaprc` files the package ships beyond the three the recipe
-asserts, and whether `MMPBSA.py` works without an MPI at run time. The recipe
-prints the `leaprc` listing into the build log rather than asserting a set.
+### Three shell traps this recipe walked into, all in one build
+
+Worth recording because each produced a failure that pointed somewhere other
+than at its cause, and all three are now written up in
+[`../README.md`](../README.md) Traps:
+
+- **`cd /tmp` in `%post`.** Another user's `inspect.py` has been sitting in the
+  login node's `/tmp` since July, and python puts the working directory on
+  `sys.path`, so `import inspect` reached from numpy via parmed resolved to their
+  script and died trying to read a file in *their* scratch. The traceback read as
+  a broken numpy.
+- **`grep -q PATTERN file && { fail; }` under `set -e`.** When grep finds nothing,
+  the healthy case, the list's exit status is grep's 1 and `set -e` kills the
+  build with no message. A clean `cpptraj` log failed the build; a dirty one
+  would have reported properly.
+- **Matching the word "error" at all.** `tleap` ends every run, including a
+  perfectly clean one, with `Exiting LEaP: Errors = 0; Warnings = 0; Notes = 0.`,
+  so a case-insensitive search for `error` matches always. The check asserts
+  `Errors = 0` is *present* instead.
+
+And one API mistake of the same shape: `cpptraj -ec '...'` is not cpptraj syntax.
+Given an unrecognised flag it prints its whole usage screen, appends
+`Error: Error(s) occurred during execution.` and exits non-zero, so the real
+complaint sits under fifty lines of help text. Commands go in a file, with `-i`.
+
+**Not** verified, and left where it is: which `leaprc` files the package ships
+beyond the three the recipe asserts, and whether `MMPBSA.py` works without an MPI
+at run time. The recipe prints the `leaprc` listing into the build log rather than
+asserting a set.
