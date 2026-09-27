@@ -24,7 +24,7 @@ From: condaforge/miniforge3:24.11.3-2
     Tool         openmm
     Version      8
     Upstream     https://openmm.org/
-    UpstreamRef  conda-forge openmm 8.6.1, cuda-version 13
+    UpstreamRef  conda-forge openmm 8.6.1, cuda-version 13.2
     Licence      MIT (LGPL for some plugins)
     Base         condaforge/miniforge3:24.11.3-2
     Citation     Eastman et al., PLoS Comput Biol 2017, 10.1371/journal.pcbi.1005659
@@ -49,8 +49,27 @@ From: condaforge/miniforge3:24.11.3-2
     # CUDA 12.9-or-later or CUDA 13, and the two are not binary compatible.
     export CONDA_OVERRIDE_CUDA=13.2
 
+    # cuda-version=13.2, NOT 13. THE MAJOR VERSION IS NOT A TIGHT ENOUGH PIN,
+    # and this was measured here rather than reasoned about: `cuda-version=13`
+    # solved to cuda-version 13.4 with cuda-nvrtc 13.4.92, while the node driver
+    # (595.71.05) supports CUDA 13.2.
+    #
+    # For most libraries that would be fine -- CUDA has minor-version
+    # compatibility, so a runtime built against a newer minor works on an older
+    # minor driver. OpenMM is not most libraries: its CUDA platform COMPILES ITS
+    # KERNELS AT RUN TIME with nvrtc, and PTX emitted by nvrtc 13.4 is not
+    # loadable by a 13.2 driver. The result is
+    #     CUDA_ERROR_UNSUPPORTED_PTX_VERSION
+    # at the first Context construction, in a job, from an image whose build
+    # log said nothing was wrong -- which is exactly the failure OpenMM's FAQ
+    # attributes to installing on a driverless login node.
+    #
+    # CONDA_OVERRIDE_CUDA does not prevent this on its own. It sets __cuda=13.2,
+    # and conda-forge's cuda-version 13.4 package merely constrains
+    # `__cuda >=13`, so the override is satisfied by a package the driver cannot
+    # use. The version has to be pinned.
     mamba create -y -p /opt/env -c conda-forge \
-        "python=3.12" "openmm=8.6.1" "cuda-version=13" numpy
+        "python=3.12" "openmm=8.6.1" "cuda-version=13.2" numpy
     mamba clean -afy
 
     export PATH=/opt/env/bin:$PATH
@@ -64,30 +83,58 @@ From: condaforge/miniforge3:24.11.3-2
     # needs were actually installed. The classic broken install is an openmm
     # whose CUDA plugin is present but whose libcufft is missing: it imports
     # fine and reports only Reference and CPU platforms at run time.
-    PLUG=$(/opt/env/bin/python -c 'import openmm, os; print(os.path.join(os.path.dirname(openmm.version.__file__), "..", "..", "..", "..", "lib", "plugins"))')
-    PLUG=$(cd "$PLUG" && pwd)
+    PLUG=$(/opt/env/bin/python -c 'import sys, os; print(os.path.join(sys.prefix, "lib", "plugins"))')
     echo "plugin directory: $PLUG"
     ls -1 "$PLUG"
     test -s "$PLUG/libOpenMMCUDA.so" \
         || { echo "FATAL: no libOpenMMCUDA.so -- this is a CPU-only openmm" >&2; exit 1; }
     /opt/env/bin/python - <<'CHECK'
-import ctypes.util, glob, os, sys
+import glob, os, sys
 import openmm
+
+# sys.prefix is the environment root. Walking up from openmm.__file__ by hand is
+# how a first version of this recipe ended up asserting against /opt/env/lib/lib
+# and failing a perfectly good build.
+prefix = sys.prefix
+lib = os.path.join(prefix, "lib")
+print("prefix", prefix)
+
 # libcufft and the nvrtc runtime are what the CUDA plugin dlopens. Missing
 # either is the documented way to get a silently CPU-only OpenMM.
-root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(openmm.__file__))))
-lib = os.path.join(root, "lib")
 for stem in ("libcufft", "libnvrtc"):
     hits = glob.glob(os.path.join(lib, stem + "*.so*"))
-    # NOTE: the format operator stays at the END of a line, never at the start
-    # of a continuation line. Apptainer parses a line whose first non-whitespace
-    # character is `%` as a SECTION HEADER, even when it is indented inside a
-    # heredoc, and the build dies before it starts with
-    #     invalid section(s) specified:
-    # naming nothing at all, because the section name it found was empty.
-    assert hits, ("missing %s under %s -- the CUDA plugin cannot load "
-                  "without it" % (stem, lib))
+    assert hits, ("missing " + stem + " under " + lib +
+                  " -- the CUDA plugin cannot load without it")
     print("%-10s %s" % (stem, os.path.basename(sorted(hits)[0])))
+
+# THE VERSION THE DRIVER HAS TO BE ABLE TO LOAD. OpenMM JIT-compiles with
+# nvrtc, so an nvrtc newer than the driver's CUDA version produces PTX the
+# driver rejects. The compute nodes' driver reports CUDA 13.2, so refuse
+# anything above it at BUILD time rather than in a job.
+DRIVER_CUDA = (13, 2)
+import re
+vers = set()
+for path in glob.glob(os.path.join(lib, "libnvrtc.so.*")):
+    m = re.search(r"libnvrtc\.so\.(\d+)\.(\d+)", path)
+    if m:
+        vers.add((int(m.group(1)), int(m.group(2))))
+print("nvrtc soname versions found:", sorted(vers))
+# The conda package's own version is the authoritative number; the soname is
+# coarser. Read it from conda-meta, which is a file rather than an inference.
+nvrtc_pkgs = glob.glob(os.path.join(prefix, "conda-meta", "cuda-nvrtc-*.json"))
+assert nvrtc_pkgs, "cuda-nvrtc is not installed at all"
+name = os.path.basename(sorted(nvrtc_pkgs)[-1])
+m = re.match(r"cuda-nvrtc-(\d+)\.(\d+)\.", name)
+assert m, ("cannot parse a version out of " + name)
+got = (int(m.group(1)), int(m.group(2)))
+print("cuda-nvrtc package version %d.%d ; driver supports %d.%d" % (
+    got[0], got[1], DRIVER_CUDA[0], DRIVER_CUDA[1]))
+assert got <= DRIVER_CUDA, (
+    "cuda-nvrtc %d.%d is NEWER than the driver's CUDA %d.%d. OpenMM compiles "
+    "its kernels at run time, so this image would die at the first Context "
+    "with CUDA_ERROR_UNSUPPORTED_PTX_VERSION. Pin cuda-version lower." % (
+        got[0], got[1], DRIVER_CUDA[0], DRIVER_CUDA[1]))
+
 # The Reference and CPU platforms need no driver, so they MUST be here even on
 # a driverless build node. If they are not, the install is broken in a way that
 # has nothing to do with CUDA.
