@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | built (no `test.sh`); a claim about the mechanism, not any one environment, checked on CoreHPC 2026-09-17 against `iggase` (python 3.12.14, gemmi 0.7.5, numpy 2.5.3, biopython 1.83) |
+| Status | **verified** 2026-09-26 — `test.sh` passed on `ccpu1-01` against `CHPC_PYENV=iggase` (python 3.12.14, gemmi 0.7.5, numpy 2.5.3, biopython 1.83, no torch). A claim about the mechanism, not about any one environment |
 | Conda env | named by `$CHPC_PYENV` (default `bio`, which nothing creates), at `$CHPC_USER_SCRATCH/envs/<name>`; exports `PYTHON` |
 | GPU | CPU |
 | Licence | various, all open source |
@@ -17,7 +17,7 @@ the CLI refuses it by design. `export` names the interpreter; you call it.
 salloc -p cpu -c 2 --mem 4G -t 1:00:00
 export CHPC_PYENV=iggase                     # the environment's name, on its own line (why: below)
 eval "$(chpc-tool export python-bio)"        # PYTHON=/mnt/scratch/user/$USER/envs/iggase/bin/python
-"$PYTHON" my_script.py                       # (untested) gemmi, numpy, biopython; no torch
+"$PYTHON" my_script.py                       # gemmi, numpy, biopython; no torch
 ```
 
 `export` is its own line because the one-line form does not work here: in
@@ -41,6 +41,47 @@ environment you named, with gemmi, numpy, biopython and deliberately no torch.
 or the rebuild command; record those versions beside any number a script
 produced, because a numpy bump can move a recorded result with every test
 still green.
+
+## What `verified` means for an entry that owns no recipe
+
+`chpc-tool test python-bio` runs against the environment **you name**, and
+refuses to run without one:
+
+```bash
+CHPC_PYENV=iggase chpc-tool test python-bio        # PASS
+chpc-tool test python-bio                         # FAIL: names what to pass
+```
+
+That refusal is the opposite of what `doctor` does on the same entry, and the
+difference is deliberate. Doctor returns "not checked", because a false FAIL in
+a status table is worse than a missing row — it is what teaches people to skim
+past the table, and then a real failure goes unread. A test is not a status
+table: a green tick from a test that had nothing to test against is a lie, and
+it is the kind that gets quoted back later as evidence.
+
+Each of the three libraries is asked to *do* something whose answer is known,
+because a conda environment is exactly where "it imports" and "it works" come
+apart — solving the same yml on a different day can swap a BLAS, a compiler, or
+a whole torch build. Measured on 2026-09-26 against `iggase`:
+
+| Library | Asserted | Measured |
+|---|---|---|
+| gemmi 0.7.5 | parses the fixture: 1 chain, 40 residues, 160 atoms, exact sequence | all four |
+| numpy 2.5.3 | `linalg.solve` returns `[2, 3]` with a residual under 1e-12 — a working BLAS | residual 0.0 |
+| biopython 1.83 | BLOSUM62 self-score is 116.0, and one substitution lowers it | 116.0, then 107.0 |
+| torch | **absent** | absent |
+
+The last row is the entry's name in assertion form. This is "the light python
+layer ... and deliberately no torch", and a yml that quietly acquires torch
+turns a 300 MB environment into a several-GB one that starts competing with the
+GPU entries for a CUDA stack. A project that genuinely needs torch wants a
+different entry, not this one.
+
+The 116.0 is arithmetic over BLOSUM62's diagonal for the 20 residues the shared
+fixture generator cycles, not a version's opinion, which is why it is safe to
+pin. The alignment is asserted at all because it is the class of number a
+project records and compares later: see the warning about a numpy bump moving a
+recorded result with every test still green.
 
 ## Do not miss
 
