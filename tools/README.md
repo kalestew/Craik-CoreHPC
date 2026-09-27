@@ -629,6 +629,28 @@ then
 fi
 ```
 
+**`grep -q PATTERN file && { fail; }` fails the build when grep finds
+NOTHING.** `%post` runs under `set -e`, and in an `A && B` list where `A` fails,
+`B` never runs and the list's exit status is `A`'s. So on the **healthy** path --
+no error in the log -- grep returns 1, the braces are skipped, and `set -e` kills
+the build with no message of its own. A dirty log would have reported properly;
+a clean one fails silently. This was in the `ambertools` recipe and cost a
+rebuild: `tleap` had already produced a correct 1782-atom system with charges
+summing to zero, and the build died immediately afterwards on a `cpptraj` log
+that was fine.
+
+Write it as a statement, not as a list:
+
+```sh
+if grep -qE '^Error:' cpptraj.log; then
+    cat cpptraj.log >&2; exit 1
+fi
+```
+
+And match a pattern the tool actually emits. A bare `-qi error` matches the word
+in a banner or a citation, which fails a healthy run for the opposite reason;
+`^Error:` is what cpptraj prefixes a real one with.
+
 **Never `cd /tmp` in `%post`, because another user's file will shadow a
 standard library module.** `/tmp` on the login node is shared and
 world-writable, apptainer binds the **host's** `/tmp` into the container, and

@@ -124,7 +124,19 @@ CHECK
     cpptraj -p test.prmtop -y test.inpcrd -ec 'strip :WAT
     rms first
     go' > cpptraj.log 2>&1 || { cat cpptraj.log; exit 1; }
-    grep -qiE 'error|Error' cpptraj.log && { echo "FATAL: cpptraj reported an error" >&2; cat cpptraj.log; exit 1; }
+    # `grep -q PATTERN file && { fail; }` IS A TRAP UNDER set -e, and it was in
+    # this recipe. When grep finds nothing -- the HEALTHY case -- the && list's
+    # exit status is grep's 1, the braces never run, and `set -e` kills the build
+    # with no message of its own. So a clean cpptraj run failed the build while a
+    # dirty one would have reported properly. Always `if grep ...; then`.
+    # 'Error:' with the colon, not a bare 'error': cpptraj's banner and its
+    # citation text contain the word in prose, and matching that would fail a
+    # healthy run for the opposite reason.
+    if grep -qE '^Error:|^ *Error:' cpptraj.log; then
+        echo "FATAL: cpptraj reported an error" >&2
+        cat cpptraj.log >&2
+        exit 1
+    fi
     tail -12 cpptraj.log
 
     cd / && rm -rf /opt/build-check
@@ -161,7 +173,7 @@ CHECK
     cd "$w"
     printf 'source leaprc.protein.ff14SB\nquit\n' > t.leap
     /opt/env/bin/tleap -f t.leap > t.log 2>&1
-    grep -qi 'error' t.log && { cat t.log; exit 1; }
+    if grep -qi 'error' t.log; then cat t.log; exit 1; fi
     /opt/env/bin/cpptraj --version
     /opt/env/bin/python -P -c "import parmed; print('parmed', parmed.__version__)"
     test -s /opt/env/dat/leap/cmd/leaprc.protein.ff14SB
