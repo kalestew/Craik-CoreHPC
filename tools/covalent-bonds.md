@@ -7,6 +7,11 @@ a bond in a different vocabulary, and every one of them returns a plausible
 structure when the address is wrong. This page tells that story once; the
 per-tool READMEs point here.
 
+A sixth, `rfdiffusion3`, **cannot be told about a bond at all** — it reads the
+bonds already in the input file and infers the modification. It is a design tool
+rather than a predictor, so it appears in the table below with a row of its own;
+the failure mode is the same shape and arrives by a different route.
+
 For a first hands-on example, use the
 [P1B7 / 8UDR walkthrough](../docs/11-p1b7-walkthrough.md). Its
 [committed input bundle](../examples/p1b7/README.md) includes all five protein
@@ -53,6 +58,7 @@ validator.
 | intellifold | AlphaFold 3 schema `bondedAtomPairs` | `[entity_id, residue_id, atom_name]`, `entity_id` a label | atom name from a CCD code or a `userCCD` block; a SMILES ligand has no atom names to bond | measured: `userCCD` and `bondedAtomPairs` are both honoured, and a bond it accepts can still be built wrong, so check the geometry |
 | alphafold3 | `bondedAtomPairs` (not built here) | as intellifold | as intellifold; `userCCD` for anything you only have as SMILES | polymer-to-polymer bonds are unsupported outright |
 | openfold3 | `covalent_bonds` in its own query JSON | declared | declared | the field is loaded and never used: apo folds only |
+| rfdiffusion3 | **nowhere — there is no field.** `FlagAndReassignCovalentModifications` runs unconditionally and reads the parser's BondList | whichever residue the file says is bonded; the whole residue is reassigned into the ligand's PN unit and atomized | whichever ligand atom the file says, by the bond record | a structure missing its `_struct_conn` record becomes a FREE ligand near a cysteine. Nothing is declared, so nothing can be wrong, so nothing warns. Measured on 8UDR: the deposited C/CYS6/SG–F/MOV/C25 bond at 1.765 Å is picked up unaided, and survives a 120-residue de novo design at 1.770 Å |
 
 ## Rules
 

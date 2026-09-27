@@ -90,6 +90,12 @@ tutorial's A–F order and sequence numbering from 1.
 - [protenix.json](protenix.json): six entities and `covalent_bonds`.
 - [chai1.fasta](chai1.fasta) and [chai1.restraints](chai1.restraints): proteins,
   bound-form ligand SMILES, and the separate comma-delimited bond restraint.
+- [rfd3.yaml](rfd3.yaml): the odd one out. Not a prediction — RFdiffusion3
+  **designs** a new 120-residue protein around the sotorasib-modified cysteine,
+  which is the job the P1B7 Fab does by other means. It declares no bond and has
+  no way to, because it reads the bonds in `reference/8UDR.cif.gz` and infers the
+  modification itself; see
+  [tools/covalent-bonds.md](../../tools/covalent-bonds.md).
 - [manifest.json](manifest.json): chain identities, reference URLs and SHA-256
   checksums of the bundled compressed structures.
 - `reference/8UDR.cif.gz`: deposited P1B7 reference coordinates.
