@@ -105,7 +105,21 @@ From: nvidia/cuda:13.2.1-devel-ubuntu24.04
     make install
     cd / && rm -rf /opt/build-src
 
-    . /opt/gromacs/bin/GMXRC
+    # NOT `. /opt/gromacs/bin/GMXRC`. %post runs under dash with `set -u`, and
+    # GMXRC is a csh/bash dispatcher: it reads $shell, which dash does not set,
+    # then falls through to GMXRC.bash, which expands $GMXLDLIB before assigning
+    # it. Under `set -u` that is fatal, so a build that compiled and installed
+    # perfectly dies at the first verification line with
+    #   /.post.script: 44: GMXRC.bash: GMXLDLIB: parameter not set
+    # and `exit status 2` from %post -- after 25 minutes of compiling. The four
+    # variables it would have set are the four below, and %environment sets the
+    # same ones for the finished image, so nothing is lost by being explicit.
+    export GMXPREFIX=/opt/gromacs
+    export GMXBIN=/opt/gromacs/bin
+    export GMXDATA=/opt/gromacs/share/gromacs
+    export GMXLDLIB=/opt/gromacs/lib
+    export PATH=/opt/gromacs/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/gromacs/lib:${LD_LIBRARY_PATH:-}
 
     # --- assert what the build actually produced -----------------------------
     # `gmx --version` prints the configuration, and it is the only place the
