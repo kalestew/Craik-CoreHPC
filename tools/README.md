@@ -616,6 +616,32 @@ then
 fi
 ```
 
+**A `%` at the start of a line inside a heredoc is an Apptainer SECTION
+HEADER.** Apptainer's definition parser looks only at the first non-whitespace
+character of each line, and it does not know or care that the line is inside a
+`%post` heredoc. So a python line continuation beginning with the format
+operator:
+
+```python
+    assert hits, ("missing %s under %s -- the plugin cannot load"
+                  % (stem, lib))          # <- parsed as a section header
+```
+
+kills the build before it starts, with
+
+```
+FATAL: ... while parsing definition: ... invalid section(s) specified:
+```
+
+naming **nothing at all** after the colon, because the section name it found
+was empty. Nothing in that message points at a heredoc, a python line, or a
+`%`. Keep the operator at the end of its line — `"..." % (a, b)` — and the
+problem does not exist. The same applies to a shell heredoc containing a line
+that starts with `%`, and to a Markdown or text block embedded in `%help`.
+
+`grep -n '^[[:space:]]*%' tools/*/*.def` finds every instance, and returns only
+the real section headers when the recipes are clean.
+
 **`WRITABLE_TMPFS=1` is for config, never for data.** Some tools insist on
 writing inside their own installation, which a read-only `.sif` forbids
 (doc 07). Where that write is small and disposable, an in-memory overlay is
