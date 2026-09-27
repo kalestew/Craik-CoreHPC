@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| Status | planned — recipe, entry and a GPU-node `test.sh` written; not yet built |
-| Image to be | `openmm_8.sif` from [`openmm_8.def`](openmm_8.def), on a `condaforge/miniforge3` base |
+| Status | **built** 2026-09-26 — image built and published; the CUDA platform is unproven until `test.sh` runs on a GPU node, which is **queued** |
+| Image | `openmm_8.sif` from [`openmm_8.def`](openmm_8.def); 575 MB on a `condaforge/miniforge3` base |
 | GPU | yes, and the point of the entry. `GPU_MAX_CC` is deliberately **empty** — see below |
 | Weights | none. An MD engine; the force field comes with your system |
 | Licence | MIT (LGPL for some plugins) — **no licence to chase**, which is why this exists beside `amber` |
-| Upstream | <https://openmm.org/>, conda-forge `openmm` 8.6.1, python 3.12, `cuda-version` 13 |
+| Upstream | <https://openmm.org/>, conda-forge `openmm` 8.6.1, python 3.12, `cuda-version` **13.2** |
 | Citation | Eastman et al., *PLoS Comput Biol* **13**(7), 2017, [1005659](https://doi.org/10.1371/journal.pcbi.1005659) |
 
 OpenMM is the **unlicensed alternative to Amber** for near-attack-fraction work
@@ -15,17 +15,18 @@ and any other molecular dynamics the programme needs. [`amber`](../amber/README.
 needs a paid site licence for `pmemd`, and [`gromacs`](../gromacs/README.md) is
 a third option; this one has nothing to buy and nothing to wait for.
 
-## Not built yet
+## Run it
 
-Nothing to fetch and nothing to stage.
+Nothing to fetch and nothing staged on FAC.
+
+The remaining step for `verified` is the test, which **requires a GPU node**
+because the CUDA platform cannot be registered without a driver:
 
 ```bash
-chpc-tool build openmm              # login node
-chpc-tool publish openmm
 chpc-tool test openmm               # GPU NODE REQUIRED -- this is what `verified` means
 ```
 
-The intended commands, from [`test.sh`](test.sh) and **not yet run**:
+The production commands, from [`test.sh`](test.sh) and **not yet run on a GPU**:
 
 ```bash
 salloc -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00

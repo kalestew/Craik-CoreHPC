@@ -2,8 +2,8 @@
 
 | | |
 |---|---|
-| Status | planned — recipe, entry and a reference-comparison `test.sh` written; not yet built |
-| Image to be | `thermompnn_1.sif` from [`thermompnn_1.def`](thermompnn_1.def), on a `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` base |
+| Status | **built** 2026-09-26 — image built and published; `test.sh` needs a GPU node and is **queued**. `verified` when it passes |
+| Image | `thermompnn_1.sif` from [`thermompnn_1.def`](thermompnn_1.def); 3.4 GB on a `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` base |
 | GPU | yes. `GPU_MAX_CC` deliberately **empty** — the build asserts all three of our GPU models are covered |
 | Weights | **in upstream's git repo**, baked into the image. Nothing on the share, nothing to fetch |
 | Licence | MIT |
@@ -23,18 +23,19 @@ the co-folding entries cannot: co-folding models barely respond to point
 mutations (Masters 2025), so a ranking built from their confidence scores is
 not a stability ranking. This is the tool that is supposed to respond.
 
-## Not built yet
+## Run it
 
-Nothing to fetch and nothing to stage — upstream commits its checkpoints, so
-`git clone` brings them and the image bakes them in.
+Nothing to fetch and nothing staged on FAC — upstream commits its checkpoints and
+the image bakes them in.
+
+The remaining step for `verified` is the test, which needs a GPU node:
 
 ```bash
-chpc-tool build thermompnn           # login node
-chpc-tool publish thermompnn
 chpc-tool test thermompnn            # GPU node -- this is what `verified` means
 ```
 
-The intended command, from [`test.sh`](test.sh) and **not yet run**:
+The production command, from [`test.sh`](test.sh) and **not yet run on real
+input**:
 
 ```bash
 salloc -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 1:00:00
