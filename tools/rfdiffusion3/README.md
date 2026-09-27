@@ -89,6 +89,37 @@ and doctor check.
 
 ## Provenance
 
+### The test passes, and it could not even run before 2026-09-26
+
+`chpc-tool test rfdiffusion3` **passed on `ccpu1-04`** on 2026-09-26, reporting:
+
+```
+search path: ['/mnt/fac/CX500146_DS1/data/rfdiffusion3', '/home/.../.foundry/checkpoints']
+ok: registry resolves /mnt/fac/CX500146_DS1/data/rfdiffusion3
+ok rfd3_latest.ckpt: 1616 entries, 336,080,102 parameters
+ok rf3_foundry_01_24_latest_remapped.ckpt: 8150 entries, 732,881,030 parameters
+```
+
+That is the first time it has run at all. `test.sh` says "CPU is fine", and on a
+CPU node it had been failing with a bare `exit 9` and no output — which read as a
+broken image and was a bug in `chpc-tool`. Every CPU-partition node here ships
+the `nvidia-smi` binary while having no GPU; asked for a compute capability it
+exits **9** and prints its complaint on **stdout**, so the `GPU_MAX_CC` probe
+carried that 9 out of a pipeline under `set -euo pipefail` and `set -e` killed
+the tool before it reached apptainer. Fixed, with
+[`tests/test_gpu_ceiling.py`](../../tests/test_gpu_ceiling.py) to keep it fixed.
+
+**The status stays `built` anyway, and that is this entry's own decision.** What
+passed is the checkpoint-resolution and deserialisation test, which proves the
+image and the weights. It does not run a design, and `verified` here was defined
+as running one — `rfd3` is a typer wrapper over a hydra app whose `--help`
+documents no config keys, and upstream ships its examples as notebooks rather
+than commands, so a minimal end-to-end invocation is still not something to
+guess at. The remaining work is to write that invocation from upstream's own
+example and add it to `test.sh`.
+
+### The build record
+
 Built 2026-09-18 by kanderson6 on the CoreHPC login node (1172 s), from
 upstream's own `0.2.0-slim` image rather than a pip install into a pytorch base.
 
