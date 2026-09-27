@@ -65,7 +65,17 @@ From: nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04
     apt-get update
     apt-get install -y --no-install-recommends \
         build-essential ninja-build cmake git ca-certificates \
-        python3.12 python3.12-dev python3.12-venv
+        python3.12 python3.12-dev python3.12-venv \
+        libxrender1 libxext6
+    # libxrender1 AND libxext6 ARE NOT OPTIONAL, and nothing in the import chain
+    # says so. openfold3.core.data.primitives.structure.component imports
+    # pdbeccdutils, which imports rdkit.Chem.Draw, which loads rdMolDraw2D --
+    # a 2D DEPICTION module, linked against libXrender. So a structure-folding
+    # image dies at
+    #   ImportError: libXrender.so.1: cannot open shared object file
+    # before it reads a single coordinate. Measured on ggpu1-10, 2026-09-27.
+    # --no-install-recommends is what excludes them, and pip cannot supply them
+    # because rdkit's wheel links them rather than vendoring them.
     rm -rf /var/lib/apt/lists/*
     # A VIRTUAL ENVIRONMENT, rather than installing into the distribution's
     # own interpreter. The first build attempt died on the line this replaces:
