@@ -1,0 +1,210 @@
+Bootstrap: docker
+From: pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+
+# ThermoMPNN -- stability ddG prediction, the third vote in the consensus.
+#
+# NOT built from upstream's pins, and the reasoning is the same as
+# ligandmpnn's. `environment.yaml` asks for python==3.10 with BOTH
+# pytorch-cuda=11.7 AND cudatoolkit=11.3 (which contradict each other), and
+# `pyproject.toml`'s extras pin torch==2.5.1 against cu121 or cu124. Honouring
+# any of those would tear out the CUDA 13.2 stack this base exists to provide
+# and replace it with one several years older than the node driver -- and would
+# cap the image at sm_90, so it could not run on the Blackwell nodes at all.
+# Upstream's own README warns that its yaml "may cause pytorch to install
+# incorrectly (CPU version instead of GPU version)".
+#
+# The genuine dependencies are the eight non-torch packages below. %post
+# asserts the things a wrong build would get wrong.
+#
+# Build:  chpc-tool build thermompnn
+
+%labels
+    Tool         thermompnn
+    Version      1
+    Upstream     https://github.com/Kuhlman-Lab/ThermoMPNN
+    UpstreamRef  370f76ec62bd929f7425e311d8df04a0d094990f
+    Licence      MIT
+    Base         pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime
+    Citation     Dieckhaus, Brocidiacono, Randolph & Kuhlman, PNAS 2024, 10.1073/pnas.2314853121
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates
+    rm -rf /var/lib/apt/lists/*
+
+    # PEP 668: the pytorch base images ship a conda python marked
+    # EXTERNALLY-MANAGED, so a bare pip install refuses with
+    # "error: externally-managed-environment" and apptainer reports a bare
+    # "exit status 1". Inside a container the system interpreter IS the
+    # environment, so overriding the marker is correct, not a workaround.
+    export PIP_BREAK_SYSTEM_PACKAGES=1
+
+    REF=370f76ec62bd929f7425e311d8df04a0d094990f
+    git clone https://github.com/Kuhlman-Lab/ThermoMPNN /opt/ThermoMPNN
+    git -C /opt/ThermoMPNN checkout --detach "$REF"
+    git -C /opt/ThermoMPNN rev-parse HEAD > /opt/ThermoMPNN/.built-from
+    rm -rf /opt/ThermoMPNN/.git
+
+    # wandb is in this list because INFERENCE NEEDS IT, which is not obvious
+    # and is not documented. analysis/custom_inference.py imports
+    # train_thermompnn for TransferModelPL, and train_thermompnn.py does
+    # `import wandb` at module scope (line 2). So a prediction-only image that
+    # left wandb out fails at import with a traceback pointing at the training
+    # module, which reads like the wrong entry point. See %environment for the
+    # other half of this: wandb must also be muzzled, because a compute node
+    # has no internet for it to phone.
+    pip install --no-cache-dir \
+        pandas tqdm torchmetrics pytorch-lightning omegaconf joblib biopython wandb
+
+    # --- the weights are IN the repo, so pin them by hash ---------------------
+    # ThermoMPNN commits its checkpoints rather than fetching them, which is
+    # convenient and also means `git clone` is the only integrity check there
+    # is. Assert the digests measured on 2026-09-26 at this ref: a truncated or
+    # substituted checkpoint is still a file, still loads far enough to build a
+    # model, and then predicts numbers that are merely wrong.
+    cd /opt/ThermoMPNN
+    echo "af449118ccfb4e34971d802321907ed82a8a035ae80f055bf8fc56009a4a838a  models/thermoMPNN_default.pt" > /tmp/w.sha256
+    echo "c9cb4a671d79604111231f8dbfc7c590e06f1197453b7a6854ac6661a642f5bd  vanilla_model_weights/v_48_020.pt" >> /tmp/w.sha256
+    sha256sum -c /tmp/w.sha256
+    rm -f /tmp/w.sha256
+
+    # --- local.yaml ships one developer's absolute paths ---------------------
+    # The file is COMMITTED, and its platform.thermompnn_dir and
+    # platform.cache_dir point at /proj/kuhl_lab and /nas/longleaf -- a UNC
+    # cluster nobody here has. Inference survives that because
+    # custom_inference.py overwrites platform.thermompnn_dir at run time
+    # (line 55); everything else in the file does not.
+    #
+    # So: fix the two platform keys, and replace every data_loc path with a
+    # marker that fails LOUDLY. Leaving a stranger's home directory in a config
+    # is how a training run ends up reporting "file not found" against a path
+    # that was never ours and looks plausible enough to go debugging.
+    python - <<'FIXCFG'
+import re, pathlib
+p = pathlib.Path("/opt/ThermoMPNN/local.yaml")
+s = p.read_text()
+s = re.sub(r'thermompnn_dir:.*', 'thermompnn_dir: "/opt/ThermoMPNN"', s)
+s = re.sub(r'cache_dir:.*', 'cache_dir: "/tmp/thermompnn-cache"', s)
+# Every remaining absolute path under data_loc belongs to upstream's cluster.
+s = re.sub(r'(:\s*)"(/nas/|/proj/)[^"]*"',
+           r'\1"UNSET-training-data-see-tools/thermompnn/README.md"', s)
+p.write_text(s)
+print(s)
+FIXCFG
+    grep -q '/opt/ThermoMPNN' /opt/ThermoMPNN/local.yaml
+    if grep -qE '/nas/|/proj/' /opt/ThermoMPNN/local.yaml; then
+        echo "FATAL: upstream absolute paths survived in local.yaml" >&2; exit 1
+    fi
+
+    mkdir -p /tmp/thermompnn-cache
+    chmod -R a+rX /opt/ThermoMPNN
+
+    # --- assert the properties a wrong build would not have -----------------
+    python - <<'CHECK'
+import sys
+sys.path.insert(0, "/opt/ThermoMPNN")
+sys.path.insert(0, "/opt/ThermoMPNN/analysis")
+import torch
+
+# 1. A CUDA build, not the CPU wheel. Upstream's README warns its own yaml can
+#    install the CPU one, and a CPU torch imports, reports a version, and runs
+#    every prediction correctly but ~50x slower -- so the assertion is on
+#    torch.version.cuda, not on `import torch`.
+assert torch.version.cuda is not None, "CPU-only torch: upstream's documented failure"
+print("torch", torch.__version__, "cuda", torch.version.cuda)
+
+# 2. Kernels for the GPUs we actually own. The gpu partition here is three
+#    architectures -- L40S sm_89, H100 NVL sm_90, RTX PRO 6000 sm_120 -- and an
+#    image built against an older toolkit dies on the newest with "no kernel
+#    image is available for execution on the device", intermittently, depending
+#    on what was free (doc 05).
+flags = torch._C._cuda_getArchFlags()
+print("arch flags", flags)
+for need in ("sm_89", "sm_90", "sm_120"):
+    assert need in flags, ("missing kernels for %s; set GPU_MAX_CC in tool.conf "
+                           "to the highest present" % need)
+
+# 3. The import chain custom_inference.py actually walks, including the
+#    training module it needs for TransferModelPL and the wandb underneath it.
+from datasets import Mutation
+from train_thermompnn import TransferModelPL
+from protein_mpnn_utils import tied_featurize, alt_parse_PDB
+from thermompnn_benchmarking import get_trained_model
+from SSM import get_ssm_mutations
+print("inference import chain ok (including train_thermompnn -> wandb)")
+
+# 4. Both checkpoints deserialise and hold real tensors. test -s passes on a
+#    truncated download; torch.load is what distinguishes them.
+for path, floor in (("/opt/ThermoMPNN/models/thermoMPNN_default.pt", 1e6),
+                    ("/opt/ThermoMPNN/vanilla_model_weights/v_48_020.pt", 1e6)):
+    obj = torch.load(path, map_location="cpu", weights_only=False)
+    sd = obj.get("state_dict", obj.get("model_state_dict", obj))
+    n = sum(v.numel() for v in sd.values() if hasattr(v, "numel"))
+    assert n > floor, (path, "parameter count", n)
+    print("ok %s: %d entries, %s parameters" % (path.rsplit("/", 1)[-1], len(sd), format(n, ",")))
+CHECK
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    export THERMOMPNN_DIR=/opt/ThermoMPNN
+    # The repo root must be importable: analysis/custom_inference.py appends it
+    # to sys.path itself, but SSM.py and the benchmarking module are imported
+    # by name and a caller running from elsewhere needs this.
+    export PYTHONPATH=/opt/ThermoMPNN:${PYTHONPATH:-}
+    # wandb is a hard import dependency of the training module that inference
+    # pulls in (see %post), and a compute node has no internet. Left alone,
+    # wandb looks for credentials, tries to reach api.wandb.ai and blocks or
+    # warns in the middle of a prediction. `disabled` makes every wandb call a
+    # no-op without touching the network or the filesystem.
+    export WANDB_MODE=disabled
+    export WANDB_SILENT=true
+    # A read-only squashfs has nowhere for a cache. /tmp is bound by apptainer,
+    # is local NVMe on every compute node, and is per-node so concurrent array
+    # tasks cannot collide.
+    export MPLCONFIGDIR="${MPLCONFIGDIR:-/tmp/mpl-cache}"
+
+%test
+    set -eu
+    # Against the finished read-only squashfs, where an import can fail for
+    # reasons %post's writable overlay cannot see (doc 07).
+    python -c "
+import sys; sys.path.insert(0, '/opt/ThermoMPNN')
+import torch, wandb, pytorch_lightning
+assert torch.version.cuda is not None
+from train_thermompnn import TransferModelPL
+print('imports ok on the squashfs')"
+    test -s /opt/ThermoMPNN/models/thermoMPNN_default.pt
+    test -s /opt/ThermoMPNN/examples/ThermoMPNN_inference_2OCJ.csv
+    grep -q '/opt/ThermoMPNN' /opt/ThermoMPNN/local.yaml
+    echo "built from $(cat /opt/ThermoMPNN/.built-from)"
+
+%runscript
+    exec python "$@"
+
+%help
+    ThermoMPNN, pinned at 370f76ec, weights included under
+    /opt/ThermoMPNN/models and /opt/ThermoMPNN/vanilla_model_weights.
+
+    Site-saturation mutagenesis over one chain:
+
+      chpc-tool exec thermompnn -- python \
+          /opt/ThermoMPNN/analysis/custom_inference.py \
+          --pdb in.pdb --chain A \
+          --model_path /opt/ThermoMPNN/models/thermoMPNN_default.pt \
+          --out_dir .
+
+    Writes ThermoMPNN_inference_<pdbid>.csv with one row per substitution.
+
+    SIGN CONVENTION: positive ddG_pred is DESTABILISING. Upstream negates the
+    Megascale ddG_ML when training (datasets.py:161), so the sign here is the
+    opposite of that dataset's.
+
+    `position` in the output is a 0-BASED INDEX into the parsed chain, NOT a
+    PDB residue number. Map it back through the structure before quoting a
+    mutation to anyone.
+
+    Monomers only: multi-chain inputs are not supported upstream.
