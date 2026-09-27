@@ -121,9 +121,16 @@ print("box", [round(x, 2) for x in p.box])
 CHECK
 
     # cpptraj reads the same pair, independently of parmed, and must agree.
-    cpptraj -p test.prmtop -y test.inpcrd -ec 'strip :WAT
-    rms first
-    go' > cpptraj.log 2>&1 || { cat cpptraj.log; exit 1; }
+    # COMMANDS GO IN A FILE, passed with -i. There is no flag for inline
+    # commands: `-ec '...'` is not cpptraj syntax, and cpptraj answers an
+    # unrecognised flag by printing its whole usage screen, appending
+    # "Error: Error(s) occurred during execution." and exiting non-zero -- which
+    # buries the one useful line under fifty lines of help text.
+    cat > analyse.in <<'CPPTRAJ'
+strip :WAT
+go
+CPPTRAJ
+    cpptraj -p test.prmtop -y test.inpcrd -i analyse.in > cpptraj.log 2>&1 || { cat cpptraj.log; exit 1; }
     # `grep -q PATTERN file && { fail; }` IS A TRAP UNDER set -e, and it was in
     # this recipe. When grep finds nothing -- the HEALTHY case -- the && list's
     # exit status is grep's 1, the braces never run, and `set -e` kills the build

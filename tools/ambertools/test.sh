@@ -94,10 +94,16 @@ cat parmed.log
 # --- stage 3: cpptraj agrees, independently -----------------------------------
 # A second reader, with its own parser. Two implementations agreeing on the atom
 # count is a stronger statement than either matching a number written here.
+# Commands go in a FILE, passed with -i. cpptraj has no inline-command flag, and
+# it answers an unrecognised one by printing its entire usage screen followed by
+# "Error: Error(s) occurred during execution." -- fifty lines of help text with
+# the actual complaint at the bottom.
+cat > analyse.in <<'CPPTRAJ'
+strip :WAT
+go
+CPPTRAJ
 if ! "$CHPC_TOOL" exec ambertools -- cpptraj -p sys.prmtop -y sys.inpcrd \
-        -ec 'strip :WAT
-             rms first
-             go' > cpptraj.log 2>&1
+        -i analyse.in > cpptraj.log 2>&1
 then
     echo "cpptraj failed to read the topology:" >&2; tail -25 cpptraj.log >&2; exit 1
 fi
