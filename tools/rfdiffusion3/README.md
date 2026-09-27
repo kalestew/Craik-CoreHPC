@@ -2,9 +2,9 @@
 
 | | |
 |---|---|
-| Status | verified 2026-09-26 on `ccpu1-04` — `chpc-tool test rfdiffusion3` designs a 60-residue backbone and then a 120-residue de novo scaffold around the P1B7 sotorasib-modified cysteine, with the covalent bond intact. **The verifying run was on CPU**; see [Provenance](#verified-2026-09-26-a-design-runs-and-it-holds-the-covalent-bond) |
+| Status | verified 2026-09-27 on `ggpu1-10` (NVIDIA L40S) in 1 m 50 s, and on `ccpu1-04` (CPU) in 8 m 42 s — `chpc-tool test rfdiffusion3` designs a 60-residue backbone and then a 120-residue de novo scaffold around the P1B7 sotorasib-modified cysteine, with the covalent bond intact on both |
 | Image | `rfdiffusion3_0.2.0.sif`, 3.65 GB, no weights inside; recipe [`rfdiffusion3_0.2.0.def`](rfdiffusion3_0.2.0.def) |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1`. **Runs on CPU too**, correctly, and slowly enough to matter |
+| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1`. **Runs on CPU too**, correctly; the same test takes 1 m 50 s on an L40S against 8 m 42 s on 16 CPU cores |
 | Weights | 5.7 GB at `$FOUNDRY_CHECKPOINT_DIRS` (`$CHPC_LAB/data/rfdiffusion3`) for the default `rfd3 rf3`; 14.6 GB if you ask for `all`. Fetched by [`fetch-weights.sh`](fetch-weights.sh) on the login node |
 | Licence | BSD-3-Clause, code and weights; commercial use permitted |
 | Upstream | `rosettacommons/foundry:0.2.0-slim`, `rc-foundry==0.2.0` |
@@ -216,17 +216,30 @@ The CA–CA assertion is the one that cannot be satisfied by a plausible-looking
 metrics dictionary: a trans peptide fixes consecutive CA–CA at 3.80 Å, and that
 is chemistry rather than a threshold chosen here.
 
-**That run was on the CPU, and the log says so rather than hiding it.** The
-8-GPU per-user cap was fully committed to another job array all day, so the test
-was routed to `community_short`, where it had a node immediately. Stage 1 of
-`test.sh` decides the accelerator, prints it, and names it again in the final
-`ok` line, so a CPU run can never be quoted as GPU coverage; the same test
-submitted to `-p gpu --gres=gpu:nvidia_l40s:1` is queued and will additionally
-assert that neither design fell back. What the CPU run does establish is
-everything that is not device-specific: the invocation, the checkpoint
-resolution, the input schema, the metrics, the covalent parse and the covalent
-geometry. What it leaves open is narrow and named — whether the CUDA kernels in
-this torch build produce the same designs on an L40S.
+### And on a GPU, 2026-09-27
+
+The 8-GPU per-user cap was fully committed when the CPU run was made, so the
+same test was queued and ran later on `ggpu1-10`:
+
+```
+node=ggpu1-10   NVIDIA L40S, 8.9, 595.71.05
+accelerator: CUDA -- NVIDIA L40S (sm_89), torch 2.7.1+cu126 cuda 12.6
+num_residues 60,  n_chainbreaks 0,  clashes 0/0,  Rg 9.84 A
+max_ca_deviation 0.049 A,  CA-CA spacing 3.768 - 3.849 A
+num_residues 120, ligand clashes 0 (min 3.25 A), insertion_rmsd 0.747 A
+MOV C25 -- nearest SG  1.770 A  (CYS A16)
+ok: both designs ran on CUDA (no accelerator fallback in either log)
+```
+
+**1 m 50 s against 8 m 42 s on 16 CPU cores**, and the last line is the one the
+GPU run adds: stage 1 saw a CUDA device, so the test then required that neither
+design fell back, and neither did. The covalent bond comes out at 1.770 Å on
+both accelerators, which is the answer to the only question the CPU run left
+open — whether the CUDA kernels in this torch build produce the same designs.
+
+Stage 1 decides the accelerator, prints it, and names it again in the final `ok`
+line precisely so that these two runs can be told apart in a log six months from
+now.
 
 ### What was actually blocking this, and it was not the science
 

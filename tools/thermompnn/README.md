@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **built** 2026-09-26 — image built and published; `test.sh` needs a GPU node and is **queued**. `verified` when it passes |
+| Status | **verified** 2026-09-27 on `ggpu1-10` (NVIDIA L40S) — `test.sh` reproduced upstream's own shipped 2OCJ reference prediction **exactly**: pearson r = 1.000000 over 3880 mutations, mean difference 0.0000 kcal/mol, in 23 s |
 | Image | `thermompnn_1.sif` from [`thermompnn_1.def`](thermompnn_1.def); 3.4 GB on a `pytorch/pytorch:2.14.0-cuda13.2-cudnn9-runtime` base |
 | GPU | yes. `GPU_MAX_CC` deliberately **empty** — the build asserts all three of our GPU models are covered |
 | Weights | **in upstream's git repo**, baked into the image. Nothing on the share, nothing to fetch |
@@ -93,8 +93,40 @@ first, and the first one is the expensive one.
 
 ## Provenance
 
-**Never run.** `STATUS=planned`; the image is not built. Everything below is
-what the recipe and test will establish.
+### Verified 2026-09-27: an exact match to upstream's own numbers
+
+`chpc-tool test thermompnn` PASSED on `ggpu1-10`, an NVIDIA L40S, in 23 s:
+
+```
+torch 2.14.0+cu132 cuda 13.2 on NVIDIA L40S (sm_89)
+arch flags sm_75 sm_80 sm_86 sm_90 sm_100 sm_120
+pearson r vs upstream reference : 1.000000
+mean |difference|               : 0.0000 kcal/mol
+mean ddG_pred all substitutions : +1.0300
+mean ddG_pred X->Pro            : +1.7240
+I159D (buried I->D)             : +4.7594
+A63I  (small->large hydrophobic): -1.8489
+spread                          : 6.6084 kcal/mol
+```
+
+**r = 1.000000 and a mean absolute difference of zero.** The test's threshold is
+r > 0.99, and it is set there deliberately: this image ignores upstream's pins
+and runs torch 2.14 on CUDA 13.2 instead of their torch 2.5.1 on CUDA 12.1,
+which was expected to reorder floating-point reductions and move the last few
+digits. It did not move them at all. Every one of the 3880 predictions matches
+the CSV the model's authors shipped.
+
+`arch flags` confirms what the build-time check argued: there is no `sm_89` in
+the list, and `sm_86` covers the L40S by intra-major forward compatibility. The
+kernels ran, because the prediction came out.
+
+The sign convention is asserted rather than trusted, and it held: substitutions
+to proline average +1.72 against +1.03 overall, so **positive ddG_pred is
+DESTABILISING** in this image's output. Get that backwards in a consensus with
+FoldX and Rosetta and the three votes cancel instead of agreeing.
+
+Everything below was written before the image existed, as the argument for
+building it the way it is built. The verification above is what settled it.
 
 ### The build ignores upstream's pins, on purpose
 

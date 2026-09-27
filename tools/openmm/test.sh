@@ -9,6 +9,11 @@
 # at all. Everything CUDA is therefore owed here, and an escape hatch would be
 # used at 6pm and then quoted back as a green test.
 #
+# The plugin-failure list is read first, but it is PARTITIONED rather than
+# required to be empty: conda-forge ships AMD ROCm plugins that cannot load on
+# an NVIDIA node and must not be counted against the image. See the comment at
+# that assertion.
+#
 # WHY AN IMPORT PROVES NOTHING. openmm/__init__.py calls
 # Platform.loadPluginsFromDirectory and NEVER RAISES when a plugin fails to
 # load; the errors are only retrievable through
@@ -31,13 +36,27 @@ print("openmm", mm.__version__)
 # 1. Plugin load failures, first. This is the diagnostic the import swallowed,
 #    and reading it before anything else means a broken CUDA stack reports the
 #    REASON rather than just its consequence.
-fails = mm.Platform.getPluginLoadFailures()
-for f in fails:
+#
+#    BUT NOT ALL OF THEM ARE FAILURES. conda-forge's openmm ships the AMD ROCm
+#    plugins alongside the CUDA ones -- libOpenMMHIP.so, libOpenMMRPMDHIP.so,
+#    libOpenMMDrudeHIP.so, libOpenMMAmoebaHIP.so -- and on an NVIDIA node every
+#    one of them fails on libhiprtc.so.6, because ROCm is not installed and
+#    should not be. Measured on ggpu1-10 (L40S) 2026-09-27: exactly those four,
+#    no others. An earlier version of this test asserted `not fails` and so
+#    FAILED on a healthy image, which is the one outcome this registry treats as
+#    worse than a missing row (../README.md). Partition them instead, and let
+#    anything that is not HIP be fatal.
+fails = list(mm.Platform.getPluginLoadFailures())
+hip = [f for f in fails if "HIP" in f or "hiprtc" in f or "rocm" in f.lower()]
+other = [f for f in fails if f not in hip]
+for f in hip:
+    print("ignored (AMD ROCm plugin on an NVIDIA node):", f.split(":")[0])
+for f in other:
     print("plugin load failure:", f, file=sys.stderr)
-assert not fails, (
-    "OpenMM failed to load %d plugin(s) -- see above. This is what an import "
-    "hides: the module is fine and the CUDA platform is gone." % len(fails))
-print("no plugin load failures")
+assert not other, (
+    "OpenMM failed to load %d non-HIP plugin(s) -- see above. This is what an "
+    "import hides: the module is fine and the CUDA platform is gone." % len(other))
+print("no plugin load failures outside the %d AMD HIP plugins" % len(hip))
 
 # 2. The platform must be REGISTERED. Listing the names is the check that
 #    corresponds to the run-time error people actually hit,
