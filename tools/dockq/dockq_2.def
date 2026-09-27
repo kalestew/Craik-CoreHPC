@@ -4,23 +4,40 @@ From: python:3.12-slim
 # DockQ v2 -- quality measure for predicted multimers, nucleic acids and
 # small-molecule complexes.
 #
-# NOT BUILT. This recipe has never been run; STATUS in tool.conf is `planned`.
-#
 # CPU-only and small. No CUDA base, no --nv, no weights: DockQ is arithmetic
 # over two structure files, and every other choice here follows from that.
-# python:3.12-slim rather than a CUDA image keeps it around 200 MB instead of
-# several GB, which matters because this is the one tool in the covalent family
+# python:3.12-slim rather than a CUDA image keeps it under a GB instead of
+# several, which matters because this is the one tool in the covalent family
 # that will be invoked thousands of times per campaign rather than dozens.
 #
-# The C-compiler trap DOES NOT APPLY, and the reason is worth stating rather
-# than leaving to inference. It bites tools whose GPU kernels are JIT-compiled
-# at first use -- boltz's cuequivariance/Triton kernels, DeepSpeed's op
-# builder. DockQ has no GPU kernels at all and no JIT path that was found, so
-# no compiler is installed. `%post` checks what it got anyway and prints it, so
-# that if a future DockQ grows a numba or Cython fast path, the build log says
-# so instead of a job finding out. If that day comes, the fix is the same as
-# boltz's: a compiler in the image, or NUMBA_CACHE_DIR out of the read-only
-# squashfs.
+# A C COMPILER IS REQUIRED, AND THE FIRST VERSION OF THIS RECIPE ARGUED AT
+# LENGTH THAT IT WAS NOT. That argument was about the wrong compiler: it
+# reasoned about JIT kernels compiled at first USE (boltz's cuequivariance and
+# Triton, DeepSpeed's op builder) and correctly concluded DockQ has none. DockQ
+# needs gcc at INSTALL time, which is a different question nobody asked. The
+# package ships src/DockQ/operations.pyx plus its generated operations.c and
+# builds them as a Cython extension, so a pip install on a slim base dies in
+# build_ext with
+#     error: [Errno 2] No such file or directory: 'gcc'
+# after several minutes of apparently healthy output (measured here
+# 2026-09-26). The lesson generalises past this entry: "does it need a
+# compiler" has to be asked of the wheel, not only of the runtime, and the
+# cheap way to ask is to look for a .pyx, a .c or an ext_modules in the
+# sdist before reasoning about it.
+#
+# The fallback makes this worse, not better. DockQ ships operations_nocy.py, a
+# pure-Python implementation, and imports it when the extension is missing. So
+# a compiler-less image would have installed, imported, answered --help and
+# scored correctly -- just far slower, silently, on the tool this registry
+# expects to run thousands of times. %post asserts the COMPILED module is the
+# one that loaded, because the fallback is exactly the kind of wrong answer
+# that passes every naive check.
+#
+# gcc stays in the finished image rather than being purged after the build.
+# It costs a few hundred MB against a 5 TB share, and it is the difference
+# between a future DockQ growing a numba or Cython fast path and working, and
+# it failing inside a read-only squashfs for reasons the job log will not
+# explain.
 #
 # Build:  chpc-tool build dockq          (login node only; /usr/bin/apptainer
 #                                         1.5.2, --fakeroot UNAVAILABLE, and
@@ -31,7 +48,7 @@ From: python:3.12-slim
     Tool         dockq
     Version      2
     Upstream     https://github.com/bjornwallner/DockQ
-    UpstreamRef  DockQ (PyPI) -- pin the exact version at build time
+    UpstreamRef  DockQ (PyPI), exact version recorded in README.md at build time
     Licence      MIT
     Base         python:3.12-slim
     Citation     Mirabello and Wallner, Bioinformatics 2024, 10.1093/bioinformatics/btae586
@@ -41,32 +58,38 @@ From: python:3.12-slim
     set -eux
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
-    apt-get install -y --no-install-recommends ca-certificates
+    # build-essential, not just gcc: the Cython extension needs the
+    # toolchain's libc headers as well as the compiler itself.
+    apt-get install -y --no-install-recommends ca-certificates build-essential
     rm -rf /var/lib/apt/lists/*
 
     pip install --no-cache-dir --upgrade DockQ
 
-    python - <<'PY'
+    python - <<'CHECK'
 import sys
 assert sys.version_info[:2] >= (3, 10), sys.version
 print("python", sys.version.split()[0])
 
-import DockQ
-print("DockQ", getattr(DockQ, "__version__", "?"))
+from importlib.metadata import version
+print("DockQ", version("DockQ"))
 
-# Report the JIT situation rather than assume it. Today DockQ is numpy and
-# Biopython; if a version grows a numba fast path, a .sif is a read-only
-# squashfs and numba refuses at IMPORT time inside one unless NUMBA_CACHE_DIR
-# points somewhere writable -- which is how boltz's image failed four seconds
-# in, before any input. Printing it costs nothing and turns a future surprise
-# into a line in a build log.
+# THE ASSERTION THIS RECIPE EXISTS FOR. DockQ falls back to a pure-Python
+# operations_nocy when its Cython extension is absent, so "it imports" and
+# "it scores correctly" are both true of an image that is quietly several
+# times slower. Prove the compiled extension is the module that loaded.
+import DockQ.operations as ops
+assert not ops.__file__.endswith(".py"), (
+    "DockQ.operations loaded from %s -- that is the pure-Python fallback, "
+    "so the Cython extension did not build. Check gcc is installed." % ops.__file__)
+print("operations", ops.__file__.rsplit("/", 1)[-1], "(compiled extension)")
+
 import importlib.util
-for mod in ("numba", "cython", "triton"):
-    print("%-8s %s" % (mod, "present -- see the comment in %post" if importlib.util.find_spec(mod) else "absent"))
-for mod in ("numpy", "Bio"):
-    spec = importlib.util.find_spec(mod)
-    print("%-8s %s" % (mod, "present" if spec else "ABSENT"))
-PY
+for mod in ("numba", "triton"):
+    print("%-8s %s" % (mod, "present -- NUMBA_CACHE_DIR matters, see %environment"
+                       if importlib.util.find_spec(mod) else "absent"))
+for mod in ("numpy", "Bio", "Cython"):
+    print("%-8s %s" % (mod, "present" if importlib.util.find_spec(mod) else "ABSENT"))
+CHECK
     command -v DockQ
 
 %environment
@@ -83,7 +106,9 @@ PY
     set -eu
     # Against the BUILT, read-only image -- %post runs on a writable overlay,
     # so an import that only fails on squashfs cannot be caught there (doc 07).
-    python -c "import DockQ; print('DockQ imports')"
+    # %post ran on a writable overlay; this runs on the finished read-only
+    # squashfs, which is where an import can fail for reasons %post cannot see.
+    python -c "import DockQ.operations as o; assert not o.__file__.endswith('.py'), o.__file__; print('compiled operations ok')"
     DockQ --help > /dev/null
 
 %runscript
