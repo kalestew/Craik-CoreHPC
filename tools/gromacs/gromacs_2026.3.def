@@ -1,0 +1,168 @@
+Bootstrap: docker
+From: nvidia/cuda:13.2.1-devel-ubuntu24.04
+
+# GROMACS 2026.3 -- molecular dynamics, compiled from source with CUDA.
+#
+# THE MODULE CHECK IS DONE: there is no gromacs module on this cluster.
+# The entry's note said to look in the Sali and CBI collections before building
+# anything and to switch to KIND=module if a GPU-enabled gromacs was already
+# there. Checked 2026-09-26 with `module -t spider` and by loading CBI, RAD,
+# Sali and nvidia-hpc and searching each: no gromacs, no amber, no openmm
+# anywhere. So the image is owed.
+#
+# BUILT FROM SOURCE BECAUSE BOTH OFFICIAL CONTAINERS ARE TOO OLD TO RUN HERE.
+# NVIDIA's NGC image `nvcr.io/hpc/gromacs` stops at 2023.2 (pushed 2023-08-18)
+# and its own page lists support for Pascal, Volta, Ampere and Hopper -- no Ada,
+# so not the L40S, and no Blackwell. Docker Hub's `gromacs/gromacs` stops at
+# 2022.2 on CUDA 11.6, which cannot target sm_120 at all. There is no
+# GROMACS-project-maintained end-user container. A three-year-old image with no
+# kernels for two of our three GPU models is not a shortcut.
+#
+# CUDA 13 IS THE KNOWN RISK IN THIS RECIPE. Support for compiling with the CUDA
+# 13 toolkit landed in GROMACS 2025.3, so 2026.3 accepts it -- but upstream's CI
+# covers CUDA 12.1, 12.5.1 and 12.6 only, so this combination is supported and
+# untested by them. The base is pinned to 13.2.1 to match the node driver
+# exactly, because that is the version whose PTX the driver can certainly load.
+#
+# Build:  chpc-tool build gromacs        (login node; this is a LONG compile)
+
+%labels
+    Tool         gromacs
+    Version      2026.3
+    Upstream     https://www.gromacs.org/
+    UpstreamRef  gromacs-2026.3.tar.gz, md5 7987af0c6ab939ab6e639f32d0dd260f
+    Licence      LGPL-2.1
+    Base         nvidia/cuda:13.2.1-devel-ubuntu24.04
+    Citation     Abraham et al., SoftwareX 2015; and cite the version used
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends \
+        build-essential cmake ca-certificates wget \
+        libhwloc-dev libblas-dev liblapack-dev python3
+    rm -rf /var/lib/apt/lists/*
+
+    cd /tmp
+    wget -q https://ftp.gromacs.org/gromacs/gromacs-2026.3.tar.gz
+    # Upstream publishes the md5 beside the tarball. A truncated download is
+    # still a file and cmake would configure a partial tree happily.
+    echo "7987af0c6ab939ab6e639f32d0dd260f  gromacs-2026.3.tar.gz" > gromacs.md5
+    md5sum -c gromacs.md5
+    tar xzf gromacs-2026.3.tar.gz
+    cd gromacs-2026.3
+    mkdir build && cd build
+
+    # --- GMX_SIMD IS SET EXPLICITLY, AND THAT MATTERS ON A CLUSTER -----------
+    # cmake AUTO-DETECTS SIMD from the machine doing the configuring, and the
+    # machine doing the configuring is the login node, because it is the only
+    # node with internet. On a cluster whose login and compute nodes differ,
+    # auto-detection produces a binary tuned for -- or worse, only legal on --
+    # the wrong CPU, and the failure is SIGILL in a job rather than an error at
+    # build time.
+    #
+    # Measured here 2026-09-26: the login node is an AMD EPYC-Genoa and the GPU
+    # nodes are AMD EPYC 9354P (also Genoa), and both report avx, avx2, fma,
+    # avx512f, avx512bw and avx512vl. So auto-detection would in fact have been
+    # safe today. It is still set explicitly, because "the login node happens to
+    # match the compute nodes" is a property of this cluster on this date and
+    # not something a recipe should silently depend on.
+    #
+    # AVX2_256 rather than AVX_512: it is GROMACS's long-standing
+    # recommendation for AMD Zen, and it is correct on every node here. Whether
+    # AVX_512 is faster on Zen 4 specifically is worth benchmarking against
+    # this image rather than assuming -- see README.md.
+    #
+    # --- CMAKE_CUDA_ARCHITECTURES covers all three of our GPU models ---------
+    # 89 = L40S (Ada), 90 = H100 NVL (Hopper), 120 = RTX PRO 6000 (Blackwell).
+    # Semicolon-delimited two- or three-digit suffixes, per the install guide.
+    # Leaving this unset lets cmake pick from the build host, which has no GPU
+    # at all.
+    cmake .. \
+        -DCMAKE_INSTALL_PREFIX=/opt/gromacs \
+        -DGMX_GPU=CUDA \
+        -DCMAKE_CUDA_ARCHITECTURES="89;90;120" \
+        -DCUDAToolkit_ROOT=/usr/local/cuda \
+        -DGMX_SIMD=AVX2_256 \
+        -DGMX_BUILD_OWN_FFTW=ON \
+        -DGMX_MPI=OFF \
+        -DGMX_OPENMP=ON \
+        -DGMX_DOUBLE=OFF \
+        -DBUILD_SHARED_LIBS=ON \
+        -DCMAKE_BUILD_TYPE=Release
+
+    make -j"$(nproc)"
+    make install
+    cd /tmp && rm -rf gromacs-2026.3 gromacs-2026.3.tar.gz gromacs.md5
+
+    . /opt/gromacs/bin/GMXRC
+
+    # --- assert what the build actually produced -----------------------------
+    # `gmx --version` prints the configuration, and it is the only place the
+    # three decisions above are visible afterwards. A CPU-only GROMACS runs
+    # every simulation correctly and slowly, so "GPU support: CUDA" is the line
+    # that distinguishes this image from a useless one.
+    gmx --version | tee /opt/gromacs/.build-config
+    grep -q "GPU support:.*CUDA" /opt/gromacs/.build-config \
+        || { echo "FATAL: built without CUDA support" >&2; exit 1; }
+    grep -qi "SIMD instructions:.*AVX2_256" /opt/gromacs/.build-config \
+        || { echo "FATAL: SIMD is not AVX2_256 -- cmake auto-detected instead" >&2; exit 1; }
+    # The architecture list, so the log records which GPUs this image can drive.
+    grep -i "CUDA compiler flags\|CUDA driver\|CUDA runtime" /opt/gromacs/.build-config || true
+
+    # And the force field / topology data, which `gmx solvate` and `gmx grompp`
+    # need and which a botched `make install` can leave behind.
+    test -s /opt/gromacs/share/gromacs/top/spc216.gro \
+        || { echo "FATAL: no spc216.gro -- share/gromacs/top did not install" >&2; exit 1; }
+    test -d /opt/gromacs/share/gromacs/top/oplsaa.ff \
+        || { echo "FATAL: no oplsaa.ff force field directory" >&2; exit 1; }
+    chmod -R a+rX /opt/gromacs
+
+%environment
+    export LC_ALL=C.UTF-8
+    export GMXPREFIX=/opt/gromacs
+    export GMXBIN=/opt/gromacs/bin
+    export GMXDATA=/opt/gromacs/share/gromacs
+    export GMXLDLIB=/opt/gromacs/lib
+    export PATH=/opt/gromacs/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/gromacs/lib:${LD_LIBRARY_PATH:-}
+    # mdrun takes every core it can see, which on a shared node is the whole
+    # machine rather than the cores Slurm allocated. Honour the allocation.
+    export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-${OMP_NUM_THREADS:-1}}"
+
+%test
+    set -eu
+    # On the finished read-only squashfs, and WITHOUT asserting that a GPU is
+    # usable: %test runs wherever the build ran, and the login node has no
+    # driver. The GPU assertions are in tools/gromacs/test.sh, on a GPU node.
+    export PATH=/opt/gromacs/bin:$PATH
+    export LD_LIBRARY_PATH=/opt/gromacs/lib:${LD_LIBRARY_PATH:-}
+    gmx --version | grep -q "GPU support:.*CUDA"
+    test -s /opt/gromacs/share/gromacs/top/spc216.gro
+    echo "gmx responds on the squashfs, with CUDA compiled in"
+
+%runscript
+    exec gmx "$@"
+
+%help
+    GROMACS 2026.3, compiled with CUDA 13.2 for sm_89, sm_90 and sm_120, so it
+    runs on every GPU model in the `gpu` partition.
+
+      chpc-tool exec gromacs -- gmx --version
+      chpc-tool exec gromacs -- gmx grompp -f md.mdp -c conf.gro -p topol.top -o md.tpr
+      chpc-tool exec gromacs -- gmx mdrun -deffnm md -nb gpu -pme gpu -bonded gpu
+
+    PASS -nb gpu TO MAKE OFFLOAD MANDATORY. Without it, mdrun decides for
+    itself and falls back to the CPU silently -- a correct simulation at a
+    fraction of the speed, reporting nothing wrong. With it, mdrun ABORTS if it
+    cannot offload, which is what you want in a job script.
+
+    Read md.log to confirm. The lines to look for:
+      1 GPU selected for this run.
+      PP tasks will do ... short-ranged ... interactions on the GPU
+      PME tasks will do all aspects on the GPU
+
+    Built with GMX_SIMD=AVX2_256 explicitly rather than by auto-detection,
+    because cmake detects the SIMD of whichever node configured the build.

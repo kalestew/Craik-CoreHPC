@@ -79,8 +79,14 @@ root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(openmm.__
 lib = os.path.join(root, "lib")
 for stem in ("libcufft", "libnvrtc"):
     hits = glob.glob(os.path.join(lib, stem + "*.so*"))
-    assert hits, ("missing %s under %s -- the CUDA plugin cannot load without it"
-                  % (stem, lib))
+    # NOTE: the format operator stays at the END of a line, never at the start
+    # of a continuation line. Apptainer parses a line whose first non-whitespace
+    # character is `%` as a SECTION HEADER, even when it is indented inside a
+    # heredoc, and the build dies before it starts with
+    #     invalid section(s) specified:
+    # naming nothing at all, because the section name it found was empty.
+    assert hits, ("missing %s under %s -- the CUDA plugin cannot load "
+                  "without it" % (stem, lib))
     print("%-10s %s" % (stem, os.path.basename(sorted(hits)[0])))
 # The Reference and CPU platforms need no driver, so they MUST be here even on
 # a driverless build node. If they are not, the install is broken in a way that
