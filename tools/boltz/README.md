@@ -1,5 +1,205 @@
 # Boltz-2
 
+<a id="run-it"></a>
+
+## Run it: P1B7 bound to the sotorasib-modified peptide–MHC
+
+This walkthrough uses the complete deposited protein sequences from
+[PDB 8UDR](https://www.rcsb.org/structure/8UDR): HLA-A*03:01 (`A`, 275
+residues), beta-2-microglobulin (`B`, 99), KRAS peptide `VVVGACGVGK` (`C`,
+10), P1B7 Fab heavy chain (`D`, 226), and Fab light chain (`E`, 213), plus
+the sotorasib-derived ligand (`F`). You do not need to find or type these
+sequences: the [example bundle](../../examples/p1b7/) contains them.
+
+The first run uses single sequences and no structural template. A second,
+optional run supplies 8UDR as a template to demonstrate reconstruction of a
+known complex. These teach input preparation and cluster operation; the
+template run is **not an independent prediction of P1B7's binding pose**.
+
+### From your laptop: transfer and submit with Globus
+
+After [Globus setup](../../docs/02-storage-and-data.md#laptop-to-cluster),
+from your local CoreHPC checkout:
+
+```bash
+source ./env.sh &&
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7" &&
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- boltz
+```
+
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch -- boltz
+```
+
+The first block previews; the second transfers the input folder directly
+from your project, waits for Globus success, then submits one GPU job using
+the shared lab installation. Add `template` after `boltz` for the optional
+template mode described below. Follow the
+[shared laptop walkthrough](../../docs/11-p1b7-walkthrough.md#submit-from-your-laptop-with-globus)
+for receipts, logs, and result retrieval. The numbered steps below are the
+alternative manual cluster-shell route; do not run both for the same lesson.
+
+### 1. Make your own working copy on the login node
+
+First complete the [shared P1B7 setup](../../docs/11-p1b7-walkthrough.md),
+including SSH access and the checkout at `~/corehpc`. Open a terminal on your
+computer and run `ssh chpc`. Paste the following block into that SSH session:
+
+```bash
+export COREHPC="$HOME/corehpc" &&
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-boltz-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$(dirname "$WORK")" &&
+cp -R "$COREHPC/examples/p1b7" "$WORK" &&
+cd "$WORK" &&
+printf '%s\n' "$WORK" > "$HOME/p1b7-last-workdir.txt" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+pwd &&
+python3 check_inputs.py &&
+chpc-tool doctor boltz &&
+bash run.sh boltz --dry-run
+```
+
+The `&&` at each line ending stops the block if a command fails. The block
+also saves your working-folder path for reconnecting later, and records the
+CoreHPC Git revision in `corehpc-commit.txt`.
+
+`WORK` is a shell variable containing your run folder. `cp -R` copies the
+example and its subfolders; it leaves the shared installation alone. `pwd`
+prints your current folder. The checker validates the bundled sequences and
+bond addresses; `doctor` checks the installed tool, and `--dry-run` shows the
+prediction command without starting it. Stop and resolve any failed check
+before requesting a GPU. A missing shared image or weights needs the lab
+maintainer; a student does not need to build the container.
+
+### 2. Read the input and understand the covalent bond
+
+Still on the login node:
+
+```bash
+cat boltz.yaml
+```
+
+The `sequences` list has five `protein` entries and a `ligand` entry with
+`ccd: MOV`. CCD is the chemical-component dictionary; `MOV` identifies the
+bound sotorasib component. The bond block connects:
+
+```yaml
+constraints:
+  - bond:
+      atom1: [C, 6, SG]
+      atom2: [F, 1, C25]
+```
+
+Read this as “peptide chain C, residue 6, sulfur SG, to ligand chain F,
+residue 1, carbon C25.” The peptide starts at KRAS residue 7, so its sixth
+residue is biological **Cys12**. Use **6**, not 12, in this input. `C25` is
+the MOV dictionary atom name; it must not be copied into a SMILES-based
+input for another predictor. The deposited ligand shares author chain D
+with the antibody, but its mmCIF **label chain is F**. The example uses this
+unambiguous A–F convention.
+
+Every `msa: empty` explicitly requests single-sequence mode. An MSA
+(multiple sequence alignment) supplies evolutionary information from related
+sequences. It can improve prediction quality, but the first run deliberately
+does not need an online MSA search. Do not add `--use_msa_server` inside a
+GPU job: compute nodes have no internet access. For an MSA-supported run,
+prepare the alignments before submission and replace the `msa` fields with
+their staged file paths; see [MSAs in the shared walkthrough](../../docs/11-p1b7-walkthrough.md).
+
+### 3. Request a GPU, then run the example
+
+Paste this on the login node. It may wait for an available GPU; that is normal.
+
+```bash
+srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 64G -t 04:00:00 --pty bash -l
+```
+
+After the new prompt appears, you are in a shell on the allocated compute
+node. Paste:
+
+```bash
+source "$COREHPC/env.sh" &&
+cd "$WORK" &&
+hostname &&
+nvidia-smi --query-gpu=name --format=csv,noheader &&
+bash run.sh boltz
+```
+
+The runner sets the weight-cache path, enables Boltz's geometry potentials,
+uses `--no_kernels`, requests five samples with seed 1, and writes PDB
+structures. It processes one sample at a time to limit GPU memory, with
+three recycling steps and 200 diffusion steps. All
+inputs are local; no MSA or template server is contacted. It also checks the
+predicted covalent geometry. A failed geometry check means inspect that
+sample before using it, even if the predictor itself finished successfully.
+
+The four-hour limit and 64 GB host-memory request are starting allocations,
+not measured requirements for this new full-Fab tutorial. The older
+658-token benchmark below used a smaller Fv assembly and different MSA
+inputs; its runtime and accuracy do not qualify this example.
+
+### 4. Find the structures and confidence files
+
+In the same compute-node shell, after the command finishes:
+
+```bash
+find out/boltz-none -type f -name '*_model_*.pdb'
+find out/boltz-none -type f -name 'confidence_*.json'
+find logs -type f -name 'boltz-none-*.log'
+python3 check_output.py boltz out/boltz-none
+```
+
+Boltz sorts samples by confidence: `_model_0.pdb` is its highest-ranked
+sample. That ranking does not establish correct chemistry or the correct
+antibody docking pose. Keep the covalent-check results alongside the
+confidence files. The last command repeats the geometry check for every
+sample; it should report `PASS` for each structure you plan to use. The
+runner refuses to reuse an existing output folder;
+for a repeat, make a fresh working copy with step 1.
+
+### 5. Try the reference-template reconstruction
+
+While the GPU allocation is still active:
+
+```bash
+bash run.sh boltz template --dry-run &&
+bash run.sh boltz template
+find out/boltz-template -type f -name '*_model_*.pdb'
+```
+
+This uses the bundled 8UDR coordinates to provide a structural template.
+The five protein chains must map A→A, B→B, C→C, D→D and E→E; the covalent
+ligand is still specified independently in the input. The runner prepares
+the template input for you. Preserve which mode produced each result:
+agreement with 8UDR after providing 8UDR measures reconstruction, and must
+not be reported as evidence of an untemplated prediction.
+
+For your own targets, the [upstream YAML schema](https://github.com/jwohlwend/boltz/blob/main/docs/prediction.md)
+describes explicit `chain_id`/`template_id` mappings. Do not assume chain
+letters mean the same thing in another PDB entry.
+
+### 6. Finish, or submit a job you can leave running
+
+Type `exit` once to release this interactive GPU and return to the login
+node. For a run that should continue after you disconnect, use a fresh work
+folder and submit from the login node instead of step 3:
+
+```bash
+cd "$WORK" &&
+mkdir -p logs &&
+JOB_ID=$(sbatch --parsable p1b7.sbatch boltz) &&
+printf '%s\n' "$JOB_ID" > last-job-id.txt &&
+printf 'Submitted job %s\n' "$JOB_ID"
+```
+
+Do not submit this into a folder whose `out/boltz-none` already exists.
+See the [shared walkthrough](../../docs/11-p1b7-walkthrough.md) for exact
+queue, log, failure-recovery, and result-copy commands. Scratch is temporary;
+archive the input, log, checks and output together.
+
+## Installed version and previous verification
+
 | | |
 |---|---|
 | Status | verified 2026-09-26: `boltz_2_gcc.sif`, rebuilt with a C compiler on 2026-09-25, passed `chpc-tool test boltz` with the kernels on, both cases, on an L40S (job 1997376, `ggpu1-08`, 2026-09-25) and on an RTX PRO 6000 Blackwell (job 1997377, `ggpu1-16`, 2026-09-26; a second submission, job 1997947, agreed on the same node); the speedup was measured (job 2001087: 225 s with the kernels against 230 s without, same node, same hour, 658 tokens). Its predecessor `boltz_2.sif` was verified 2026-09-19 on an H100 NVL (job 1899084) and an RTX PRO 6000 (job 1899088), kernels off, and qualified at 658 tokens on an L40S (job 1986189, `--no_kernels`). What each run proved: Provenance |
@@ -11,7 +211,7 @@
 | Base | `python:3.12-slim` (torch 2.14.0+cu130) |
 | Built | `boltz_2` 2026-09-19, kanderson6, CoreHPC login node (747 s); `boltz_2_gcc` 2026-09-25, published to the share the same day |
 
-## Run it
+## Command reference: your own inputs
 
 ```bash
 srun -p gpu --gres=gpu:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l

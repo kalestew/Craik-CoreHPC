@@ -7,3 +7,4 @@
 lab/bin/*   text eol=lf
 *.sif       binary
 *.tar       binary
+*.cif.gz    binary

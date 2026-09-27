@@ -1,0 +1,5 @@
+/out/
+/logs/
+/prepared/
+/slurm-*.out
+__pycache__/

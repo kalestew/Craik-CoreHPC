@@ -7,6 +7,14 @@ a bond in a different vocabulary, and every one of them returns a plausible
 structure when the address is wrong. This page tells that story once; the
 per-tool READMEs point here.
 
+For a first hands-on example, use the
+[P1B7 / 8UDR walkthrough](../docs/11-p1b7-walkthrough.md). Its
+[committed input bundle](../examples/p1b7/README.md) includes all five protein
+chains, the bound-form sotorasib ligand, predictor-specific bond declarations,
+and a checker for that complete complex. The one-peptide checker below is
+for the registry's small self-tests; it cannot be applied unchanged to P1B7,
+which has many cysteines across several chains.
+
 ## Why geometry is the only check
 
 HA-ADAPT's entire Chai-1 corpus, 1,726 results, is quarantined. The free drug

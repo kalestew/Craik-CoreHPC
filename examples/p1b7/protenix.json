@@ -1,0 +1,73 @@
+[
+  {
+    "name": "p1b7_8udr_full_fab",
+    "sequences": [
+      {
+        "proteinChain": {
+          "sequence": "GSHSMRYFFTSVSRPGRGEPRFIAVGYVDDTQFVRFDSDAASQRMEPRAPWIEQEGPEYWDQETRNVKAQSQTDRVDLGTLRGYYNQSEAGSHTIQIMYGCDVGSDGRFLRGYRQDAYDGKDYIALNEDLRSWTAADMAAQITKRKWEAAHEAEQLRAYLDGTCVEWLRRYLENGKETLQRTDPPKTHMTHHPISDHEATLRCWALGFYPAEITLTWQRDGEDQTQDTELVETRPAGDGTFQKWAAVVVPSGEEQRYTCHVQHEGLPKPLTLRWE",
+          "count": 1,
+          "id": [
+            "A"
+          ]
+        }
+      },
+      {
+        "proteinChain": {
+          "sequence": "IQRTPKIQVYSRHPAENGKSNFLNCYVSGFHPSDIEVDLLKNGERIEKVEHSDLSFSKDWSFYLLYYTEFTPTEKDEYACRVNHVTLSQPKIVKWDRDM",
+          "count": 1,
+          "id": [
+            "B"
+          ]
+        }
+      },
+      {
+        "proteinChain": {
+          "sequence": "VVVGACGVGK",
+          "count": 1,
+          "id": [
+            "C"
+          ]
+        }
+      },
+      {
+        "proteinChain": {
+          "sequence": "VQLQQSGPGLVKPSQTLSLTCAISGDSVSSNSVAWNWIRQSPSRGLEWLGRTYYRSKWYSDYAVSVKSRITINPDTSKNQFSLQLTSMTPEDTAVYYCAREGVTMGPGAFDIWGQGTMVTVSSASTKGPSVFPLAPSSKSTSGGTAALGCLVKDYFPEPVTVSWNSGALTSGVHTFPAVLQSSGLYSLSSVVTVPSSSLGTQTYICNVNHKPSNTKVDKKVEPKSC",
+          "count": 1,
+          "id": [
+            "D"
+          ]
+        }
+      },
+      {
+        "proteinChain": {
+          "sequence": "ALTQPPSVSGSPGQSVTISCTGSSSDVGHYNRVSWYQQSPGTAPKLMIYDVSNRPSGAFSRFSGSRSGNTASLTISGLQPEDEADYYCSSHRTGYTVEVFGTGTKVTVLGQPKAAPSVTLFPPSSEELQANKATLVCLISDFYPGAVTVAWKADSSPVKAGVETTTPSKQSNNKYAASSYLSLTPEQWKSHRSYSCQVTHEGSTVEKTVAPTE",
+          "count": 1,
+          "id": [
+            "E"
+          ]
+        }
+      },
+      {
+        "ligand": {
+          "ligand": "CCD_MOV",
+          "count": 1,
+          "id": [
+            "F"
+          ]
+        }
+      }
+    ],
+    "covalent_bonds": [
+      {
+        "entity1": 3,
+        "copy1": 1,
+        "position1": 6,
+        "atom1": "SG",
+        "entity2": 6,
+        "copy2": 1,
+        "position2": 1,
+        "atom2": "C25"
+      }
+    ]
+  }
+]

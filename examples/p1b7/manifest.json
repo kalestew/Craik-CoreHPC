@@ -1,0 +1,65 @@
+{
+  "name": "p1b7_8udr_full_fab",
+  "source": "https://www.rcsb.org/structure/8UDR",
+  "sequence_basis": "deposited full polymer sequences, biological assembly 1; missing coordinate residues retained",
+  "chains": [
+    {
+      "chain": "A",
+      "entity": 1,
+      "role": "HLA-A*03:01 heavy chain",
+      "sequence": "GSHSMRYFFTSVSRPGRGEPRFIAVGYVDDTQFVRFDSDAASQRMEPRAPWIEQEGPEYWDQETRNVKAQSQTDRVDLGTLRGYYNQSEAGSHTIQIMYGCDVGSDGRFLRGYRQDAYDGKDYIALNEDLRSWTAADMAAQITKRKWEAAHEAEQLRAYLDGTCVEWLRRYLENGKETLQRTDPPKTHMTHHPISDHEATLRCWALGFYPAEITLTWQRDGEDQTQDTELVETRPAGDGTFQKWAAVVVPSGEEQRYTCHVQHEGLPKPLTLRWE"
+    },
+    {
+      "chain": "B",
+      "entity": 2,
+      "role": "beta-2-microglobulin",
+      "sequence": "IQRTPKIQVYSRHPAENGKSNFLNCYVSGFHPSDIEVDLLKNGERIEKVEHSDLSFSKDWSFYLLYYTEFTPTEKDEYACRVNHVTLSQPKIVKWDRDM"
+    },
+    {
+      "chain": "C",
+      "entity": 3,
+      "role": "KRAS G12C peptide",
+      "sequence": "VVVGACGVGK"
+    },
+    {
+      "chain": "D",
+      "entity": 4,
+      "role": "P1B7 Fab heavy chain",
+      "sequence": "VQLQQSGPGLVKPSQTLSLTCAISGDSVSSNSVAWNWIRQSPSRGLEWLGRTYYRSKWYSDYAVSVKSRITINPDTSKNQFSLQLTSMTPEDTAVYYCAREGVTMGPGAFDIWGQGTMVTVSSASTKGPSVFPLAPSSKSTSGGTAALGCLVKDYFPEPVTVSWNSGALTSGVHTFPAVLQSSGLYSLSSVVTVPSSSLGTQTYICNVNHKPSNTKVDKKVEPKSC"
+    },
+    {
+      "chain": "E",
+      "entity": 5,
+      "role": "P1B7 Fab light chain",
+      "sequence": "ALTQPPSVSGSPGQSVTISCTGSSSDVGHYNRVSWYQQSPGTAPKLMIYDVSNRPSGAFSRFSGSRSGNTASLTISGLQPEDEADYYCSSHRTGYTVEVFGTGTKVTVLGQPKAAPSVTLFPPSSEELQANKATLVCLISDFYPGAVTVAWKADSSPVKAGVETTTPSKQSNNKYAASSYLSLTPEQWKSHRSYSCQVTHEGSTVEKTVAPTE"
+    }
+  ],
+  "ligand": {
+    "chain": "F",
+    "entity": 6,
+    "ccd": "MOV",
+    "smiles": "CCC(=O)N1CCN([C@@H](C)C1)C2=NC(=O)N(c3nc(c(F)cc23)c4c(O)cccc4F)c5c(C)ccnc5C(C)C",
+    "heavy_atoms": 41,
+    "ccd_attachment": "C25",
+    "chai1_attachment": "C1"
+  },
+  "bond": {
+    "chain": "C",
+    "residue": 6,
+    "author_residue": 12,
+    "atom": "SG",
+    "reference_distance_angstrom": 1.765
+  },
+  "references": {
+    "8UDR": {
+      "url": "https://files.rcsb.org/download/8UDR.cif.gz",
+      "sha256": "dbde919081cc02a479d360865d6809d8af4266c133aa6498b9a779a8ef9311a7",
+      "release_date": "2024-10-16"
+    },
+    "8VRA": {
+      "url": "https://files.rcsb.org/download/8VRA.cif.gz",
+      "sha256": "eb2e88d66f78aa59ff953130e418725e9aa4a776605525fa0f63928d9b0bb318",
+      "release_date": "2024-09-04"
+    }
+  }
+}

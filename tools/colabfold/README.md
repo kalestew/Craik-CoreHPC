@@ -12,6 +12,79 @@
 
 ## Run it
 
+### P1B7 protein-only comparison
+
+For your first **complete covalent P1B7 complex**, start with the
+[Boltz, Chai, or Protenix walkthrough](../../docs/11-p1b7-walkthrough.md).
+This installed ColabFold/AlphaFold2 workflow accepts protein sequences; it
+does not represent the sotorasib ligand or its peptide attachment. The
+included ColabFold input is therefore an explicit **protein-only control**,
+not an equivalent prediction of the haptenated complex.
+
+After the shared walkthrough has set up the checkout at `~/corehpc`, paste
+this **on the login node**:
+
+```bash
+export COREHPC="$HOME/corehpc" &&
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-colabfold-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$WORK" &&
+cp -R "$COREHPC/examples/p1b7/." "$WORK/" &&
+cd "$WORK" &&
+printf '%s\n' "$WORK" > "$HOME/p1b7-last-workdir.txt" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+python3 check_inputs.py &&
+cat colabfold-protein-only.fasta
+```
+
+The FASTA contains **one record** with the five full protein sequences
+separated by `:` in A/B/C/D/E order: HLA, beta-2-microglobulin, peptide,
+Fab heavy chain, Fab light chain. Five independent FASTA records would ask
+for five predictions, rather than this one complex. There is no chain F
+and no sotorasib in this control.
+
+**On the login node**, request a GPU shell:
+
+```bash
+srun --account=hpc_core -p gpu --gres=gpu:nvidia_l40s:1 \
+    -c 8 --mem=64G -t 04:00:00 --pty bash -l
+```
+
+**On the allocated compute node:**
+
+```bash
+source "$COREHPC/env.sh" &&
+cd "$WORK" &&
+chpc-tool doctor colabfold &&
+eval "$(chpc-tool export colabfold)" &&
+chpc-tool exec colabfold -- colabfold_batch \
+    --msa-mode single_sequence --model-type alphafold2_multimer_v3 \
+    --data "$COLABFOLD_DATA" colabfold-protein-only.fasta out/colabfold-protein-only
+```
+
+This uses the shared multimer weights and makes no online MSA query. It
+does not supply a structural template. The full 823-residue control has
+not been GPU-qualified here; the resource request is a starting point and
+the single-sequence output is for learning. The 31-residue verification in
+the header does not establish the accuracy or runtime of this complex.
+
+When the command finishes, inspect the outputs:
+
+```bash
+find out/colabfold-protein-only -type f -name '*.pdb'
+find out/colabfold-protein-only -type f -name '*.json'
+exit
+```
+
+`exit` releases the GPU shell and returns you to the login node. Follow
+[Save your results](../../docs/11-p1b7-walkthrough.md#save-your-results).
+Do not run the bundle's covalent output checker on this control: it correctly
+requires a ligand and bond that ColabFold was never given. The bundled
+`p1b7.sbatch` supports the three covalent tutorial tools; for ColabFold batch
+work, use `tool-gpu.sbatch` as described below.
+
+### General command reference
+
 ```bash
 srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
 mkdir -p /mnt/scratch/user/$USER/colabfold/run1 && cd "$_"   # in.fasta here; the same path is valid inside the container

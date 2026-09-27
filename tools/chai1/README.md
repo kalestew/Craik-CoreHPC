@@ -1,5 +1,215 @@
 # Chai-1
 
+<a id="run-it"></a>
+
+## Run it: the P1B7/8UDR complex
+
+This example folds the five protein chains of
+[PDB 8UDR](https://www.rcsb.org/structure/8UDR), including the complete
+deposited P1B7 Fab sequences, together with the covalently attached
+sotorasib-derived ligand. The [input bundle](../../examples/p1b7/) supplies
+the sequences, the ligand description, the bond restraint and reference
+coordinates. You do not need to assemble these files by hand.
+
+### From your laptop: transfer and submit with Globus
+
+After [Globus setup](../../docs/02-storage-and-data.md#laptop-to-cluster),
+from your local CoreHPC checkout:
+
+```bash
+source ./env.sh &&
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7" &&
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- chai1
+```
+
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch -- chai1
+```
+
+The first block previews; the second transfers the input folder directly
+from your project, waits for Globus success, then submits one GPU job using
+the shared lab installation. Add `template` after `chai1` for the optional
+template mode described below. Follow the
+[shared laptop walkthrough](../../docs/11-p1b7-walkthrough.md#submit-from-your-laptop-with-globus)
+for receipts, logs, and result retrieval. The numbered steps below are the
+alternative manual cluster-shell route; do not run both for the same lesson.
+
+### 1. Copy and check the example on the login node
+
+Complete the [shared setup](../../docs/11-p1b7-walkthrough.md) first; it
+creates a checkout at `~/corehpc` and explains `ssh chpc`. In that SSH
+session, on the login node, paste:
+
+```bash
+export COREHPC="$HOME/corehpc" &&
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-chai1-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$(dirname "$WORK")" &&
+cp -R "$COREHPC/examples/p1b7" "$WORK" &&
+cd "$WORK" &&
+printf '%s\n' "$WORK" > "$HOME/p1b7-last-workdir.txt" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+pwd &&
+python3 check_inputs.py &&
+chpc-tool doctor chai1 &&
+bash run.sh chai1 --dry-run
+```
+
+The `&&` at line endings stops the block on failure. It also saves the
+working-folder path for reconnecting and writes the CoreHPC Git revision
+to `corehpc-commit.txt` for your run record.
+
+`WORK` stores your personal run-folder path; `pwd` prints that folder.
+The input check should succeed, and `doctor` should report that Chai is
+available. The dry run prints the command without predicting anything.
+If a shared image or weight cache is missing, give the maintainer the
+message; reinstalling Chai in your home directory is unnecessary.
+
+### 2. Understand the two input files
+
+On the login node:
+
+```bash
+cat chai1.fasta
+cat chai1.restraints
+```
+
+The FASTA records are ordered as HLA heavy chain (275 residues),
+beta-2-microglobulin (99), KRAS peptide `VVVGACGVGK` (10), P1B7 Fab heavy
+chain (226), Fab light chain (213), and ligand. Chai assigns them chain
+letters **A, B, C, D, E, F in that order**. The names in FASTA headers are
+human-readable names; the restraint's chain letters refer to this order.
+If you reorder records, you must update the restraints too.
+
+A protein record begins `>protein|name=...`. The ligand record begins
+`>ligand|name=...` and its next line is a SMILES string: a description of
+the molecule's atoms and bonds. It describes the bound adduct used by this
+example. Do not replace it with a free-drug SMILES from a catalogue.
+
+The comma-delimited restraint connects **`C,C6@SG`** to **`F,@C1`**:
+peptide chain C, cysteine 6, sulfur SG, to ligand chain F, atom C1. That
+sixth peptide residue is KRAS Cys12 because this peptide begins at KRAS
+residue 7. Chai uses positions in the supplied sequence, so enter 6 here.
+
+The same warhead carbon is called **C25 in the MOV chemical dictionary**
+and **C1 for this exact Chai SMILES**. These names are not interchangeable.
+Changing the SMILES atom order can change Chai's atom names while preserving
+the molecule. The checker verifies the example's mapping, and the runner
+checks the predicted geometry afterwards. Chai generally appends an entity
+copy suffix in its output, so the output atom may be named `C1_1`.
+
+### 3. Allocate a compatible GPU and run
+
+Paste on the login node:
+
+```bash
+srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 64G -t 04:00:00 --pty bash -l
+```
+
+Wait for the new prompt. This starts a shell on a compute node; it may sit
+in the queue first. Then paste:
+
+```bash
+source "$COREHPC/env.sh" &&
+cd "$WORK" &&
+hostname &&
+nvidia-smi --query-gpu=name --format=csv,noheader &&
+bash run.sh chai1
+```
+
+The runner passes both the FASTA and the covalent-restraint file, uses five
+samples with seed 1, three trunk recycles and 200 diffusion timesteps, and
+checks the resulting covalent geometry. These controls set how many
+candidate structures Chai generates and how much refinement it performs;
+you can keep the supplied values for this first run.
+
+Use the named L40S GPU request as written. This installed Chai image cannot
+run on the cluster's Blackwell GPUs, which a generic `--gres=gpu:1` might
+assign. The 64 GB request is host memory, not GPU memory; these resources
+are a starting allocation for this new full-Fab tutorial, not a measured
+runtime or memory promise.
+
+The first run uses **single sequences**, with no multiple sequence
+alignments (MSAs) or template. Chai's ESM sequence embeddings remain on;
+they are not an MSA. Do not add `--use-msa-server` or
+`--use-templates-server` to a compute-node command: that node has no
+internet access. For research runs, stage MSAs in Chai's expected alignment
+format before submission and supply `--msa-directory`; see
+[the shared MSA instructions](../../docs/11-p1b7-walkthrough.md).
+
+### 4. Locate the results and distinguish sample number from rank
+
+When the command finishes, in the same shell:
+
+```bash
+find out/chai1-none -type f -name 'pred.model_idx_*.cif'
+find out/chai1-none -type f -name 'scores.model_idx_*.npz'
+find logs -type f -name 'chai1-none-*.log'
+python3 check_output.py chai1 out/chai1-none
+```
+
+There should be five predicted mmCIF structures and corresponding score
+files. The last command repeats the geometry check on all samples; inspect
+any `FAIL` before using the affected structure.
+**`model_idx_0` is the first sample, not necessarily the best one.**
+Unlike Boltz, Chai does not name the highest-confidence prediction `0`.
+Preserve all the samples and their scores. A good confidence score cannot
+substitute for the runner's covalent-geometry check or examination of the
+antibody docking pose.
+
+The runner refuses to overwrite an output folder. To repeat a mode, start
+from a fresh working copy with step 1. This prevents an old prediction
+from being mistaken for the result of a changed input.
+
+### 5. Add the 8UDR reference as a template
+
+While your interactive GPU allocation is still active:
+
+```bash
+bash run.sh chai1 template --dry-run &&
+bash run.sh chai1 template
+find out/chai1-template -type f -name 'pred.model_idx_*.cif'
+```
+
+The runner prepares the template-hit table and stages the reference
+coordinates. Chai expects a **tab-delimited m8 hit table with no header**,
+whereas its restraint file is **comma-delimited with a header**. Supplying
+the mmCIF alone as `--template-hits-path` is not sufficient. The reference
+must also be available as `templates/8UDR.cif.gz` beneath the prediction
+output directory, with that capitalization and compression.
+
+Template spans refer to residues with coordinates and must agree with
+Chai's kalign alignment. They are not simply the full lengths of the
+deposited chains. The example prepares these details for you. The
+[template notes below](#templates-fixed-in-chai1_2-and-the-hit-range-is-kaligns-to-decide)
+explain them when you are ready to supply another structure.
+
+This run is a **reference-template reconstruction**: Chai has been shown
+the experimental complex you will compare against. Keep it labelled
+separately from the no-template prediction. It does not independently
+establish that P1B7, or a new design placed in its pose, binds this target.
+
+### 6. Release the GPU or use a batch job
+
+Type `exit` once to return to the login node and release your interactive
+allocation. To submit a run that survives closing the SSH session, make a
+fresh work folder and use this on the login node instead of step 3:
+
+```bash
+cd "$WORK" &&
+mkdir -p logs &&
+JOB_ID=$(sbatch --parsable p1b7.sbatch chai1) &&
+printf '%s\n' "$JOB_ID" > last-job-id.txt &&
+printf 'Submitted job %s\n' "$JOB_ID"
+```
+
+Use `p1b7.sbatch chai1 template` for the template mode. Do not submit a
+mode whose output folder already exists. Follow the
+[shared walkthrough](../../docs/11-p1b7-walkthrough.md) for monitoring,
+reading logs, recovering from errors, and archiving to permanent storage.
+
+## Installed version and previous verification
+
 | | |
 |---|---|
 | Status | verified 2026-09-25 on an L40S (`chpc-tool test chai1`, job 1986672, `ggpu1-06`, 87 s, two cases) |
@@ -11,7 +221,7 @@
 | Base | `python:3.12-slim` (torch 2.6.0+cu124) |
 | Built | `chai1_1`: 2026-09-18, kanderson6, CoreHPC login node (716 s); `chai1_2`: rebuilt 2026-09-24 |
 
-## Run it
+## Command reference: your own inputs
 
 ```bash
 srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l

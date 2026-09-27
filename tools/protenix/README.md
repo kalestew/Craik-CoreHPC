@@ -1,5 +1,217 @@
 # Protenix v1
 
+<a id="run-it"></a>
+
+## Run it: P1B7, peptide–MHC and the covalent ligand
+
+This walkthrough uses the full deposited sequences from
+[PDB 8UDR](https://www.rcsb.org/structure/8UDR): HLA-A*03:01, beta-2-
+microglobulin, the sotorasib-modified KRAS peptide and both chains of the
+P1B7 Fab. The [example bundle](../../examples/p1b7/) contains the prepared
+JSON input, so your first run does not require writing JSON or installing
+Python packages.
+
+### From your laptop: transfer and submit with Globus
+
+After [Globus setup](../../docs/02-storage-and-data.md#laptop-to-cluster),
+from your local CoreHPC checkout:
+
+```bash
+source ./env.sh &&
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7" &&
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- protenix
+```
+
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch -- protenix
+```
+
+The first block previews; the second transfers the input folder directly
+from your project, waits for Globus success, then submits one GPU job using
+the shared lab installation. Add `template` after `protenix` for the optional
+template mode described below. Follow the
+[shared laptop walkthrough](../../docs/11-p1b7-walkthrough.md#submit-from-your-laptop-with-globus)
+for receipts, logs, and result retrieval. The numbered steps below are the
+alternative manual cluster-shell route; do not run both for the same lesson.
+
+### 1. Prepare your working folder on the login node
+
+Follow the [shared setup](../../docs/11-p1b7-walkthrough.md) to connect with
+`ssh chpc` and create a checkout at `~/corehpc`. In that SSH session, paste:
+
+```bash
+export COREHPC="$HOME/corehpc" &&
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-protenix-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$(dirname "$WORK")" &&
+cp -R "$COREHPC/examples/p1b7" "$WORK" &&
+cd "$WORK" &&
+printf '%s\n' "$WORK" > "$HOME/p1b7-last-workdir.txt" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+pwd &&
+python3 check_inputs.py &&
+chpc-tool doctor protenix &&
+bash run.sh protenix --dry-run
+```
+
+The `&&` at line endings stops the block on failure. It also saves the
+working-folder path for reconnecting and writes the CoreHPC Git revision
+to `corehpc-commit.txt` for your run record.
+
+This copies the example into your own scratch folder and checks its inputs.
+`WORK` is the variable holding that folder's path; `pwd` prints it.
+`--dry-run` displays the eventual prediction command without running it.
+Proceed when the input audit passes and the installed tool is available.
+If the shared weights or image are missing, send the maintainer the exact
+`doctor` message; students can use the shared installation directly.
+
+### 2. Read the chains and bond in the JSON
+
+On the login node:
+
+```bash
+python3 -m json.tool protenix.json
+```
+
+The outer square brackets enclose a list of prediction jobs; this example
+has one. Its `sequences` list has six entities in this exact order:
+
+1. HLA-A*03:01, chain A, 275 residues.
+2. Beta-2-microglobulin, chain B, 99 residues.
+3. KRAS peptide `VVVGACGVGK`, chain C, 10 residues.
+4. P1B7 Fab heavy chain, chain D, 226 residues.
+5. P1B7 Fab light chain, chain E, 213 residues.
+6. Bound sotorasib component `CCD_MOV`, chain F.
+
+The `covalent_bonds` entry connects `entity1: 3`, `position1: 6`,
+`atom1: "SG"` to `entity2: 6`, `position2: 1`, `atom2: "C25"`.
+Entity numbers count entries in `sequences`, starting at 1; they are not
+chain letters. `copy1` and `copy2` both select the first and only copy.
+
+The sixth residue of this peptide is biological KRAS Cys12. Position 12
+would be wrong in this ten-residue input. `CCD_MOV` requests the bound
+ligand from the chemical-component dictionary, so the ligand atom name is
+dictionary **C25**. Chai's **C1** describes that same carbon under its own
+SMILES-based naming; do not copy that name here. Reordering the entities
+requires changing the bond's entity numbers even if the explicit chain IDs
+stay unchanged. The [pinned upstream JSON format](https://github.com/bytedance/Protenix/blob/v1.1.0/docs/infer_json_format.md)
+documents these fields for this installed version.
+
+### 3. Request a GPU and start the prediction
+
+On the login node:
+
+```bash
+srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 64G -t 04:00:00 --pty bash -l
+```
+
+The allocation may wait in the queue. Once its new shell prompt appears,
+paste these commands on the compute node:
+
+```bash
+source "$COREHPC/env.sh" &&
+cd "$WORK" &&
+hostname &&
+nvidia-smi --query-gpu=name --format=csv,noheader &&
+bash run.sh protenix
+```
+
+The runner explicitly selects `protenix_base_default_v1.0.0`, requests
+five samples with seed 1, uses ten cycles and 200 diffusion steps, and
+passes `--use_msa false`. This is a **single-sequence** teaching run:
+no evolutionary alignment search is needed, and a compute node cannot
+reach Protenix's online MSA service. Without either this flag or staged
+MSA paths, the tool can retry a network search indefinitely.
+
+The runner also closes standard input with `< /dev/null`; retain that
+redirection when adapting its native command. It prevents an alignment
+subprocess from waiting forever on an open input pipe. The L40S request
+is also deliberate: this image does not support the cluster's Blackwell
+GPUs. A generic `--gres=gpu:1` can land on an incompatible node.
+
+The resources above are a starting allocation for the new full-Fab
+tutorial. The small verified tests in the installation record below do
+not establish its runtime, memory use or prediction accuracy.
+
+### 4. Find the predictions and check chemistry
+
+After the command finishes, in the compute-node shell:
+
+```bash
+find out/protenix-none -type f -name '*_sample_*.cif'
+find out/protenix-none -type f -name '*summary_confidence*.json'
+find logs -type f -name 'protenix-none-*.log'
+python3 check_output.py protenix out/protenix-none
+```
+
+The runner checks each predicted covalent bond. If it reports a failed
+geometry check, preserve the output and inspect the failure before using
+that sample. A high confidence score does not rescue an incorrectly
+attached ligand. The last command repeats that check on every sample,
+printing `PASS` or `FAIL` and the relevant geometry.
+
+Protenix writes samples in generation order. **`sample_0` is not a rank**;
+compare the accompanying summary-confidence files when selecting samples.
+Keep those files and the chemistry checks with the structures. The runner
+refuses to reuse an existing output folder; repeat step 1 to start a new run.
+
+### 5. Learn the template path with a related antibody
+
+The no-template run above is the common baseline across all three tools.
+Protenix cannot use an exact copy of 8UDR in the same way as the Boltz and
+Chai reconstruction exercises: its template prefilter rejects near-complete
+duplicate sequences. Simply supplying all five 8UDR chains can therefore
+produce a successful job that silently used fewer templates than requested.
+
+The optional example instead supplies **related 8VRA antibody-chain
+templates only**. The input to be folded remains the complete P1B7/8UDR
+assembly. This is a different experiment from giving Boltz or Chai all five
+chains of 8UDR; compare results with that distinction recorded.
+
+In the same active GPU allocation:
+
+```bash
+bash run.sh protenix template --dry-run &&
+bash run.sh protenix template
+find out/protenix-template -type f -name '*_sample_*.cif'
+```
+
+The runner prepares the template-hit files and a private template cache.
+The mapping is P1B7 heavy chain D→8VRA heavy chain E and P1B7 light chain
+E→8VRA light chain D: this entry reverses the antibody-chain letters.
+HLA, beta-2-microglobulin and peptide receive no templates in this mode.
+
+Protenix needs a per-chain `templatesPath` plus `--use_template true`,
+locally staged mmCIFs, known release dates, and a cutoff that permits those
+dates. The lab image exposes `PROTENIX_MAX_TEMPLATE_DATE` and
+`PROTENIX_TEMPLATE_FETCH_REMOTE`; the runner sets up the example without
+changing the shared cache. A template file's existence alone does not prove
+the predictor used it. The [template notes below](#templates-reachable-and-admissible-once-one-literal-became-a-key)
+explain the gates and what to check when using another structure.
+
+### 6. Finish the session or submit a batch job
+
+Type `exit` once to release the interactive GPU and return to the login
+node. For a job that continues after disconnecting, prepare a fresh working
+copy and paste this on the login node instead of step 3:
+
+```bash
+cd "$WORK" &&
+mkdir -p logs &&
+JOB_ID=$(sbatch --parsable p1b7.sbatch protenix) &&
+printf '%s\n' "$JOB_ID" > last-job-id.txt &&
+printf 'Submitted job %s\n' "$JOB_ID"
+```
+
+Append `template` after `protenix` for that mode. Do not reuse a folder
+that already contains the selected mode's output. The
+[shared walkthrough](../../docs/11-p1b7-walkthrough.md) gives copyable
+commands for monitoring, logs, recovery and archiving. It also explains
+the next step for research runs: generate MSAs before submission and use
+absolute `pairedMsaPath`/`unpairedMsaPath` entries instead of disabling MSAs.
+
+## Installed version and previous verification
+
 | | |
 |---|---|
 | Status | verified 2026-09-25 on an L40S (`chpc-tool test protenix`, job 1986816, `ggpu1-09`, 140 s, three cases) |
@@ -11,7 +223,7 @@
 | Upstream | <https://github.com/bytedance/Protenix>, `protenix==1.1.0` on PyPI (2.0.0 is the v2 generation) |
 | Pinned at | **v1**, for the licence: "Why v1" under Build notes |
 
-## Run it
+## Command reference: your own inputs
 
 ```bash
 srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
@@ -457,8 +669,10 @@ template and let the fold exit zero:
 - a hit whose ungapped sequence is a substring of the query **and** covers more
   than 95% of it is a `DuplicateError` — the tool declining to template a
   structure with itself. So a target's own reference entry cannot template it;
-- a hit under ten residues is a `LengthError`, so a peptide chain cannot be
-  templated at all.
+- a hit under ten residues is a `LengthError`, so very short peptide
+  templates are dropped. The tutorial’s 10-residue peptide is omitted because
+  its matching reference sequence is a duplicate, not because all peptides
+  are categorically unsupported.
 
 ### Templates are de-duplicated by SEQUENCE, so a set can collapse
 
