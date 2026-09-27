@@ -1,17 +1,199 @@
 # 4. Batch jobs with sbatch
 
-Ready-to-edit templates live in `templates/slurm/`; `tool-gpu.sbatch` is the
-one for a registry tool (`tools/README.md`, "As a batch job"). This doc
-explains the pieces. Wiki sources: Access Primer, Submission Examples,
-Advanced Topics.
+A **batch job** is a script that Slurm runs on a compute node when resources
+are available. You submit it from the login node with `sbatch`; it keeps
+running if you disconnect, close your laptop, or leave for the day. This is
+the usual way to run a structure prediction. First try the tiny job below,
+then follow the [P1B7 / 8UDR walkthrough](11-p1b7-walkthrough.md) for Boltz,
+Protenix and Chai-1.
+
+If the batch script and inputs are on your laptop, the
+[Globus submission helper](11-p1b7-walkthrough.md#submit-from-your-laptop-with-globus)
+transfers the job folder, waits for completion, and runs `sbatch` on the
+cluster for you. The steps below teach the same scheduler commands from
+an SSH session.
+
+Ready-to-edit templates live in [`templates/slurm/`](../templates/slurm/).
+[`tool-gpu.sbatch`](../templates/slurm/tool-gpu.sbatch) runs a lab registry
+tool; [the tool guide](../tools/README.md) explains its settings. Wiki sources
+for this page: Access Primer, Submission Examples, Advanced Topics.
+
+## Your first batch job
+
+This practice run uses one CPU for a few seconds. It checks that you can
+submit a job, find its log and confirm that it finished. It needs no Python
+installation, structure files, GPU or downloaded model weights.
+
+### 1. Connect and make a working folder
+
+**On your laptop:**
+
+```bash
+ssh chpc
+```
+
+**On the login node:**
+
+```bash
+hostname
+mkdir -p "/mnt/scratch/user/$USER/corehpc-first-job/logs"
+cd "/mnt/scratch/user/$USER/corehpc-first-job"
+pwd
+```
+
+Check that the hostname contains `chpc-ucsf-login-vm1` and the working folder
+ends in your username followed by `/corehpc-first-job`. These files live in
+your own scratch directory. Scratch is temporary storage; keep valuable
+results on FAC as explained in [storage and data movement](02-storage-and-data.md).
+
+### 2. Create the script
+
+**Still on the login node**, paste the entire block, from `cat` through the
+last `EOF`, then press Return. It writes a text file called `hello.sbatch`;
+repeating it replaces that practice file. `EOF` is a delimiter marking the
+end of the file contents, not a command you run separately.
+
+```bash
+cat > hello.sbatch <<'EOF'
+#!/bin/bash
+#SBATCH --job-name=corehpc_hello
+#SBATCH --partition=community_short
+#SBATCH --qos=cmnt_short
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=1G
+#SBATCH --time=00:05:00
+#SBATCH --output=logs/%x_%j.out
+
+set -euo pipefail
+printf 'Job ID: %s\n' "$SLURM_JOB_ID"
+printf 'Compute node: '
+hostname
+printf 'Working directory: '
+pwd
+srun bash -c 'date; sleep 15; echo "Practice job finished successfully."'
+EOF
+```
+
+The `#SBATCH` lines ask Slurm for resources. `community_short` needs the
+matching `cmnt_short` QoS. `--time=00:05:00` is a five-minute **limit**, not a
+request to run for exactly five minutes. All later lines are the commands
+the compute node will execute. `%x` and `%j` become the job name and unique
+job ID in the log filename. Errors go into the same log.
+
+Review the file you created:
+
+```bash
+cat hello.sbatch
+```
+
+### 3. Submit once and save the job ID
+
+**On the login node, in the same folder:**
+
+```bash
+sbatch --test-only hello.sbatch
+```
+
+This checks whether Slurm accepts the request without submitting a job. It
+does not run or validate the program in the script. If it reports an error,
+resolve that before continuing. Then submit:
+
+```bash
+JOB_ID=$(sbatch --parsable hello.sbatch)
+printf '%s\n' "$JOB_ID" > last-job-id.txt
+printf 'Submitted job %s\n' "$JOB_ID"
+```
+
+Expect a numeric job ID, such as `1999999` (your number will differ). Each
+`sbatch` call submits a **new** job, even if the filename is unchanged. Do
+not keep resubmitting while you wait. If submission fails or no job ID is
+printed, stop and read the error instead of using the following commands.
+
+### 4. Check the queue and read the output
+
+```bash
+squeue -j "$JOB_ID" -o "%.18i %.16j %.10T %.10M %R"
+```
+
+`PENDING` means waiting; `RUNNING` means the compute node has started your
+script. A reason such as `Priority` or `Resources` is normal while waiting.
+A very short job may already have disappeared from `squeue`; that alone
+does not say whether it succeeded or failed.
+
+The log appears only after the job starts. List the logs:
+
+```bash
+ls -lh logs/
+```
+
+Once `corehpc_hello_` followed by your job ID appears, read it:
+
+```bash
+cat "logs/corehpc_hello_${JOB_ID}.out"
+sacct -j "$JOB_ID" --format=JobID,JobName,State,ExitCode,Elapsed
+```
+
+A successful run prints a compute hostname, the scratch folder and
+`Practice job finished successfully.` The allocation row in `sacct` should
+say `COMPLETED` with `ExitCode` `0:0`. Additional `.batch`, `.extern` and
+`.0` rows describe parts of the same job. Accounting can take a short time
+to update; check again if the job has just finished.
+
+For a longer run, watch new log lines as they arrive:
+
+```bash
+tail -f "logs/corehpc_hello_${JOB_ID}.out"
+```
+
+Press **Control-C** to stop watching. That stops `tail`, not the submitted
+job. If a log does not exist yet, check `squeue`; a pending job has not opened
+its log. If the job finished with `FAILED`, `TIMEOUT` or `OUT_OF_MEMORY`,
+read the end of its log before resubmitting.
+
+### 5. Reconnect or cancel when needed
+
+You may type `exit` to disconnect after submission; the batch job continues.
+After `ssh chpc` in a new terminal, return to the working folder and reload
+the saved job ID (`JOB_ID` variables do not survive a new shell):
+
+```bash
+cd "/mnt/scratch/user/$USER/corehpc-first-job"
+JOB_ID=$(cat last-job-id.txt)
+squeue -u "$USER"
+sacct -j "$JOB_ID" --format=JobID,JobName,State,ExitCode,Elapsed
+```
+
+If you deliberately want to stop **this** pending or running job:
+
+```bash
+scancel "$JOB_ID"
+```
+
+Cancellation can take a moment. Check `squeue` or `sacct` again; a completed
+job cannot be canceled. Do not use `scancel -u "$USER"` unless you intend to
+stop **all** of your jobs, including unrelated work.
+
+Once this practice job succeeds, continue to the
+[P1B7 structure-prediction walkthrough](11-p1b7-walkthrough.md). The same
+submit → job ID → log → completion checks apply there; the scientific inputs
+and GPU resources are different.
 
 ## Anatomy of a job script
+
+The following is a reference for a larger CPU job, **not another practice
+script to submit unchanged**. Replace `my_script.py` and the module name
+with your program's instructions. Put all `#SBATCH` directives before the
+first executable shell command. Slurm reads these directives itself and
+does not expand shell variables such as `$USER` in them; use relative log
+paths or write the full path. See the official
+[`sbatch` reference](https://slurm.schedmd.com/sbatch.html).
 
 ```bash
 #!/bin/bash
 #SBATCH --job-name=myjob
 #SBATCH --partition=cpu              # cpu (default) | gpu | community | community_short   (pod, large_gpu: not ours)
-#SBATCH --qos=cmnt_short             # ONLY for community_short; other partitions take our default QoS hpc_core
 #SBATCH --nodes=1
 #SBATCH --ntasks=1                   # processes (MPI ranks); = --nodes for one task per node
 #SBATCH --cpus-per-task=8            # threads per process
@@ -30,6 +212,8 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 srun -u python my_script.py          # srun lets SLURM track the step; -u = unbuffered output
 ```
 
+- For `cpu`, `gpu` and `community`, the lab's default `hpc_core` QoS works.
+  Only `community_short` requires adding `#SBATCH --qos=cmnt_short`.
 - Command-line flags override `#SBATCH` lines: `sbatch --mem=64G job.sh`.
 - `srun` inside the script is recommended by CoreHPC so SLURM manages the
   process lifecycle; for a plain serial command it is optional.
@@ -39,15 +223,21 @@ srun -u python my_script.py          # srun lets SLURM track the step; -u = unbu
 
 ## Requesting GPUs
 
+For registry tools, start with [the GPU job template](../templates/slurm/tool-gpu.sbatch)
+and the [P1B7 walkthrough](11-p1b7-walkthrough.md). The following is only the
+GPU-specific fragment of a script, not a complete runnable job:
+
 ```bash
 #SBATCH --partition=gpu
-#SBATCH --gres=gpu:1                 # any GPU; gpu:nvidia_h100_nvl:1 for a specific model
+#SBATCH --gres=gpu:nvidia_l40s:1     # supported by every current lab registry tool
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 module load nvidia-hpc               # CUDA toolchain (see doc 06); conda/containers bring their own CUDA runtime
 srun python train.py
 ```
 
+`--gres=gpu:1` requests any GPU and may select an architecture unsupported by
+your container; check [GPU compatibility](../tools/README.md#which-gpu) first.
 Multiple GPUs on one node: `--gres=gpu:2` (gpu partition nodes have 1–2).
 Bind each process to its closest GPU: `--gpu-bind=closest`. See doc 08 for
 two-GPU jobs. The lab has no POD or large_gpu access.
@@ -104,6 +294,10 @@ trap 'save_checkpoint; exit 0' SIGTERM
 ```
 
 ## Monitoring
+
+Run these commands on the login node. The table below is a reference:
+replace `<id>` with your actual numeric job ID, including removing the angle
+brackets. Unlike the copyable first-job blocks, it uses placeholders.
 
 | Task | Command |
 |------|---------|

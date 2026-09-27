@@ -13,94 +13,175 @@ there is needed to run something.
 
 ## Run a tool on your inputs
 
-You need a shell on a compute node with `chpc-tool` on `PATH` (root README,
-"First hour on CoreHPC", steps 4 and 6). The example is Boltz-2, which runs on
-any node of the `gpu` partition; seven tools do not, see "Which GPU".
+For your first run, use **[the P1B7 / 8UDR walkthrough](../docs/11-p1b7-walkthrough.md)**.
+It explains the terminal, prepares the actual input files, and takes you
+through submission, logs, output checks, and saving your results. The
+per-tool guides continue with the same complex:
+[Boltz-2](boltz/README.md#run-it), [Chai-1](chai1/README.md#run-it), and
+[Protenix](protenix/README.md#run-it). The example bundle is checked into
+[`examples/p1b7/`](../examples/p1b7/README.md); another project's checkout is
+not required.
+
+### Send a tool job from your laptop
+
+Set up [direct project-folder access in Globus](../docs/02-storage-and-data.md#laptop-to-cluster)
+first. From a local CoreHPC checkout, preview and then submit the P1B7 example:
 
 ```bash
-# 1. A GPU node.
-srun -p gpu --gres=gpu:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
-
-# 2. Inputs on scratch. The same path is valid inside the container, so
-#    nothing is copied in or out.
-mkdir -p /mnt/scratch/user/$USER/boltz/p1 && cd /mnt/scratch/user/$USER/boltz/p1
-cat > in.yaml <<'EOF'
-version: 1
-sequences:
-  - protein:
-      id: A
-      sequence: MKTAYIAKQRQISFVKSHFSRQLEERLGLIE
-      msa: empty
-EOF
-
-# 3. Is it there, and what does it need?
-chpc-tool doctor boltz          # one row: OK, the weight cache path, and a caveat about --no_kernels
-chpc-tool show boltz            # image path, gpu yes, the exports, and the entry's note
-
-# 4. The tool's variables in THIS shell, so you can write them on a command line.
-eval "$(chpc-tool export boltz)"
-echo "$BOLTZ_CACHE"             # /mnt/fac/CX500146_DS1/data/boltz
-
-# 5. Run. After `--` comes the command exactly as the tool's own docs give it.
-chpc-tool exec boltz -- boltz predict in.yaml --cache "$BOLTZ_CACHE" --out_dir out --no_kernels
-
-# 6. Output is where you said, on scratch. Keep what matters on FAC.
-find out -name '*model_0*'
-cp -r out /mnt/fac/CX500146_DS1/results/myproject/p1/
+source ./env.sh &&
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7" &&
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- boltz
 ```
 
-Three things in that block are the whole method:
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch -- boltz
+```
 
-- **`chpc-tool exec <tool> -- <program> <args>`.** `exec` finds the image,
-  adds `--nv` for a GPU tool, mounts scratch and FAC, exports the tool's
-  weight and cache paths into the container, and refuses a GPU the image has
-  no kernels for. Write the program after `--` every time; "The CLI" below
-  says why `chpc-tool exec boltz predict ...` is not the same command.
-- **`eval "$(chpc-tool export <tool>)"`** before you type a tool's variable
-  (`$BOLTZ_CACHE`, `$COLABFOLD_DATA`, `$RFDIFFUSION_MODELS`) on a command
-  line. `exec` already exports them *inside* the container; the `eval` puts
-  them in *your* shell, where the command line is expanded. Without it the
-  variable is empty and the tool falls back to its own default, which for
-  Boltz is downloading weights from a node with no internet.
-- **The tool's own caveats.** `--no_kernels` above comes from the `NOTE=` in
-  `tools/boltz/tool.conf`, which `chpc-tool show boltz` prints: the previous
-  image had no C compiler, so any prediction over about 128 tokens died
-  without it; the rebuilt image runs them on every node class, and the flag
-  stays in this example because a fold made with the kernels is a different
-  computation from one made without them (the entry's README says how little
-  they buy). Every entry has such a note; read it, and the entry's
-  `README.md` ("Do not miss"), before the first real run.
+This sends the selected folder through Globus, waits for success, then
+submits its batch script with SSH. `-- chai1` and `-- protenix` use the other
+tutorial tools; adding `template` selects that tool's template mode. The
+[full laptop walkthrough](../docs/11-p1b7-walkthrough.md#submit-from-your-laptop-with-globus)
+explains the receipt, monitoring, and downloading results directly back into
+your project. By default it uses the shared lab installation; `--corehpc`
+selects an existing cluster checkout instead.
 
-Where things are: inputs and outputs on `/mnt/scratch/user/$USER` (purged at
-30 days); weights and databases at `$CHPC_LAB/data/<tool>`, already fetched
-for every built tool, and `doctor` says so if one is missing; images at
-`$CHPC_LAB/containers` with a faster copy on group scratch, chosen per image;
-final results at `$CHPC_LAB/results/<project>/`. Between a laptop and any of
-those it is Globus: `chpc-globus.sh push ./p1 "$CHPC_USER_SCRATCH/boltz/p1"`
-in, `chpc-globus.sh pull "$CHPC_LAB/results/myproject/p1" ./` out (doc 02);
-`scp` through the bastion is not permitted. A CPU tool (foldseek,
-mmseqs2, hhsuite, dockq, pymol; rosetta and foldx are native installs) is the
-same sequence from `salloc -p cpu -c 8 --mem 16G -t 2:00:00`.
+For your own tool, put the batch script and every local file it needs in a
+self-contained job folder, then pass that folder and the script's relative
+path to `chpc-submit.sh`. Use `chpc-globus.sh push`/`pull` alone when you only
+want to transfer files. Keep local data and scripts out of SSH command
+payloads: transfer the files, then execute the staged script.
+
+### Work from a cluster shell
+
+The short version below assumes you have already connected with `ssh chpc`
+and cloned this repo at `~/corehpc` following that walkthrough. **Paste this
+on the login node:**
+
+```bash
+export COREHPC="$HOME/corehpc"
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-boltz-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$WORK" &&
+cp -R "$COREHPC/examples/p1b7/." "$WORK/" &&
+cd "$WORK" &&
+printf '%s\n' "$WORK" | tee "$HOME/p1b7-last-workdir.txt" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+python3 check_inputs.py &&
+bash run.sh boltz --dry-run
+```
+
+`WORK` is your own run directory; the timestamp keeps repeated tutorials
+separate. `cp` copies the included inputs there. `check_inputs.py` checks the
+bundle's sequences and declared chemistry without running a prediction.
+`--dry-run` prints the command the runner will use. Stop if either check
+fails. An input check is not a prediction or a check of predicted geometry.
+
+**Still on the login node, request a compute shell:**
+
+```bash
+srun --account=hpc_core --partition=gpu --gres=gpu:nvidia_l40s:1 \
+    --cpus-per-task=8 --mem=64G --time=04:00:00 --pty bash -l
+```
+
+Slurm may print that it is waiting for resources. Wait for a new prompt.
+The L40S selection is usable by all three tutorial tools. This is an initial
+resource request, not a measured requirement for the full Fab example.
+
+**At the new prompt, on the compute node:**
+
+```bash
+hostname
+printf 'Job: %s\n' "$SLURM_JOB_ID"
+source "$COREHPC/env.sh" &&
+cd "$WORK" &&
+chpc-tool doctor boltz &&
+bash run.sh boltz
+```
+
+Read the command and output path printed by the runner. It uses the shared
+weights and local inputs, then checks the predicted covalent geometry.
+[The Boltz guide](boltz/README.md#run-it) explains the exact underlying
+`chpc-tool exec` command, flags, output files, and optional reference template.
+When finished, `exit` releases the interactive allocation and returns to the
+login node. Follow the [save-results steps](../docs/11-p1b7-walkthrough.md#save-your-results)
+before leaving your only copy on scratch.
+
+### What the command means
+
+You will see these two lines inside most GPU workflows:
+
+```bash
+eval "$(chpc-tool export boltz)"
+chpc-tool exec boltz -- boltz predict boltz.yaml --cache "$BOLTZ_CACHE" --out_dir out/manual-boltz --no_kernels --use_potentials --seed 1 --diffusion_samples 5
+```
+
+This is an explanation of the runner's building blocks, not another required
+run. The first line loads the Boltz-specific settings into **your current
+shell**. In the second line:
+
+- `chpc-tool` is our lab's launcher, not the prediction program itself.
+- `exec boltz` selects the installed Boltz container, weights, filesystem
+  mounts, and GPU compatibility checks.
+- `--` ends the launcher's arguments. The second `boltz` is the program to
+  run inside the container; always include it.
+- `predict boltz.yaml` names the task and its input file. It is found relative
+  to the directory printed by `pwd`, unless you give an absolute path.
+- `--cache "$BOLTZ_CACHE"` points to the existing shared weights. The preceding
+  `eval` is necessary because your shell expands `$BOLTZ_CACHE` before the
+  container starts.
+- `--out_dir` chooses a new output folder. Other options are tool-specific;
+  the Boltz README explains the geometry and sampling choices.
+
+A **container** packages software and dependencies; you do not install them
+on your account. Scratch and FAC appear at the same paths inside it. A
+**model weight** file holds trained model parameters. An **MSA** is an alignment
+of related sequences, and a **template** is a known structure supplied as
+additional information. They are different inputs. The first tutorial uses
+single sequences to run without an online MSA service; it is an onboarding
+exercise, not a qualified production protocol.
+
+Inputs and intermediate outputs belong on scratch. Shared weights and
+reference databases are under `$CHPC_LAB/data/`; images are under
+`$CHPC_LAB/containers`, with a faster per-image scratch copy when available.
+Final results belong under `$CHPC_LAB/results/`. Do not edit shared weights
+or run I/O-heavy calculations directly on FAC.
+
+For a CPU-only tool, request a CPU **shell** instead:
+
+```bash
+srun --account=hpc_core --partition=cpu --cpus-per-task=4 \
+    --mem=8G --time=01:00:00 --pty bash -l
+```
+
+A bare `salloc` reserves resources but does not itself move your shell off
+the login node. See [interactive jobs](../docs/03-interactive-jobs.md).
 
 ### As a batch job
 
-`templates/slurm/tool-gpu.sbatch` is steps 1 to 6 as a job script. Copy it,
-edit the four lines marked EDIT (tool, work directory, `--gres`, the command
-after `--`), create `logs/`, submit:
+A batch job keeps running after you disconnect. For the P1B7 example, **on
+the login node**, after staging the bundle as above:
 
 ```bash
-cp /mnt/fac/CX500146_DS1/slurm/tool-gpu.sbatch ~/jobs/boltz_p1.sbatch   # from a checkout: corehpc/templates/slurm/tool-gpu.sbatch
-$EDITOR ~/jobs/boltz_p1.sbatch
-mkdir -p logs && sbatch ~/jobs/boltz_p1.sbatch
-squeue -u $USER
-ls logs/
+cd "$WORK" &&
+mkdir -p logs &&
+JOB_ID=$(sbatch --parsable p1b7.sbatch boltz) &&
+printf '%s\n' "$JOB_ID" | tee last-job-id.txt &&
+squeue -j "$JOB_ID"
 ```
 
-Stage the inputs into the work directory the script names before you submit
-(from a laptop, `chpc-globus.sh push`; on the cluster, `cp` from FAC).
-The job sources `chpc.env` itself, runs the same `eval` and the same
-`chpc-tool exec`, and prints which GPU it landed on at the top of its log. See
-`docs/04-batch-jobs.md` for sizing, arrays and monitoring.
+The included script requests a GPU and calls the same runner. Use `chai1` or
+`protenix` in place of `boltz` after reading that tool's walkthrough. A job
+number means Slurm accepted the request, not that the prediction finished.
+[The shared walkthrough](../docs/11-p1b7-walkthrough.md#watch-a-batch-job)
+explains pending jobs, logs, failures, cancellation, and reconnecting.
+
+For your own workflow later, copy
+[`templates/slurm/tool-gpu.sbatch`](../templates/slurm/tool-gpu.sbatch) and
+edit its four marked lines: GPU, tool, working directory, and program command.
+Create `logs/` **before** submitting: Slurm opens the log before executing the
+script. Stage the inputs into its working directory first. The
+[batch-job guide](../docs/04-batch-jobs.md) explains how to create and edit a
+script, as well as resource sizing and arrays.
 
 ## The CLI
 
@@ -231,7 +312,9 @@ README says which model its self-test ran on.
 
 ## Reading a tool's README
 
-`tools/<tool>/README.md` opens with a header table (status and the GPU model
+The Boltz, Chai, and Protenix READMEs open with a complete P1B7 walkthrough;
+their installation/build records follow it. Other entries generally open
+with a header table (status and the GPU model
 the self-test ran on, image, which `--gres` to ask for, weights, licence,
 upstream pin), then three sections a first run needs: **Run it**, a
 copy-pasteable block with production defaults; **Inputs and outputs**, what

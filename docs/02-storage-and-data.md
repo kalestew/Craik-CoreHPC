@@ -109,104 +109,333 @@ rsync -av /mnt/fac/CX500146_DS1/MyFolder/ /mnt/scratch/group/CX500146_DS1/MyFold
 sbatch -p cpu -c 2 --mem 4G -t 12:00:00 --wrap 'rsync -a /mnt/fac/CX500146_DS1/big/ /mnt/scratch/group/CX500146_DS1/big/'
 ```
 
-### Laptop to cluster
+<a id="laptop-to-cluster"></a>
 
-**The AUP names three approved paths: Globus, the FAC share, and Open
-OnDemand.** `scp`/`rsync` over the SSH alias is not one of them, and the
-CoreHPC training on 2026-09-10/11 said so explicitly -- transferring files
-through the bastion "is not allowed ... mainly because of security reasons",
-and an attendee's `scp` to the UCSF bastion failed on the call. Treat it as
-unsanctioned wherever it still happens to succeed, and do not build a workflow
-on it. `scripts/chpc-stage.sh` predates that finding and `scripts/chpc-globus.sh`
-replaces it.
+### Laptop to cluster: Globus is the normal transfer route
 
-The lab's route is `chpc-globus.sh` (next section): it drives the same Globus
-collections from a shell and knows that a share destination takes two legs. A
-one-off file can go through the Globus web app; anything a pipeline depends on
-goes through the script.
+Use **Globus for files, Git for published code, and SSH for commands**. Run the
+Globus commands below in a terminal **on your laptop**, before `ssh chpc`.
+Globus Connect Personal must be running on that laptop, and an external drive
+must stay mounted while its files are being transferred.
 
-- Globus web app for files under ~1 GB: log in at <https://www.globus.org/>
-  with the "University of California San Francisco" org login, File Manager,
-  search collections for `corehpc`: "UCSF CoreHPC - User Home" and
-  "UCSF CoreHPC - User Scratch", browse to your username.
-- Globus Connect Personal for large data sets: install per
-  <https://docs.globus.org/globus-connect-personal/install/>, log in with your
-  UCSF CILogon identity (it ends in `@ucsf.edu` with six leading digits of
-  your UCID), create a personal collection, then transfer collection-to-
-  collection -- by hand in the web app, or with `chpc-globus.sh`, which drives
-  that same collection; `chpc.env.local.example` walks through the one-time
-  setup. Choose "High Assurance" if the data is PHI / P3 / P4.
-- FAC shares are also mounted elsewhere (lab workstations, per the FAC team),
-  so the FAC share itself can be the transfer medium for lab data.
+- `git clone` and `git pull` on the cluster obtain committed code from its Git
+  server. They do not include your laptop's uncommitted edits or local inputs.
+- Globus sends the current files you select: inputs, scripts under development,
+  a project working directory, and results coming back. A transfer is a copy,
+  not a live link; send changes again before the next run.
+- SSH opens a terminal, submits a job, or runs a script that is already on the
+  cluster. For a longer check, save a local script, transfer it with Globus,
+  then execute it with a short SSH command. Do not transport files or programs
+  through SSH using `scp`, `rsync`, a tar stream, base64, or a remote heredoc.
 
-**There is no FAC Globus collection.** The two CoreHPC collections are User
-Home and User Scratch, so a Globus transfer intended for a lab share lands in
-scratch and then needs a copy into FAC -- and it must not be aimed at Home,
-which is the 20 GiB quota. Weights, containers and reference databases belong
-on FAC precisely because scratch is purged, so Globus is the first leg of that
-trip and never the whole of it. When the data is already on a workstation that
-mounts the share, copying it there directly skips Globus altogether.
-`chpc-globus.sh` below is that two-leg trip, scripted.
+The AUP names Globus, the FAC share, and Open OnDemand as approved transfer
+paths. The CoreHPC training on 2026-09-10/11 explicitly disallowed file
+transfers through the bastion. `scripts/chpc-globus.sh` implements the lab's
+Globus route; the retired `scripts/chpc-stage.sh` refuses transfers and points
+to this replacement. The Globus web
+[File Manager](https://app.globus.org/file-manager) can use the same collections
+for a manual transfer. A workstation that already mounts FAC can also copy
+files directly to that mount.
 
-Approved data-transfer paths per the AUP are Globus, the FAC share, and Open
-OnDemand. Do not set up other tunnels for data egress.
+### 1. Make your projects folder accessible
 
-### `chpc-globus.sh`: the scripted route
+The lab convention is one projects folder on your Mac, holding this repo and
+every project that uses it, and Globus Connect Personal allowed to see that
+folder. Transfers then read and write your working copies directly. You can
+allow the whole projects folder, or one project at a time.
 
-Confirmed with the cluster administrators on 2026-09-26 that Globus is the
-preferred path, so it is a first-party one here rather than a manual procedure
-in a document. `scripts/chpc-globus.sh` is the replacement for
-`scripts/chpc-stage.sh`, and it is what a pipeline should depend on.
+On a Mac:
+
+1. Install and start [Globus Connect Personal](https://docs.globus.org/globus-connect-personal/install/mac/).
+   Sign in using your UCSF identity and complete the collection setup.
+2. Click the Globus icon in the menu bar. Open **Settings/Preferences → Access**
+   (the folder list may be labelled **Accessible Folders/Directories**).
+3. Click **+** and select your projects folder, for example
+   `/Users/yourname/projects`. A folder on an external volume
+   (`/Volumes/...`) works the same way and must be allowed here too.
+4. Read access lets Globus send files. Enable **Writable** for the folder where
+   you want downloaded results to land. You can instead keep the project
+   read-only and allow a separate results folder to be writable.
+
+Adding a folder to this access list does **not** publish its contents to other
+people. Collaborator/public sharing uses a separate guest collection and
+explicit permissions; **Sharable** is unnecessary for your own transfers to
+CoreHPC. See the [Globus sharing guide](https://docs.globus.org/guides/tutorials/manage-files/share-files/).
+
+### 2. Install the command-line tool and sign in
+
+Globus Connect Personal is the background app that provides access to files.
+The **Globus CLI** supplies the `globus` terminal command. You need both for the
+scripted workflow.
+
+On a Mac with Homebrew already installed, paste:
 
 ```bash
-chpc-globus.sh doctor                            # what is set up, what is not
-chpc-globus.sh env                               # the resolved settings
-chpc-globus.sh push ./inputs "$CHPC_USER_SCRATCH/proj/inputs"     # one leg: scratch is a collection
-chpc-globus.sh push ./outputs "$CHPC_LAB/results/proj/outputs"    # two legs: FAC is not
-chpc-globus.sh pull "$CHPC_LAB/results/proj" ~/proj-results
-chpc-globus.sh push ./big "$CHPC_LAB/data/x" --dry-run   # print the route, run nothing
-chpc-globus.sh push ./big "$CHPC_LAB/data/x" --wait 0    # queue it, print the task id, return
+brew install pipx
+pipx ensurepath
 ```
 
-**Two legs, and it says which it took.** Because there is no FAC collection, a
-push to the share is one Globus transfer into `$CHPC_GLOBUS_STAGING` on user
-scratch, then a cluster-local `cp`, then `chpc-fac-fixacl` on what landed --
-without that last step the files are unreadable by the person who just wrote
-them. A destination directory that does not exist yet is created and repaired
-*before* the copy, because a directory made at the share root inherits that
-same DENY and the copy into it fails (the ACL note above); aim a push inside
-the layout all the same, `results/<project>/` or `data/`. A pull is the same
-trip backwards, and it fills the buffer *before* it transfers: a transfer of an
-unfilled staging path does not fail, it delivers an empty directory and reports
-`SUCCEEDED`.
+Close that Terminal window and open a new one, then paste:
 
-A transfer to or from scratch itself is one leg and needs no ssh at all. The
-FAC leg runs over the primed master session (`chpc-prime.sh`, doc 01), and
-`doctor` says whether one is open.
+```bash
+pipx install globus-cli
+globus --version
+globus login
+```
 
-**What is a site fact and what is yours.** `lab/chpc.env` holds both collection
-UUIDs and derives `CHPC_GLOBUS_SCRATCH_ROOT` from `CHPC_USER` -- the scratch
-collection is one shared UUID whose `/` is your own `/mnt/scratch/user/$CHPC_USER`,
-verified 2026-09-26. Nothing about the cluster side is per-person. What you
-declare, in `chpc.env.local`, is the directory on your own machine that Globus
-may write (`CHPC_GLOBUS_STAGING_LOCAL`) and what `/` means inside your personal
-collection (`CHPC_GLOBUS_LOCAL_ROOT`); the collection id itself is detected with
-`globus endpoint local-id`, so there is nothing to paste. See
-`chpc.env.local.example`.
+Follow the browser sign-in and consent prompts using your UCSF account. If
+`globus --version` already works, skip installation and just sign in. Other
+installation options are in the [official CLI guide](https://docs.globus.org/cli/).
 
-**The root matters more than it looks.** A collection path is a POSIX path with
-the collection's root removed, and a wrong root does not fail a transfer -- it
-relocates one, successfully, with nothing downstream able to tell. That is why
-`chpc-globus.sh` refuses a path outside its declared root instead of passing it
-through, and why `doctor` resolves your staging directory through the declared
-root and asks the collection to list it rather than trusting the setting.
+### 3. Load this project's settings and check the actual folder
 
-`globus collection show` needs a `manage_collections` consent that a transfer
-does not, so a `MissingLoginError` from *that* command is not a broken setup.
-`globus ls` is the check that matches what a transfer needs. Note also that the
-`data_access` scope exists only for mapped collections: a `globus login --gcs`
-against a personal collection fails with `UNKNOWN_SCOPE_ERROR` and is not
-something you did wrong.
+Open a terminal on your laptop and go to your CoreHPC checkout inside the
+projects folder you just allowed (the README's first-hour steps clone it
+there). Change the first line to your own path; keep the double quotes if a
+folder name has spaces:
+
+```bash
+cd "$HOME/projects/Craik-CoreHPC"
+cp -n chpc.env.local.example chpc.env.local
+nano chpc.env.local
+```
+
+`cp -n` creates your settings file only if it does not already exist. In the
+editor, find the `#CHPC_USER=...` line, remove its leading `#`, and replace
+`jdoe` with your **campus username**, for example:
+
+```bash
+CHPC_USER="${CHPC_USER:-jdoe}"
+```
+
+Save with **Control-O**, press **Return**, and leave with **Control-X**. With a
+normal Mac collection, no Globus values need changing. Your local collection
+ID is detected automatically and `CHPC_GLOBUS_LOCAL_ROOT` defaults to `/`.
+`CHPC_GLOBUS_STAGING_LOCAL` can stay unset.
+
+Now paste:
+
+```bash
+source env.sh
+chpc-globus.sh env
+chpc-globus.sh doctor "$CHPC_PROJECT"
+```
+
+For a project that embeds CoreHPC as a submodule, start at that project's root
+and use `cp -n corehpc/chpc.env.local.example chpc.env.local`, then
+`source corehpc/env.sh` instead. Keep the same `env` and `doctor` commands.
+`CHPC_PROJECT` is the parent project when CoreHPC is a submodule, or this
+checkout when it stands alone. Settings belong in the parent project's
+`chpc.env.local`, which should be ignored by Git.
+
+Check that `CHPC_USER` is your campus username and that the reported local
+collection/path is the folder you intended. `doctor` checks login, whether the
+local path can be listed through Globus, and access to CoreHPC User Scratch.
+Its SSH warning matters for FAC copies and later job submission; a direct
+Globus transfer to/from user scratch needs no SSH session. A successful
+listing confirms read access, **not** Globus write permission; the destination
+must also be marked Writable before pulling results.
+
+If User Scratch requests consent, paste this, follow its browser prompts, and
+repeat the check:
+
+```bash
+globus login --gcs "$CHPC_GLOBUS_SCRATCH_COLLECTION"
+chpc-globus.sh doctor "$CHPC_PROJECT"
+```
+
+**Access permissions and path mapping are different.** For normal Mac GCP, a
+folder such as `/Users/yourname/projects/Craik-CoreHPC` has that same absolute
+path inside its collection. Adding just that project to Accessible Folders
+does not change the collection root to that folder. Keep
+`CHPC_GLOBUS_LOCAL_ROOT=/`; override it only if you have verified a different
+mapping for your collection. On CoreHPC, the User Scratch collection maps `/`
+to your own `/mnt/scratch/user/$CHPC_USER`, and the wrapper removes that prefix
+for you. Always pass the full cluster filesystem path to the wrapper.
+
+### 4. Send the P1B7 example straight from this checkout
+
+This short example checks data movement without starting a prediction. From
+the same **laptop terminal**:
+
+```bash
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7"
+chpc-globus.sh push "$CHPC_REPO/examples/p1b7" \
+  "$CHPC_USER_SCRATCH/p1b7-transfer-check" --dry-run
+```
+
+Read the printed source and destination. `--dry-run` prints the route without
+sending anything; it does not prove access or completion. Remove that option
+to transfer:
+
+```bash
+chpc-globus.sh push "$CHPC_REPO/examples/p1b7" \
+  "$CHPC_USER_SCRATCH/p1b7-transfer-check"
+```
+
+The wrapper waits for success (up to an hour by default). The contents of
+`examples/p1b7` arrive directly in `p1b7-transfer-check`, so its README is at
+`$CHPC_USER_SCRATCH/p1b7-transfer-check/README.md`. Globus does not add another
+`p1b7` directory underneath that destination. The
+[P1B7 walkthrough](11-p1b7-walkthrough.md) uses these same inputs with Boltz,
+Chai, and Protenix.
+
+For a ready-to-run job bundle, `chpc-submit.sh` combines a Globus transfer,
+successful-completion check, and Slurm submission. Preview the P1B7 Boltz job
+without transferring files or submitting anything:
+
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- boltz
+```
+
+The [P1B7 walkthrough](11-p1b7-walkthrough.md) explains that job's requirements
+and actual submission. The helper sends the selected folder to its own run
+directory on scratch.
+
+For a deliberate copy of a whole working project, use the lower-level `push`
+with explicit exclusions:
+
+```bash
+chpc-globus.sh push "$CHPC_PROJECT" \
+  "$CHPC_USER_SCRATCH/work/$(basename "$CHPC_PROJECT")" \
+  --exclude '.git' --exclude 'chpc.env.local' --exclude '.DS_Store' \
+  --exclude-dir '.git' --exclude-dir '.venv' --exclude-dir '__pycache__' \
+  --sync-level checksum
+```
+
+`push` does not read `.gitignore`. `--exclude` matches file names;
+`--exclude-dir` matches directory names and omits their entire contents. Quote
+patterns so your local shell does not expand them. Both `.git` forms matter:
+a normal checkout has a `.git` directory, while submodules/worktrees can have
+a `.git` file. Directory exclusions require `python3`, which builds the
+request sent through the Globus CLI. Add exclusions for your own large
+generated outputs or local environments.
+
+Globus copies uncommitted and untracked files that are not excluded; it does
+not create a Git clone. Recursive Globus transfers skip symlinks encountered
+inside a directory, so use real input files in a self-contained job folder.
+`--sync-level checksum` skips identical files on repeated sends to the same
+scratch destination. It never deletes files already present there, so use a
+new cluster run directory when an exact, fresh set of inputs matters. Avoid
+editing files while a transfer of them is active.
+
+### 5. Wait for large transfers and retrieve results
+
+For a direct transfer to user scratch, `--wait 0` queues it and prints the task
+ID. This lets you check it later without keeping the terminal command open:
+
+```bash
+TRANSFER_TASK=$(chpc-globus.sh push "$CHPC_REPO/examples/p1b7" \
+  "$CHPC_USER_SCRATCH/p1b7-transfer-check" --wait 0)
+printf 'Transfer task: %s\n' "$TRANSFER_TASK"
+globus task wait "$TRANSFER_TASK" --timeout 3600
+globus task show "$TRANSFER_TASK"
+```
+
+**Wait for `Status: SUCCEEDED` before submitting a job that uses those files.**
+A wait timeout does not cancel the transfer; inspect the task status and wait
+again. `globus task list` finds task IDs if you open a new terminal. Keep GCP
+running and your Mac awake/connected until the transfer completes.
+
+To bring that example directory back as a transfer check, create a writable
+results folder under your allowed project path and paste:
+
+```bash
+mkdir -p "$CHPC_PROJECT/downloads"
+chpc-globus.sh doctor "$CHPC_PROJECT/downloads"
+chpc-globus.sh pull "$CHPC_USER_SCRATCH/p1b7-transfer-check" \
+  "$CHPC_PROJECT/downloads/p1b7-transfer-check"
+```
+
+For real results, replace the source with the output directory reported by
+your job, and choose a new local destination. Pulling into an existing folder
+can replace same-named files; use a separate run folder to preserve older
+results. You can pull from scratch or from FAC, for example:
+
+```bash
+chpc-prime.sh
+chpc-globus.sh pull "$CHPC_LAB/results/p1b7" \
+  "$CHPC_PROJECT/downloads/p1b7-results"
+```
+
+That FAC example assumes your job saved results there. Follow the
+[P1B7 result-saving step](11-p1b7-walkthrough.md) for the actual run path.
+
+### Persistent data: why FAC transfers have two legs
+
+There is **no FAC Globus collection**. The two CoreHPC collections are User
+Home and User Scratch; use **User Scratch** for inputs and outputs, not the
+20 GiB Home collection. These are site settings already in `lab/chpc.env`.
+
+A push to FAC first transfers into `$CHPC_GLOBUS_STAGING` on user scratch,
+then uses SSH to request a **cluster-local** copy into FAC and repair its ACLs.
+File contents do not pass through SSH. A pull copies FAC data into that scratch
+buffer first, then Globus transfers it to your laptop. This remote buffer is
+separate from the optional local staging folder.
+
+For example, with actual files in the P1B7 example:
+
+```bash
+chpc-prime.sh
+chpc-globus.sh push "$CHPC_REPO/examples/p1b7" \
+  "$CHPC_LAB/data/p1b7-example" --dry-run
+chpc-globus.sh push "$CHPC_REPO/examples/p1b7" \
+  "$CHPC_LAB/data/p1b7-example"
+```
+
+Use destinations inside the established FAC layout (`data/`, `results/`, and
+so on), because of the ACL issue described above. The scratch buffer is
+purged like any other scratch data; FAC holds the persistent copy. Each FAC
+transfer uses its own scratch buffer, so repeated sends cannot reuse stale
+buffer contents. `--sync-level checksum` does not save upload work on that
+route: the new buffer starts empty. A push to
+FAC must finish the Globus leg before its local copy, so `--wait 0` is refused
+for that route. Use the default wait or a longer `--wait` value.
+
+### Optional: expose only a staging folder
+
+If you would rather not give Globus access to your projects folder, allow a
+single staging folder instead (Writable, for incoming results) and copy the
+files for each run into it. `push` and `pull` take whatever local path you
+pass them, so nothing else changes:
+
+```bash
+mkdir -p "$HOME/globus-staging/p1b7"
+cp -R "$CHPC_REPO/examples/p1b7/." "$HOME/globus-staging/p1b7/"
+chpc-globus.sh doctor "$HOME/globus-staging/p1b7"
+chpc-globus.sh push "$HOME/globus-staging/p1b7" \
+  "$CHPC_USER_SCRATCH/p1b7-transfer-check"
+```
+
+`CHPC_GLOBUS_STAGING_LOCAL` in `chpc.env.local` only records that folder for
+pipelines that ask for it; setting it copies nothing and grants no access.
+
+### If a check fails
+
+- **`globus: command not found`:** install the CLI and open a new Terminal
+  window after `pipx ensurepath`.
+- **No local collection detected:** start Globus Connect Personal. If you set
+  `CHPC_GLOBUS_LOCAL_COLLECTION` manually, confirm it identifies this machine.
+- **Local path cannot be listed:** confirm it exists, its external disk is
+  mounted, and it is in Accessible Folders. Check the absolute path shown by
+  `chpc-globus.sh env`/`doctor`; do not substitute a different root just to make
+  an unrelated folder list successfully.
+- **A path contains `..`:** use the absolute path from `pwd -P` after changing
+  to the intended directory. The wrapper refuses `..` because simplifying it
+  around symlinks could select a different file.
+- **Push works, pull fails:** enable Writable for the local destination and
+  check your macOS user can write there too. Listing alone cannot prove this.
+- **Scratch consent error:** run the `globus login --gcs` command in step 3.
+  Do not use `--gcs` with your personal collection; its authentication model
+  differs from the cluster's mapped collection.
+- **FAC copy needs SSH:** run `chpc-prime.sh` in your laptop terminal. See
+  [access and SSH setup](01-access-and-ssh.md) if the alias is not configured.
+- **A transfer is still active:** use `globus task show TASK_ID`. A disconnected
+  laptop or unmounted drive needs to be available again for transfer to resume.
+
+`globus collection show` can require management consent beyond transfer
+permissions. Use `doctor`/`globus ls` to diagnose file access rather than
+assuming a management-consent error means transfers are broken.
 
 ### "Slow" is about bandwidth, not about every access pattern
 

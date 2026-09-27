@@ -1,13 +1,16 @@
 # UCSF CoreHPC — Craik Lab Field Guide
 
-How the Craik Lab uses the UCSF CoreHPC cluster. Three things live here:
+How the Craik Lab uses the UCSF CoreHPC cluster. Four things live here:
 
 - A tool registry, `tools/`: one entry per piece of software the lab runs
   (Boltz-2, ColabFold, RFdiffusion, Rosetta and 29 more) and the `chpc-tool`
   command that runs any of them from the lab's shared FAC storage, with the
   weights, bind mounts and GPU constraints already sorted out.
-- Slurm job templates, `templates/slurm/`, and the lab environment file they
-  source, `lab/chpc.env`.
+- A complete worked example, `examples/p1b7/`: the inputs, checks and batch
+  script for one structure prediction, used by every walkthrough.
+- Slurm job templates, `templates/slurm/`, the lab environment file they
+  source, `lab/chpc.env`, and the laptop-side scripts, `scripts/`, that move
+  data over Globus and submit jobs.
 - A field guide to the cluster itself, `docs/`: access, storage, jobs,
   partitions, containers.
 
@@ -16,51 +19,189 @@ the registry from it; see "Using it from a project" below.
 
 ## First hour on CoreHPC
 
-1. Get an account: your PI submits <https://tiny.ucsf.edu/Gethpc>. You need a
-   UCSF campus account, Duo, and membership of the lab FAC share
-   (`sec_fac_cx500146_ds1`).
-2. Connect to the UCSF VPN, even on campus Wi-Fi (`docs/01-access-and-ssh.md`
-   has the GlobalProtect caveats).
-3. Install `ssh/config.example` as `~/.ssh/config`, create a key, follow
-   `docs/01-access-and-ssh.md`. After that `ssh chpc` reaches the login node
-   with one Duo push per session.
-4. On the login node, once, add this line to `~/.bashrc` and run it:
+Start here even if you have never used a terminal. The worked scientific
+example is **P1B7 bound to sotorasib-modified KRAS peptide–MHC I, PDB 8UDR**.
+Its inputs are included in this repo: you do not need another lab project's
+files. The first session covers access and preparation; a prediction may
+queue longer than an hour.
 
-   ```bash
-   [ -f /mnt/fac/CX500146_DS1/chpc.env ] && source /mnt/fac/CX500146_DS1/chpc.env
-   ```
+### 1. Know which computer you are typing on
 
-   It puts `chpc-tool` on `PATH` with Tab completion, moves the Apptainer,
-   pip and conda caches off your 20 GiB home, and makes scratch and FAC
-   visible inside containers.
-5. Work in `/mnt/scratch/user/$USER` (purged after 30 days). Final results
-   go to `/mnt/fac/CX500146_DS1/results/<project>/`. Never compute on the
-   login node, and never run heavy I/O against `/mnt/fac`.
-6. Get a compute node. Every partition defaults to a one-hour limit, so
-   always pass `-t`:
+Open **Terminal** on your Mac. This gives you a *shell*: a program that runs
+the commands you type. There are three places commands run in this guide:
 
-   ```bash
-   salloc -p cpu -c 4 --mem 8G -t 2:00:00                                        # CPU
-   srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l  # GPU, safe for every tool
-   ```
+- **Laptop:** your Mac, before `ssh chpc`. Files here are on your Mac.
+- **Login node:** the cluster's entrance, after `ssh chpc`. Use it to prepare
+  small input files, download files, submit jobs, and read logs.
+- **Compute node:** a machine assigned by Slurm, the cluster's job scheduler.
+  Run structure prediction and other substantial calculations here.
 
-7. On that node, `chpc-tool doctor`: one row per tool, OK or FAIL, and where
-   it lives. That is the check that steps 4 to 6 worked.
-8. Data moves over Globus, never `scp` or `rsync` through the bastion (the
-   AUP). On your laptop: `source env.sh` in a checkout of this repo, set up
-   Globus Connect Personal once (`chpc.env.local.example` walks through it),
-   then `chpc-globus.sh doctor` and
+Each walkthrough labels the location before its command blocks. Paste the
+commands inside a block, without the surrounding backticks or a shell prompt
+such as `$`. Press Return. A line beginning with `#` is a comment. If a line
+ends in `\`, paste the next line too: they form one command. If a block
+contains `<<'EOF'`, paste through the final `EOF`; this writes the intervening
+text into a file. If you see an error, stop and read it before pasting the next
+block.
 
-   ```bash
-   chpc-globus.sh push ./inputs "$CHPC_USER_SCRATCH/myproj/inputs"   # to scratch: one leg; to FAC: two, the script takes both
-   chpc-globus.sh pull "$CHPC_LAB/results/myproj" ./results
-   ```
+These commands are useful anywhere and do not change files:
 
-   `docs/02-storage-and-data.md` has the route and its traps.
+```bash
+hostname
+whoami
+pwd
+ls
+```
+
+`hostname` names the computer, `whoami` prints your account, `pwd` prints
+the current directory, and `ls` lists its contents. On macOS zsh, lines with
+comments need `setopt interactivecomments`; the SSH setup guide enables this
+before using commented examples.
+
+`cd folder` changes directory; `mkdir -p folder` creates it if needed.
+`~` means your home directory on the computer you are using. `$USER` expands
+to your username there. Quoted paths such as `"$WORK"` keep spaces together.
+Variables last for the current shell; the reconnect instructions below reset
+them. **Ctrl-C** stops the foreground command. `exit` leaves the current shell;
+from a compute shell it returns to the login node, and from the login node it
+disconnects SSH.
+
+### 2. Get access and connect
+
+You need a UCSF campus account, Duo, a CoreHPC account, and membership of the
+lab FAC share (`sec_fac_cx500146_ds1`). Your PI requests access through
+<https://tiny.ucsf.edu/Gethpc>. Connect to the UCSF VPN, including on campus
+Wi-Fi.
+
+**On your laptop, once:** follow [Access and SSH, first-time setup](docs/01-access-and-ssh.md)
+to create an SSH key and add the cluster connection settings. That page
+explains exactly where your campus username goes and how to preserve an
+existing SSH configuration. Then, **on your laptop each time**:
+
+```bash
+ssh chpc
+```
+
+Approve Duo when prompted. You should now be on the login node. Check:
+
+```bash
+hostname
+whoami
+```
+
+The hostname should be `chpc-ucsf-login-vm1` (or the current CoreHPC login
+host), and the username should be your campus username, not your Mac account.
+If `ssh chpc` says it cannot resolve `chpc`, finish the SSH configuration
+before continuing.
+
+### 3. Load the lab tools
+
+**On the login node, each new session:**
+
+```bash
+source /mnt/fac/CX500146_DS1/chpc.env &&
+command -v chpc-tool &&
+chpc-tool list
+```
+
+`source` loads settings into your current shell. The first command configures
+the lab's shared tools and moves their temporary caches to scratch storage.
+`command -v` should print a path ending in `/bin/chpc-tool`. `list` shows what
+is installed; a `planned` tool is not available yet. You do **not** need to
+install Boltz, Chai, Protenix, CUDA, or their model weights yourself.
+
+Optional, **once on the login node**, save that setup line for future
+interactive Bash sessions. This appends it only if absent:
+
+```bash
+touch "$HOME/.bashrc"
+if ! grep -Fq '/mnt/fac/CX500146_DS1/chpc.env' "$HOME/.bashrc"; then
+    printf '%s\n' '[ -f /mnt/fac/CX500146_DS1/chpc.env ] && source /mnt/fac/CX500146_DS1/chpc.env' >> "$HOME/.bashrc"
+fi
+```
+
+The walkthroughs still source their environment explicitly, so they work
+without this optional setup. If the shared file is missing or unreadable,
+ask the lab maintainer about FAC access; do not proceed with empty variables.
+
+### 4. Put this repo on your Mac and set up Globus
+
+Open a **laptop terminal**, separate from your SSH session. Lab members keep
+their projects in one folder on the Mac and let Globus see that folder; this
+repo goes in it too. Clone it once, into the folder where you keep projects
+(here `~/projects`; use your own):
+
+```bash
+mkdir -p ~/projects && cd ~/projects
+git clone https://git.kalestew.io/ucsf/craik-lab/Craik-CoreHPC.git
+cd Craik-CoreHPC
+```
+
+If Git asks for credentials, use your GitLab login; if access is denied, ask
+the lab maintainer. Then follow
+[Globus setup](docs/02-storage-and-data.md#laptop-to-cluster) once: install
+Globus Connect Personal and its command-line tool, sign in, add your projects
+folder to its **Accessible Folders**, and write your campus username into
+`chpc.env.local`. Enable **Writable** on the folder if results should come
+back there. From this checkout, check the setup:
+
+```bash
+source ./env.sh &&
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7"
+```
+
+`doctor` lists the real folder through Globus. If it reports
+`Path not allowed`, add the displayed folder in Globus Connect Personal's
+Access settings and retry. Keep the app running and the Mac awake while a
+transfer is active.
+
+**Globus moves files; SSH runs commands.** Put scripts and inputs through
+Globus, then execute the staged script with a short SSH command. Do not send
+file contents through SSH using `scp`, `rsync`, tar, base64, or large inline
+Python/heredoc programs. `git clone`/`git pull` remains appropriate for a
+committed code checkout on the cluster; it does not transfer your current
+local edits or untracked inputs.
+
+### 5. Prepare and run the P1B7 example
+
+Open the **[P1B7 / 8UDR walkthrough](docs/11-p1b7-walkthrough.md)** next.
+It explains the five protein chains, covalent ligand, and templates, then
+walks through sending the supplied inputs from your laptop and running:
+
+- [Boltz-2](tools/boltz/README.md#run-it), the first suggested walkthrough.
+- [Chai-1](tools/chai1/README.md#run-it), with its separate bond-restraint file.
+- [Protenix](tools/protenix/README.md#run-it), with its own JSON input format.
+
+The quick path, **on your laptop** after Globus setup, is:
+
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- boltz
+```
+
+This previews the transfer and submission. To actually send the files and
+submit one GPU job, run:
+
+```bash
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch -- boltz
+```
+
+The helper transfers that self-contained example folder and a small submit
+script, waits for both Globus transfers to succeed, then submits the batch
+job. It creates a fresh scratch directory and saves a receipt with the job
+ID and remote path. It uses the lab's shared installation on the cluster by
+default. A failed or timed-out transfer stops before job submission.
+
+The walkthrough also gives the manual cluster-shell route, monitoring,
+reconnection, and result retrieval. Scratch is temporary; keep final results
+on FAC and retrieve them with Globus. For your own work, supply a
+self-contained job folder containing its batch script, scripts, and inputs.
+Use [the transfer guide](docs/02-storage-and-data.md#laptop-to-cluster) when you
+only need to move files without submitting a job.
 
 ## Run a tool
 
-On a compute node, after step 4 above:
+Once you have completed a walkthrough, these are the reusable commands.
+**On a GPU compute node**, with the lab environment loaded:
 
 ```bash
 chpc-tool list                              # every tool; STATUS verified = it has run on a compute node here
@@ -70,8 +211,8 @@ chpc-tool exec boltz -- boltz --help        # run a program inside it. Always `-
 chpc-tool exec boltz -- bash                # a shell inside it
 ```
 
-Put inputs on `/mnt/scratch/user/$USER` (from a laptop, `chpc-globus.sh
-push`, step 8); the same path is valid inside the container, so a command that
+Put inputs on `/mnt/scratch/user/$USER` (from a laptop, use the Globus guide
+above); the same path is valid inside the container, so a command that
 works at the shell works unchanged through `chpc-tool exec`. Weights are
 already on the share and `exec` hands the tool their location.
 
@@ -83,6 +224,8 @@ inputs"](tools/README.md#run-a-tool-on-your-inputs).
 
 ## Where to go next
 
+- First complete scientific example, including inputs, jobs and results:
+  [P1B7 / 8UDR walkthrough](docs/11-p1b7-walkthrough.md).
 - Run the lab's software on your inputs, interactively or as a job:
   [`tools/README.md`](tools/README.md).
 - One tool's run block, inputs, traps and build record: `tools/<tool>/README.md`.
@@ -137,16 +280,36 @@ in the same `ucsf/craik-lab` group can use the relative URL
 project, point the submodule's origin at the SSH URL:
 `git -C corehpc remote set-url origin git@git.kalestew.io:ucsf/craik-lab/Craik-CoreHPC.git`.
 
-Then, on a laptop or on the cluster:
+On your laptop, source the submodule and use the included P1B7 job folder
+for your first dispatch. Complete the [Globus setup](docs/02-storage-and-data.md)
+once, including access to your projects folder:
 
 ```bash
-source corehpc/env.sh                      # any path, bash or zsh
-chpc-prime.sh                              # Duo once; scripts/ and lab/bin/ are now on PATH
-chpc-globus.sh push ./inputs "$CHPC_USER_SCRATCH/myproj/inputs"   # Globus, one leg; a FAC destination is two (doc 02)
-cp corehpc/templates/slurm/gpu.sbatch jobs/train.sbatch   # copy templates out; edit the copy
-sbatch jobs/train.sbatch                   # the job sources the pinned chpc.env through $CHPC_ENV
-chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your project, not the submodule
+source corehpc/env.sh
+chpc-globus.sh doctor "$CHPC_REPO/examples/p1b7"
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch --dry-run -- boltz
+chpc-submit.sh "$CHPC_REPO/examples/p1b7" p1b7.sbatch -- boltz
 ```
+
+The last line transfers the selected folder through Globus, waits for it,
+then submits the job over SSH. See the [walkthrough](docs/11-p1b7-walkthrough.md)
+for monitoring and downloading the results. By default, the job uses the
+shared cluster tool installation; `--corehpc /absolute/path/on/cluster/corehpc`
+selects an existing pinned checkout on the cluster.
+
+For your own jobs, collect the batch script and its input files in one
+self-contained folder, then pass that folder and its relative `.sbatch`
+filename to `chpc-submit.sh`. Keep inputs unchanged until the transfer ends.
+The standard tool template receives `WORKDIR` pointing at the transferred
+folder. Project-specific wrappers should call these helpers for transfer and
+submission, so their users get the same access checks and transfer receipts.
+Add `.chpc/` and `chpc.env.local` to the parent project's `.gitignore`;
+they hold local receipts and machine settings.
+
+When already working in a cluster shell, source the **cluster's** checkout
+and run `sbatch` there as shown in [batch jobs](docs/04-batch-jobs.md).
+Only a cluster path to `CHPC_ENV` can be carried into a job; a Mac path
+cannot be used by the compute node.
 
 `env.sh` exports:
 
@@ -160,7 +323,7 @@ chpc-discover.sh --out docs/cluster-facts.md              # facts dump into your
 | `CHPC_TOOLS` | path of `tools/` in this checkout: the registry `chpc-tool` reads |
 | `CHPC_ON_CLUSTER` | `1` on a CoreHPC node, `0` elsewhere |
 | `CHPC_*` paths | FAC, group scratch, user scratch, containers (from `lab/chpc.env`) |
-| `CHPC_GLOBUS_*` | the two CoreHPC collections, the scratch root and the staging buffer (site facts, from `lab/chpc.env`); your machine's collection, root and staging directory (from `chpc.env.local`, empty until set) |
+| `CHPC_GLOBUS_*` | CoreHPC collections and scratch paths from `lab/chpc.env`; your machine's collection and path mapping from `chpc.env.local`. A local staging directory is optional. |
 
 Off-cluster only the paths are set. The cache and conda redirections in
 `lab/chpc.env` apply on cluster nodes, so sourcing it on a laptop leaves
@@ -231,6 +394,7 @@ say so and give the CoreHPC-specific version.
 | `docs/08-multi-gpu-and-pod.md` | Two-GPU jobs on the `gpu` partition, GPU arrays; POD kept as reference only (not available to us) |
 | `docs/09-sge-to-slurm.md` | Wynton (SGE) to SLURM translation table |
 | `docs/10-policies-support-troubleshooting.md` | Acceptable-use essentials, downtimes, support channels, common errors |
+| `docs/11-p1b7-walkthrough.md` | First complete P1B7/8UDR example: supplied inputs, chains and ligand, laptop dispatch, interactive/batch runs, templates, checks, reconnecting and saving |
 | `docs/cluster-facts.md` | Live facts captured from the cluster by `scripts/chpc-discover.sh` (last: 2026-09-18) |
 | `docs/wiki-sources.md` | Index of the wiki pages this guide is built from |
 | `docs/training-2026-09.md` | The Sept 2026 CoreHPC training: what it confirmed, where it is wrong for UCSF, what it changed here |
@@ -239,12 +403,17 @@ say so and give the CoreHPC-specific version.
 
 ```
 env.sh                      Source me: CHPC_* variables, scripts on PATH, tab completion; standalone or submodule
-chpc.env.local.example      Copy to <your project>/chpc.env.local: username, share, SSH alias, Globus staging directory
+chpc.env.local.example      Copy to <your project>/chpc.env.local: username, share, SSH alias, local Globus collection
 ssh/config.example          SSH config: bastion, ProxyJump, ControlMaster
 scripts/chpc-prime.sh       Open the Duo-authenticated master SSH session
 scripts/chpc-discover.sh    Dump live cluster facts to docs/cluster-facts.md (or --out FILE)
-scripts/chpc-globus.sh      Move data over Globus, the approved path (push/pull/doctor/env)
-scripts/chpc-stage.sh       rsync to group scratch -- NOT an approved path; see its header
+scripts/chpc-globus.sh      Transfer directly from/to project folders (doctor PATH, push/pull, exclusions, checksum sync)
+scripts/chpc-submit.sh      Globus-stage a self-contained job folder, wait for success, then submit with a short SSH command
+scripts/chpc-submit-remote.sh  The cluster-side half of chpc-submit.sh; travels with the job folder, never run by hand
+scripts/lib/                Python helper that builds a Globus transfer request with directory exclusions
+scripts/chpc-stage.sh       Retired SSH transfer entry point; exits with Globus migration instructions
+examples/p1b7/              Self-contained P1B7/8UDR tutorial inputs, references, runners and checks
+docs/                       The field guide (see Contents above)
 tools/<tool>/tool.conf      THE TOOL REGISTRY: one entry per piece of software
 tools/README.md             Run a tool, the CLI, which GPU, add a tool; then the tool.conf reference
 tools/covalent-bonds.md     How each co-folding tool addresses a covalent bond, and why only geometry checks one
@@ -255,7 +424,10 @@ lab/README.md               Layout of our shared FAC directory, and keeping its 
 lab/bin/chpc-tool           Resolve, run, build and publish anything in the registry
 lab/bin/chpc-assets         Install and verify licensed binaries and model weights
 lab/bin/chpc-jobstats       What a finished job should have asked for (sacct; login node)
-lab/bin/chpc-completion.bash  Tab completion; sourced by env.sh and chpc.env in interactive shells
+lab/bin/chpc-fac-fixacl     Repair the owner-DENY ACL on anything created at the FAC share root
+lab/bin/chpc-stage-containers  Refresh the group-scratch mirror of the share's containers
+lab/bin/run-in-container    The wrapper `chpc-tool publish` instantiates as $CHPC_LAB/bin/<tool>
+lab/bin/chpc-completion.bash  Tab completion for chpc-tool, chpc-globus.sh and chpc-submit.sh
 lab/lib/jobstats.awk        The accounting maths behind chpc-jobstats
 tests/                      python3 -m unittest discover -s tests   (runs on a laptop; no cluster needed)
 ```

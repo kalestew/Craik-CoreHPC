@@ -68,10 +68,11 @@ is a per-user cap on the GPU jobs specifically, but the CPU jobs, there's no
   Open OnDemand) and doc 02 already said so 23 lines below where it recommended
   `scp`. The training resolves the contradiction: transfer through the bastion is
   not permitted, and an attendee's `scp` failed live.
-- **`scripts/chpc-stage.sh`** — carries a policy warning. Behaviour unchanged;
-  retiring it is an owner decision. Superseded on 2026-09-26 by
-  `scripts/chpc-globus.sh`, the Globus route scripted, after the cluster
-  administrators confirmed Globus is the preferred path.
+- **`scripts/chpc-stage.sh`** — first given a policy warning, then retired on
+  2026-09-26 after the cluster administrators confirmed Globus is the
+  preferred path: it now refuses to transfer and prints the
+  `scripts/chpc-globus.sh` equivalent. The filename stays so older callers get
+  that message instead of a silent fallback.
 - **doc 02** — records that *which* timestamp starts the 30-day purge is
   undocumented and was not settled on the call.
 - **doc 04** — `seff` added to the monitoring table; a note that fair-share counts
