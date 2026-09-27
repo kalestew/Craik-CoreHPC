@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | planned — recipe, entry and a GPU-node `test.sh` written; not yet built |
+| Status | **built** 2026-09-27 — image compiled; every `test.sh` assertion passed on `ggpu1-06` (L40S) run directly against the SIF: 510 SPC waters minimised to -47.6 kJ/mol each, then 2000 MD steps with **mandatory** `-nb gpu -pme gpu` at 2652 ns/day. Not `verified` only because the FAC share is down, so the image is unpublished and `chpc-tool test` has not run |
 | Image to be | `gromacs_2026.3.sif` from [`gromacs_2026.3.def`](gromacs_2026.3.def), compiled from source on `nvidia/cuda:13.2.1-devel-ubuntu24.04` |
 | GPU | yes. Compiled for sm_89, sm_90 **and** sm_120, so every GPU model in the partition works; `GPU_MAX_CC` is empty |
 | Weights | none. Force fields and `spc216.gro` ship in `share/gromacs/top` |
@@ -15,25 +15,32 @@ the licensed [`amber`](../amber/README.md). Of the three it is the only one with
 **neither a licence to chase nor a conda solve to get wrong** — the trade being
 that it has to be compiled.
 
-## Not built yet
-
-```bash
-chpc-tool build gromacs              # login node; a LONG compile, tens of minutes
-chpc-tool publish gromacs
-chpc-tool test gromacs               # GPU NODE REQUIRED -- this is what `verified` means
-```
-
-The intended commands, from [`test.sh`](test.sh) and **not yet run**:
+## Run it
 
 ```bash
 salloc -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 16G -t 2:00:00
-chpc-tool exec gromacs -- gmx grompp -f md.mdp -c conf.gro -p topol.top -o md.tpr  # (untested)
-chpc-tool exec gromacs -- gmx mdrun -deffnm md -nb gpu -pme gpu -bonded gpu        # (untested)
+chpc-tool exec gromacs -- gmx grompp -f md.mdp -c conf.gro -p topol.top -o md.tpr
+chpc-tool exec gromacs -- gmx mdrun -deffnm md -nb gpu -pme gpu
 ```
 
-Any GPU model works — `nvidia_l40s`, `nvidia_h100_nvl` or `nvidia_rtx_pro_6000`.
+**`-nb gpu` is not optional.** Without it `mdrun` decides for itself and falls
+back to the CPU in silence; with it, it aborts instead. See
+[Do not miss](#do-not-miss).
 
-Build and publish: [`../README.md`, Add a tool](../README.md#add-a-tool).
+Any GPU model works — `nvidia_l40s`, `nvidia_h100_nvl` or `nvidia_rtx_pro_6000`.
+The image is compiled for sm_89, sm_90 and sm_120, so `GPU_MAX_CC` is empty and
+`chpc-tool exec` refuses nothing.
+
+The image was built on 2026-09-27 but **is not on the share yet**: the FAC mount
+went unresponsive cluster-wide that morning, before `chpc-tool publish gromacs`
+could copy it. Until that is done the SIF lives at
+`/mnt/scratch/user/$USER/apptainer/gromacs_2026.3.sif` and only its builder can
+reach it. Publish with:
+
+```bash
+chpc-tool publish gromacs
+chpc-tool test gromacs               # GPU NODE REQUIRED -- this is what `verified` means
+```
 
 ## The module check is done, and the answer is no
 
@@ -104,10 +111,40 @@ recipe builds 2026.3 from the upstream tarball with the md5 checked.
 
 ## Provenance
 
-**Never run.** `STATUS=planned`; the image is not built. Everything below is
-what the recipe and test will establish.
+### Built and exercised on a GPU, 2026-09-27
 
-### CUDA 13 is the known risk
+The compile took about 24 minutes on the login node (started 00:06, SIF written
+00:30) and produced a 3.72 GB image. `%test` passed inside the build: "gmx
+responds on the squashfs, with CUDA compiled in".
+
+Then every assertion in [`test.sh`](test.sh) was run against the SIF on
+`ggpu1-06`, an L40S with driver 595.71.05:
+
+```
+GROMACS version:     2026.3
+GPU support:         CUDA
+SIMD instructions:   AVX2_256
+solvate placed 510 SPC waters
+minimised to -2.4294924e+04 kJ/mol over 510 waters
+    1 GPU selected for this run.
+    PP tasks will do non-perturbed short-ranged interactions on the GPU
+    PME tasks will do all aspects on the GPU
+Performance:     2652.656 ns/day
+```
+
+**−47.6 kJ/mol per water** is the regression baseline this section promised, and
+it sits mid-band in the −60 to −25 the test allows. `SIMD instructions:
+AVX2_256` confirms the pin held rather than cmake auto-detecting. All three
+`md.log` lines are present, so offload was real and not merely compiled in.
+
+The status is `built` and not `verified` for reasons that are both plumbing: the
+image is unpublished and `chpc-tool test gromacs` has not run, because the FAC
+share is down. The assertions were driven directly against the SIF instead,
+which does not exercise the registry path that `verified` is about.
+
+Still not measured: whether `AVX_512` beats `AVX2_256` on our Genoa nodes.
+
+### CUDA 13 was the known risk, and it was not a problem
 
 Support for compiling with the CUDA 13 toolkit landed in GROMACS 2025.3, so
 2026.3 accepts it — but upstream's CI covers **CUDA 12.1, 12.5.1 and 12.6
@@ -121,7 +158,7 @@ minor version emitting PTX an older driver cannot load. GROMACS compiles its
 kernels ahead of time rather than at run time, so it is less exposed than OpenMM
 is, but there is no reason to take the risk for nothing.
 
-### What `test.sh` will prove
+### What `test.sh` proves
 
 The fixture is upstream's own `spc216.gro` and OPLS-AA force field, both of
 which ship inside `share/gromacs/top`, so nothing is downloaded.
@@ -162,7 +199,6 @@ image that silently did the work on the CPU.
 - that `spc216.gro` and `oplsaa.ff` ship in `share/gromacs/top`;
 - the CPU flags on the login node and on a GPU node, quoted under "Do not miss".
 
-**Not** verified, and left to the first run: the actual per-water energy this
-build produces (recorded as the regression baseline the first time `test.sh`
-passes), whether `AVX_512` beats `AVX2_256` on our Genoa nodes, and how long
-the compile takes.
+Settled by the 2026-09-27 run above: the per-water energy (−47.6 kJ/mol) and
+the compile time (about 24 minutes). Still open: whether `AVX_512` beats
+`AVX2_256` on our Genoa nodes.
