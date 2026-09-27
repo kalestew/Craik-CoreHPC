@@ -1,6 +1,6 @@
 #!/bin/sh
 # RFdiffusion3 self-test: it designs a backbone, and it holds a covalent bond.
-# Run:  chpc-tool test rfdiffusion3      (CPU works; GPU is ~100x faster)
+# Run:  chpc-tool test rfdiffusion3      (~9 min on 16 CPU cores; faster on a GPU)
 #
 # Four stages, in increasing order of what they prove:
 #   0. both checkpoints exist and deserialise
@@ -119,7 +119,7 @@ cat load.log
 # ============================================================================
 # rfd3 runs on the CPU perfectly well and says so at ERROR level --
 #   "No GPUs/XPUs/MPS available - Setting accelerator to 'cpu'"
-# -- then produces a correct design about 100x slower. So the CPU path is not
+# -- then produces a correct design, just much more slowly. So the CPU path is not
 # a failure and this test does not treat it as one. What it refuses to do is
 # leave the log ambiguous: the accelerator is decided here, printed here, and
 # named again in the final ok line, so nobody can quote a CPU run as GPU

@@ -4,7 +4,7 @@
 |---|---|
 | Status | verified 2026-09-26 on `ccpu1-04` — `chpc-tool test rfdiffusion3` designs a 60-residue backbone and then a 120-residue de novo scaffold around the P1B7 sotorasib-modified cysteine, with the covalent bond intact. **The verifying run was on CPU**; see [Provenance](#verified-2026-09-26-a-design-runs-and-it-holds-the-covalent-bond) |
 | Image | `rfdiffusion3_0.2.0.sif`, 3.65 GB, no weights inside; recipe [`rfdiffusion3_0.2.0.def`](rfdiffusion3_0.2.0.def) |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1`. **Runs on CPU too**, correctly and about 100× slower |
+| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1`. **Runs on CPU too**, correctly, and slowly enough to matter |
 | Weights | 5.7 GB at `$FOUNDRY_CHECKPOINT_DIRS` (`$CHPC_LAB/data/rfdiffusion3`) for the default `rfd3 rf3`; 14.6 GB if you ask for `all`. Fetched by [`fetch-weights.sh`](fetch-weights.sh) on the login node |
 | Licence | BSD-3-Clause, code and weights; commercial use permitted |
 | Upstream | `rosettacommons/foundry:0.2.0-slim`, `rc-foundry==0.2.0` |
@@ -136,10 +136,12 @@ A committed, working example is
   without the `+`. This applies to every `specification.*` override, not to
   `out_dir`, `inputs`, `ckpt_path` or `inference_sampler.*`.
 - **It runs on the CPU, correctly, and tells you at ERROR level.**
-  `No GPUs/XPUs/MPS available - Setting accelerator to 'cpu'`. A 60-residue
-  design took 11 s of inference at 20 timesteps on `ccpu1-04`; the same thing
-  on an L40S is seconds. Nothing fails, so an sbatch that lost its `--gres`
-  produces correct designs at a hundredth of the speed and only the wall clock
+  `No GPUs/XPUs/MPS available - Setting accelerator to 'cpu'`. Measured on
+  `ccpu1-04` with 16 cores: a 60-residue design at 200 timesteps and a
+  120-residue one with a 47-atom motif, together, took 8 m 42 s including
+  loading 5.7 GB of checkpoints. No GPU timing has been taken here yet, so no
+  ratio is quoted. What matters is that **nothing fails**: an sbatch that lost
+  its `--gres` still produces correct designs, and only the wall clock
   complains.
 - **Never read the `GPU information:` line as evidence of a GPU.**
   `cuequivariance_ops/triton/cache_manager.py` catches a pynvml failure and
@@ -195,8 +197,8 @@ neighbouring carbon that happened to drift close.
 
 The `insertion_rmsd` of 0.474 Å is upstream's own measure of how faithfully the
 fixed motif was reproduced. The whole test took 8 m 42 s on `ccpu1-04` with 16
-cores, almost all of it the two 200-timestep designs; the same work on an L40S
-is seconds.
+cores, almost all of it the two 200-timestep designs. No GPU timing has been
+taken here, so this page quotes none.
 
 Stage 2, the unconditional design, on the same run:
 
