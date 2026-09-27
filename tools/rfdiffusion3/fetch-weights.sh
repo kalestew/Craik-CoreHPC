@@ -36,11 +36,31 @@ CHPC_TOOL="${CHPC_TOOL:-$SELF_DIR/../../lab/bin/chpc-tool}"
 
 eval "$("$CHPC_TOOL" export rfdiffusion3)"
 dest="$FOUNDRY_CHECKPOINT_DIRS"
+mkdir -p "$dest"
+
+# The covalent-modification test fixture travels with the checkpoints rather
+# than with the entry, because the share carries tools/ and not examples/.
+# One copy lives in git, under examples/p1b7; this places it where test.sh
+# looks. `--fixture` does only this and downloads nothing.
+install_fixture() {
+  src="$SELF_DIR/../../examples/p1b7/reference/8UDR.cif.gz"
+  if [ -f "$src" ]; then
+    cp -f "$src" "$dest/8UDR.cif.gz"
+    echo "fixture:     $dest/8UDR.cif.gz  ($(stat -c%s "$dest/8UDR.cif.gz") bytes)"
+  else
+    echo "fixture:     NOT FOUND at $src -- run this from a repo checkout" >&2
+  fi
+}
+if [ "${1:-}" = "--fixture" ]; then
+  install_fixture
+  exit 0
+fi
+
 models=${*:-rfd3 rf3}
 
 echo "destination: $dest"
 echo "models:      $models"
-mkdir -p "$dest"
+install_fixture
 
 # The read-only-image problem this tool has is handled by WRITABLE_TMPFS=1 in
 # its tool.conf, not here: foundry persists the checkpoint directory with
