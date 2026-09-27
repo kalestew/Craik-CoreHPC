@@ -524,22 +524,28 @@ Scheduler values in particular never appear in this directory. They live in the
 
 ### An entry is not an image
 
-Ten of 34 entries are `STATUS=planned` (2026-09-26): the catalogue records a tool
+Seven of 34 entries are `STATUS=planned` (2026-09-26): the catalogue records a tool
 the lab expects to want, with its licence, upstream and intended packaging, before
 anyone has built it. That is deliberate — an entry costs minutes, an image costs an
 afternoon and a few GB of the share.
 
-**What `planned` is hiding matters more than the count**, and the ten are not ten
+**What `planned` is hiding matters more than the count**, and the seven are not seven
 of the same thing:
 
 | Blocked on | Entries |
 |---|---|
 | a **licence or credential** somebody has to obtain | `amber` (paid site licence for `pmemd`), `netmhciipan` (two tarballs behind a DTU form), `pyrosetta` (credentials for a private conda channel), `bindcraft` (calls `pyrosetta.init()` at import scope, so it inherits that block) |
 | a **decision about scale** | `alphafold3` — weights staged and sha256-verified, but hundreds of GB of genetic databases are not, and fetching them is a commitment rather than a step |
-| a **GPU node to run the test on** | `openmm`, `thermompnn` — both built and published; their tests need a GPU and are queued |
-| **work, and nothing else** | `ambertools`, `gromacs`, `rfdiffusion2` |
+| **work, and nothing else** | `gromacs` (source build), `rfdiffusion2` |
 
-Two further entries are `external` rather than `planned`, because nothing will
+A further four are `built` rather than `verified` — `intellifold`, `openfold3`,
+`openmm`, `thermompnn`. Every one of them is published and waiting on the same
+thing: a GPU node. Their tests cannot run on the CPU partitions, and the 8-GPU
+per-user cap means a queued verification sits behind whatever else the lab is
+running. `built` is the honest status for an image nobody has yet proved on this
+hardware; it is not a synonym for "probably fine".
+
+Two entries are `external` rather than `planned`, because nothing will
 ever be built for them: see the status table under "Add a tool".
 
 `chpc-tool list` prints the status, and `chpc-tool doctor` fails loudly on a tool that

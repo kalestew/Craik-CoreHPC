@@ -30,6 +30,20 @@ set -eu
 : "${FOUNDRY_CHECKPOINT_DIRS:?not set -- run through chpc-tool, which exports it}"
 : "${RFD3_CKPT:?not set -- run through chpc-tool, which exports it}"
 
+# atomworks prints the same six-line preamble about CCD_MIRROR_PATH and
+# PDB_MIRROR_PATH on every import, plus four "Field ... not found in file"
+# notices for the conditioning annotations a deposited CIF naturally lacks.
+# All benign, all unavoidable, and together they bury the four lines that
+# matter. Strip exactly those and nothing else -- a real error still shows.
+quiet() {
+    grep -v -e 'Environment variable .* not set' \
+            -e '^  ([0-9])' \
+            -e 'WARNING:atomworks.io:Field .* not found in file, ignoring' \
+            -e "WARNING:atomworks.io:We can't fix formal charges" \
+            -e 'INFO:    Cleanup error: while stopping driver' \
+            "$1" || true
+}
+
 d="$FOUNDRY_CHECKPOINT_DIRS"
 for f in rfd3_latest.ckpt rf3_foundry_01_24_latest_remapped.ckpt; do
     test -s "$d/$f" || {
@@ -214,7 +228,7 @@ then
     echo "the unconditional design is not a usable protein:" >&2
     tail -25 uncond_check.log >&2; exit 1
 fi
-sed 's/^/    /' uncond_check.log
+quiet uncond_check.log | sed 's/^/    /'
 
 # ============================================================================
 # 3. The P1B7 covalent bond, going in
@@ -289,7 +303,7 @@ then
     echo "rfd3 did not read the deposited covalent bond:" >&2
     tail -25 cov_in.log >&2; exit 1
 fi
-sed 's/^/    /' cov_in.log
+quiet cov_in.log | sed 's/^/    /'
 
 # ============================================================================
 # 4. And coming out of a design
@@ -389,7 +403,7 @@ then
     echo "the covalent modification did not survive the design:" >&2
     tail -30 cov_out.log >&2; exit 1
 fi
-sed 's/^/    /' cov_out.log
+quiet cov_out.log | sed 's/^/    /'
 
 # ============================================================================
 # The accelerator claim, settled against the logs

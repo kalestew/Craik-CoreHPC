@@ -1,0 +1,47 @@
+# RFdiffusion3 design spec: build a new protein around the sotorasib-modified
+# KRAS G12C cysteine of 8UDR.
+#
+# This is a DESIGN task, not a prediction. The other inputs here -- boltz.yaml,
+# protenix.json, chai1.fasta -- fold the complex that exists. This one invents a
+# 120-residue scaffold to hold the covalent adduct, which is the same job the
+# P1B7 Fab does by other means.
+#
+# Run it from this directory:
+#   gunzip -c reference/8UDR.cif.gz > 8UDR.cif
+#   eval "$(chpc-tool export rfdiffusion3)"
+#   chpc-tool exec rfdiffusion3 -- rfd3 design \
+#       inputs=rfd3.yaml out_dir=out ckpt_path="$RFD3_CKPT"
+#
+# YAML rather than JSON so these comments can exist. rfd3 takes either, and a
+# `_comment` key in the JSON would be read as a design named `_comment`.
+#
+# THERE IS NO BOND DECLARATION HERE, AND THAT IS NOT AN OMISSION.
+# RFdiffusion3 has no `covalent_bonds` and no `bondedAtomPairs`. It reads the
+# bonds in the input file: 8UDR's deposited _struct_conn gives C/CYS6/SG to
+# F/MOV/C25 at 1.765 A, and FlagAndReassignCovalentModifications picks that up
+# on its own, marking the ligand and the whole bonded cysteine as one atomized
+# unit. Hand it a file with the record stripped and you get a FREE ligand, a
+# plausible design, and no warning anywhere -- so check the output geometry
+# every time. See ../../tools/covalent-bonds.md.
+
+p1b7_cov_scaffold:
+  input: 8UDR.cif
+
+  # By CCD component name, as deposited. MOV is bound-form sotorasib, 41 heavy
+  # atoms. Fixed in space by default, since extract_ligand_array sets ligands
+  # up as a fully fixed motif.
+  ligand: MOV
+
+  # `unindex` hands the model the choice of WHERE in the new sequence the
+  # cysteine lands, rather than pinning it to a residue number. It chose 107 of
+  # 120 on one run and 119 on the next, so find it by geometry in the output --
+  # nearest SG to MOV C25 -- and never by residue number.
+  unindex: C6
+
+  length: 120-120
+
+  # ALL, not BKBN: the sulfur is the whole point, and a backbone-only motif
+  # would let the side chain be re-predicted away from the ligand.
+  select_fixed_atoms:
+    C6: ALL
+    MOV: ALL

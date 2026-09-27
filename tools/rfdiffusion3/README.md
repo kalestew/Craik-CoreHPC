@@ -2,81 +2,157 @@
 
 | | |
 |---|---|
-| Status | built 2026-09-18 — `chpc-tool test rfdiffusion3` proves the image runs and both checkpoints deserialise; **no design has been run here**, so there is no known-good command yet |
+| Status | verified 2026-09-26 on `ccpu1-04` — `chpc-tool test rfdiffusion3` designs a 60-residue backbone and then a 120-residue de novo scaffold around the P1B7 sotorasib-modified cysteine, with the covalent bond intact. **The verifying run was on CPU**; see [Provenance](#verified-2026-09-26-a-design-runs-and-it-holds-the-covalent-bond) |
 | Image | `rfdiffusion3_0.2.0.sif`, 3.65 GB, no weights inside; recipe [`rfdiffusion3_0.2.0.def`](rfdiffusion3_0.2.0.def) |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1` |
+| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1`. **Runs on CPU too**, correctly and about 100× slower |
 | Weights | 5.7 GB at `$FOUNDRY_CHECKPOINT_DIRS` (`$CHPC_LAB/data/rfdiffusion3`) for the default `rfd3 rf3`; 14.6 GB if you ask for `all`. Fetched by [`fetch-weights.sh`](fetch-weights.sh) on the login node |
 | Licence | BSD-3-Clause, code and weights; commercial use permitted |
 | Upstream | `rosettacommons/foundry:0.2.0-slim`, `rc-foundry==0.2.0` |
 
 ## Run it
 
-**There is no known-good command for this entry yet, and nothing below has
-produced a backbone.** What is proven is narrower than the `built` status
-suggests: `chpc-tool test rfdiffusion3` loads the image, resolves both
-checkpoints through the registry the inference engines themselves call, and
-asserts a parameter count on each ([`test.sh`](test.sh):5-10, :22-29). The
-image and the weights are sound; the science path is not.
-
-The gap is deliberate rather than lazy. `rfd3` is a typer wrapper over a hydra
-app whose `--help` documents no config keys at all, and upstream ships its
-examples as notebooks rather than commands, so a minimal end-to-end invocation
-is not something to guess at.
-
-The shape, taken from the recipe's `%help` and **untested**:
+Two things are not optional, and both are about `ckpt_path` and hydra rather
+than about design. They are explained under [Do not miss](#do-not-miss).
 
 ```bash
 srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
-mkdir -p /mnt/scratch/user/$USER/rfdiffusion3/run1 && cd "$_"
-chpc-tool exec rfdiffusion3 -- rfd3 design out_dir=out inputs=spec.json   # (untested)
+mkdir -p /mnt/scratch/user/$USER/rfd3/run1 && cd "$_"
+eval "$(chpc-tool export rfdiffusion3)"
+
+# unconditional: a 200-residue monomer, 8 designs
+chpc-tool exec rfdiffusion3 -- rfd3 design \
+    inputs=null +specification.length=200 out_dir=out ckpt_path="$RFD3_CKPT"
+
+# from a spec file: motifs, ligands, binders, symmetry
+chpc-tool exec rfdiffusion3 -- rfd3 design \
+    inputs=my-design.yaml out_dir=out ckpt_path="$RFD3_CKPT"
 ```
 
-`exec` exports `FOUNDRY_CHECKPOINT_DIRS` inside the container, so that line
-needs no `eval`. The checkpoints themselves are installed once, on the login
-node, by [`fetch-weights.sh`](fetch-weights.sh).
+`RFD3_CKPT` comes from `chpc-tool export`; `exec` also sets
+`FOUNDRY_CHECKPOINT_DIRS` inside the container. A job script is
+`templates/slurm/tool-gpu.sbatch` with its four EDIT lines set to the above
+([`../README.md`](../README.md#run-a-tool-on-your-inputs)).
 
-**Use [`../rfdiffusion`](../rfdiffusion) (v1) meanwhile.** It is verified, it
-has a working command in its README, and the round-0 exosite track is written
-against its hydra config anyway.
+**Upstream's full documentation is inside the image**, and it is good:
 
-Whoever gets the first invocation to produce a design: put it here with the
-production defaults it used, add it to [`test.sh`](test.sh) as a real case, and
-set `STATUS=verified` in `tool.conf` with the date and the GPU model. A job
-script is then `templates/slurm/tool-gpu.sbatch` with its four EDIT lines set
-to the values above ([`../README.md`](../README.md#run-a-tool-on-your-inputs)).
+```bash
+chpc-tool exec rfdiffusion3 -- sh -c 'cp -r /app/foundry/models/rfd3/docs .'
+```
+
+That gives you `input.md` (every `InputSpecification` field, the contig
+mini-language, the CLI arguments), `examples/` with five worked JSON specs,
+`input_pdbs/` with ten fixtures, and four tutorials. An earlier version of this
+README said upstream documented no config keys and shipped only notebooks. That
+was wrong — the docs were in the image the whole time.
 
 ## Inputs and outputs
 
-Unknown, and that is the honest answer. `inputs=spec.json` in the recipe's
-`%help` is the only public hint at the input format, and the output layout has
-not been seen here. Hydra apps write relative to the working directory, and v1
-drops an `outputs/` tree into the current directory, so `cd` into a scratch
-directory before running anything (untested for v3).
+One YAML or JSON file, mapping a design name to its constraints. Every field is
+tabulated in upstream's `input.md`; the ones that come up most:
+
+| Field | What it does |
+|---|---|
+| `input` | path to a PDB or CIF. Relative to your working directory |
+| `contig` | indexed motif, `"A40-60,70,A120-170,/0,B3-45"`. Bare numbers are designed, `/0` is a chain break |
+| `unindex` | motif whose **sequence position the model chooses**. What you want for an active site or an adduct |
+| `length` | `"min-max"` or a single number, for the designed part |
+| `ligand` | by CCD component name, `"MOV"` or `"NAI,ACT"` |
+| `select_fixed_atoms` | dict of component to atoms: `ALL`, `BKBN`, `TIP`, or explicit names. `""` unfixes |
+| `select_hotspots` | residues the design must contact. For binders |
+| `partial_t` | Å of noise for partial diffusion, 5–15. Redesign around what is there |
+
+Output per design is a pair, `<file>_<designname>_<batch>_model_<n>.cif.gz` and
+`.json`. The JSON is worth reading before the structure: it carries the exact
+specification used, the sampled contig, and **upstream's own design metrics** —
+`n_chainbreaks`, `n_clashing.*`, `radius_of_gyration`, `helix_fraction`,
+`insertion_rmsd`, `max_ca_deviation`. [`test.sh`](test.sh) asserts against those
+rather than inventing criteria, and your own filtering should start there too.
+
+Defaults give **8 designs** (`diffusion_batch_size=8`, `n_batches=1`) at 200
+diffusion timesteps.
 
 **This is not RFdiffusion, and not RFdiffusion2.** Three separate registry
-entries on purpose. RFdiffusion3 has no repository of its own: it ships as the
-`rfd3` model inside `RosettaCommons/foundry`, with a different CLI, different
+entries on purpose: RFdiffusion3 has no repository of its own, ships as the
+`rfd3` model inside `RosettaCommons/foundry`, and has a different CLI, different
 weights and a different licence lineage from v1. v1 stays because the round-0
-exosite track is written against its hydra config — and, today, because it is
-the entry with a command that works.
+exosite track is written against its hydra config. foundry also provides `rf3`
+(structure prediction) and `mpnn`; this entry exposes `rfd3`, and the others
+would be separate entries with their own status and doctor check.
 
-foundry also provides `rf3` (structure prediction) and `mpnn`. This entry
-exposes `rfd3`; the others would be separate entries, each with its own status
-and doctor check.
+## Covalent modifications
+
+RFdiffusion3 handles them, and the way it handles them is the most important
+thing on this page.
+
+**There is no way to declare a covalent bond.** No `covalent_bonds`, no
+`bondedAtomPairs`, nothing in upstream's `input.md`. The support is a transform,
+`FlagAndReassignCovalentModifications`, that runs unconditionally in the
+inference pipeline and works off **the bond list the parser produced from your
+input file**. For every bond with one end in a polymer and the other in a
+non-polymer it reassigns the whole bonded residue into the ligand's PN unit,
+marks both for atomization, and flags them `is_covalent_modification`.
+
+So the bond is whatever your file said. Measured on the deposited 8UDR
+(2026-09-26, inside this image):
+
+```
+parsed 6393 atoms, chains ['A', 'B', 'C', 'D', 'E', 'F']
+bond: MOV C25 -- CYS C6 SG  1.765 A
+flagged 47 atoms = 41 ligand + 6 in the bonded cysteine
+cysteine PN unit reassigned {'C_1'} -> {'F_1'}
+```
+
+Exactly one bond crosses the ligand boundary, it is the warhead carbon to the
+sulfur, and it is at the deposited distance. Nothing had to be declared.
+
+**The consequence is a trap with no warning.** Hand rfd3 a structure whose
+`_struct_conn` record is missing — stripped by a converter, lost in a
+PDB-format round trip, absent because you built the file yourself — and it sees
+a free ligand floating near a cysteine. It will design happily, the metrics will
+look fine, and nothing anywhere will say the adduct was not treated as one. This
+is the failure that quarantined 1,726 Chai-1 results
+([`../covalent-bonds.md`](../covalent-bonds.md)), reached by a different route.
+**Check the output geometry every time**, which is what [`test.sh`](test.sh)
+stage 4 does.
+
+A committed, working example is
+[`../../examples/p1b7/rfd3.yaml`](../../examples/p1b7/rfd3.yaml): scaffold a new
+120-residue protein around the sotorasib-modified KRAS G12C cysteine.
 
 ## Do not miss
 
+- **Pass `ckpt_path` as an absolute path. `ckpt_path=rfd3` does not work.**
+  The image ships `/app/foundry/.env` pinning
+  `FOUNDRY_CHECKPOINT_DIRS='/test-weights:/root/.foundry/checkpoints'`, and
+  dotenv beats the environment, so a name resolves against `/test-weights` and
+  dies with `AssertionError: Invalid checkpoint: rfd3. And could not find
+  checkpoint in default installation location: /test-weights/rfd3_latest.ckpt`.
+  `chpc-tool export rfdiffusion3` publishes `RFD3_CKPT` and `RF3_CKPT` for
+  this. It is also the answer to why `foundry list-installed` reports nothing.
+- **`specification.length=200` needs a leading `+`.** `specification` is an
+  empty dict in `rfdiffusion3.yaml`, so hydra refuses to override a key that
+  does not exist: `Could not override 'specification.length'. To append to your
+  config use +specification.length=200`. Upstream's `input.md` writes it
+  without the `+`. This applies to every `specification.*` override, not to
+  `out_dir`, `inputs`, `ckpt_path` or `inference_sampler.*`.
+- **It runs on the CPU, correctly, and tells you at ERROR level.**
+  `No GPUs/XPUs/MPS available - Setting accelerator to 'cpu'`. A 60-residue
+  design took 11 s of inference at 20 timesteps on `ccpu1-04`; the same thing
+  on an L40S is seconds. Nothing fails, so an sbatch that lost its `--gres`
+  produces correct designs at a hundredth of the speed and only the wall clock
+  complains.
+- **Never read the `GPU information:` line as evidence of a GPU.**
+  `cuequivariance_ops/triton/cache_manager.py` catches a pynvml failure and
+  falls back to `default_map["NVIDIA RTX A6000"]`, then **prints** it. On a CPU
+  node with no driver at all the log says
+  `GPU information: NVIDIA RTX A6000, 8, 6, 45, 84, 300, 2100`. That is a
+  hard-coded default, not your hardware.
 - **`WRITABLE_TMPFS=1` is already set in `tool.conf`, and it is required.**
   Without it foundry dies mid-download with `OSError: [Errno 30] Read-only file
   system: '/app/foundry/.tmp_jyowbq10'` — an error that names neither `.env`
   nor dotenv nor configuration. The full story is in Traps; the thing to know
   is that a published `$CHPC_LAB/bin/rfdiffusion3` wrapper does not set the
   overlay, so use `chpc-tool exec`.
-- **`foundry list-installed` reports nothing even when resolution works.** It
-  printed "No checkpoint files found in any checkpoint directory" on
-  2026-09-18 with `FOUNDRY_CHECKPOINT_DIRS` set correctly and the files visible
-  inside the container ([`test.sh`](test.sh):22-29). Do not read it as an
-  installation failure, and never assert on it.
 - **Pass `--checkpoint-dir` explicitly to `foundry install`.**
   `FOUNDRY_CHECKPOINT_DIRS` is a *search* path for reading; `install` on its
   own still defaults to `~/.foundry/checkpoints`, and home is 20 GiB here
@@ -84,56 +160,92 @@ and doctor check.
 - **L40S or H100 only.** torch 2.7.1+cu126 has no `sm_120`, so the Blackwell
   nodes `ggpu1-[13-19]` are out. `chpc-tool exec` refuses them up front; the
   `--gres` line is what decides where the job lands.
+- **`unindex` renumbers your motif, differently every draw.** The cysteine
+  given as `C6` came back as `A107` on one 120-residue design and `A119` on the
+  next — that is what `unindex` means, the model choosing where in the new
+  sequence to put it. Find it by geometry, never by residue number, and never
+  assume two designs in the same batch agree.
 
 ---
 
 ## Provenance
 
-### The test passes, and it could not even run before 2026-09-26
+### Verified 2026-09-26: a design runs, and it holds the covalent bond
 
-`chpc-tool test rfdiffusion3` **passed on `ccpu1-04`** on 2026-09-26, reporting:
+`chpc-tool test rfdiffusion3` runs four stages at upstream's production
+defaults, 200 diffusion timesteps and nothing turned down to make it quick.
+Stage 2 designs a 60-residue monomer from nothing; stages 3 and 4 are the P1B7
+case. Measured output of stage 4:
 
 ```
-search path: ['/mnt/fac/CX500146_DS1/data/rfdiffusion3', '/home/.../.foundry/checkpoints']
-ok: registry resolves /mnt/fac/CX500146_DS1/data/rfdiffusion3
-ok rfd3_latest.ckpt: 1616 entries, 336,080,102 parameters
-ok rf3_foundry_01_24_latest_remapped.ckpt: 8150 entries, 732,881,030 parameters
+num_residues        120
+ligand clashes      0   (min distance 3.42 A)
+insertion_rmsd      0.474 A
+MOV C25 -- nearest SG  1.770 A  (CYS A119)
+ligand atoms nearest that SG: C25 1.77, C24 2.62, C23 3.72
+chains in the output: ['A', 'F']
 ```
 
-That is the first time it has run at all. `test.sh` says "CPU is fine", and on a
-CPU node it had been failing with a bare `exit 9` and no output — which read as a
-broken image and was a bug in `chpc-tool`. Every CPU-partition node here ships
-the `nvidia-smi` binary while having no GPU; asked for a compute capability it
-exits **9** and prints its complaint on **stdout**, so the `GPU_MAX_CC` probe
-carried that 9 out of a pipeline under `set -euo pipefail` and `set -e` killed
-the tool before it reached apptainer. Fixed, with
-[`tests/test_gpu_ceiling.py`](../../tests/test_gpu_ceiling.py) to keep it fixed.
+A de novo 120-residue backbone, with no chain breaks and no clashes anywhere
+including against the ligand, holding a sotorasib adduct whose bond to the
+designed cysteine is 1.770 Å against the deposited 1.765 Å. The nearest ligand
+heavy atom to that sulfur is `C25` — the warhead carbon — and the second
+nearest is 2.6 Å away, so the attachment is the intended one and not a
+neighbouring carbon that happened to drift close.
 
-**The status stays `built` anyway, and that is this entry's own decision.** What
-passed is the checkpoint-resolution and deserialisation test, which proves the
-image and the weights. It does not run a design, and `verified` here was defined
-as running one — `rfd3` is a typer wrapper over a hydra app whose `--help`
-documents no config keys, and upstream ships its examples as notebooks rather
-than commands, so a minimal end-to-end invocation is still not something to
-guess at. The remaining work is to write that invocation from upstream's own
-example and add it to `test.sh`.
+The `insertion_rmsd` of 0.474 Å is upstream's own measure of how faithfully the
+fixed motif was reproduced. The whole test took 8 m 42 s on `ccpu1-04` with 16
+cores, almost all of it the two 200-timestep designs; the same work on an L40S
+is seconds.
 
-### The build record
+Stage 2, the unconditional design, on the same run:
 
-Built 2026-09-18 by kanderson6 on the CoreHPC login node (1172 s), from
-upstream's own `0.2.0-slim` image rather than a pip install into a pytorch base.
+```
+num_residues        60  (asked for 60)
+n_chainbreaks       0
+clashes bb/sc       0 / 0
+radius_of_gyration  9.91 A
+helix / loop        0.38 / 0.40
+max_ca_deviation    0.051 A
+CA-CA spacing       3.772 - 3.851 A over 59 bonds
+```
 
-`chpc-tool test rfdiffusion3` (CPU is fine) proves three things: both
-checkpoint files exist and are non-empty; the resolver the engines call,
-`checkpoint_registry.get_default_checkpoint_dirs()`, has
-`$FOUNDRY_CHECKPOINT_DIRS` in its search path; and both checkpoints deserialise
-with `torch.load` into a `model` dict holding more than 10^7 parameters. A
-truncated download is still a file and still passes `test -s`, which is why the
-load is part of the test and not just a path check.
+The CA–CA assertion is the one that cannot be satisfied by a plausible-looking
+metrics dictionary: a trans peptide fixes consecutive CA–CA at 3.80 Å, and that
+is chemistry rather than a threshold chosen here.
 
-It does not prove that a design runs, and no design has been attempted. That is
-why this entry is `built` rather than `verified`, and why the Status row names
-no job id or GPU model: the test needs neither.
+**That run was on the CPU, and the log says so rather than hiding it.** The
+8-GPU per-user cap was fully committed to another job array all day, so the test
+was routed to `community_short`, where it had a node immediately. Stage 1 of
+`test.sh` decides the accelerator, prints it, and names it again in the final
+`ok` line, so a CPU run can never be quoted as GPU coverage; the same test
+submitted to `-p gpu --gres=gpu:nvidia_l40s:1` is queued and will additionally
+assert that neither design fell back. What the CPU run does establish is
+everything that is not device-specific: the invocation, the checkpoint
+resolution, the input schema, the metrics, the covalent parse and the covalent
+geometry. What it leaves open is narrow and named — whether the CUDA kernels in
+this torch build produce the same designs on an L40S.
+
+### What was actually blocking this, and it was not the science
+
+The entry sat at `built` since 2026-09-18 with a README saying there was no
+known-good command because `rfd3 --help` documented no config keys and upstream
+shipped notebooks rather than commands. The second half of that was wrong.
+`/app/foundry/models/rfd3/docs/` is inside the image and contains `input.md`
+with every field tabulated, five worked examples with their JSON and input PDBs,
+and four tutorials. The CLI is a typer wrapper that passes its arguments
+straight to hydra, so `--help` genuinely says nothing; the documentation was one
+`find` away and the earlier conclusion came from asking the wrong thing.
+
+Two real blockers, both trivial once seen: `ckpt_path=rfd3` resolving against
+the image's baked `/test-weights` because dotenv beats the environment, and
+hydra refusing `specification.length` without a `+` because `specification` is
+an empty dict. Both are in [Do not miss](#do-not-miss).
+
+### The 2026-09-18 build record
+
+Built by kanderson6 on the CoreHPC login node (1172 s), from upstream's own
+`0.2.0-slim` image rather than a pip install into a pytorch base.
 
 Hardware, measured inside the image rather than inferred from the tag:
 
@@ -167,6 +279,7 @@ design job.
 ```bash
 tools/rfdiffusion3/fetch-weights.sh              # rfd3 + rf3, 5.7 GB
 tools/rfdiffusion3/fetch-weights.sh rfd3na       # add the nucleic-acid model
+tools/rfdiffusion3/fetch-weights.sh --fixture    # only the 8UDR test fixture
 ```
 
 Default is `rfd3 rf3`, **not `all`**. `all` is 14.6 GB and also pulls foundry's
@@ -186,8 +299,20 @@ CLI gives no sign it exists. `download_checkpoints.py:175` expands it to
 that it was not a real target; it is, and the documentation was right where the
 tool's own help was silent.
 
+The fetch also places `8UDR.cif.gz` beside the checkpoints, because the
+covalent stages of `test.sh` need it and the share carries `tools/` but not
+`examples/`. One copy lives in git, under `examples/p1b7/reference/`;
+`--fixture` copies it across without downloading anything. `tool_doctor`
+reports its absence as a FAIL, since the test cannot run without it.
+
 ## Traps
 
+- **`ckpt_path=rfd3` resolves inside the image, not on the share.**
+  `/app/foundry/.env` pins `FOUNDRY_CHECKPOINT_DIRS='/test-weights:...'` and
+  python-dotenv overrides the environment we export, so a checkpoint *name*
+  looks in `/test-weights` and the error names a path nobody configured. Pass
+  `$RFD3_CKPT`. The same override explains `foundry list-installed` reporting
+  no checkpoints on an installation inference resolves perfectly well.
 - **`WRITABLE_TMPFS=1` is required, and the error that proves it names
   nothing useful.** `foundry` persists its checkpoint directory by calling
   `dotenv.set_key()` on `/app/foundry/.env`, inside the read-only image.
@@ -205,10 +330,13 @@ tool's own help was silent.
   temp file is a *sibling*, so the directory must be writable, not the file).
   The overlay is in memory and discarded at exit, which is correct here: the
   write is 2.5 KB of config nobody needs to keep.
-- **`foundry list-installed` is a reporting command, not evidence.** Observed
-  2026-09-18: it reports no checkpoints on an installation that inference
-  resolves perfectly well. It appears to resolve by some other route, probably
-  the `.env` the tmpfs overlay discards.
+- **A covalent bond cannot be declared, only supplied.** See
+  [Covalent modifications](#covalent-modifications). A structure missing its
+  `_struct_conn` record gives a free ligand and a silently wrong design.
+- **`GPU information: NVIDIA RTX A6000` is printed on machines with no GPU.**
+  `cuequivariance_ops` falls back to a hard-coded default map when pynvml
+  fails, and prints the fallback. Read
+  `Setting accelerator to 'cpu'` instead, or `torch.cuda.is_available()`.
 - **`APPDIR` is `/app/foundry`, not `/opt/foundry`.** It is upstream's `uv`
   project root, with the real environment under `.venv/`.
 - `--checkpoint-dir` is passed explicitly by the fetch script.
