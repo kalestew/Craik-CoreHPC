@@ -337,6 +337,16 @@ An entry starts as a description and earns its status:
 | `planned` | described only. No image, no install. `doctor` reports it and moves on. |
 | `built` | the image or install exists on the share, but nothing has run through it yet |
 | `verified` | `test.sh` has passed on a compute node, and the date is in the entry's README |
+| `external` | **a terminus, not a rung.** The tool is deliberately not installed here, because it is not installable here: a web service whose only local form is a protocol nobody has written. `doctor` prints it under "not checked" and there is nothing to build. |
+
+`external` exists because `planned` was lying about two entries. `funclib` and
+`pross` are Weizmann web servers, and a local install of either is a Rosetta
+protocol that would have to be written from scratch. Carried as `planned` they
+read as a queue of pending builds, and the honest answer to "when is the image
+coming" is never. A status column that says so is worth more than a NOTE three
+paragraphs long that nobody reaches. An `external` entry still owes a README:
+the point is to record how the lab actually uses the tool, and what a local
+install would take, so the next person does not re-derive it.
 
 Files in an entry:
 
@@ -351,7 +361,9 @@ Files in an entry:
 | `assets.tsv` | licensed payloads | files by sha256, installed by `chpc-assets`; the payload itself never enters git |
 
 A `planned` entry needs no README: `UPSTREAM`, `LICENSE` and a `NOTE=` line in
-`tool.conf` carry everything there is to say about a tool nobody has built.
+`tool.conf` carry everything there is to say about a tool nobody has built. An
+`external` entry does owe one, because there is something to say: which web
+service, what it is used for, and what a local install would actually involve.
 The README is where the *build* gets recorded, so it is owed at the moment
 someone does the build, not before.
 

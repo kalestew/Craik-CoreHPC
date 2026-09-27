@@ -9,6 +9,10 @@
 #   chpc-tool exec <tool> [--] <cmd>...     run a command through the right runtime
 #   chpc-tool doctor [<tool>...]            is it really there, and really working
 #   chpc-tool test <tool>...                run the entry's test.sh (what STATUS=verified means)
+#
+# STATUS: planned -> built -> verified, plus `external` for a tool that is
+# deliberately not installed here (a web service). `external` is a terminus,
+# not a rung on the way up.
 #   chpc-tool build <tool>                  build the container from its .def
 #   chpc-tool publish <tool>                copy a built image to the share: sif, .def, wrapper, README row, mirror
 #   chpc-tool wrapper <tool>                write $CHPC_LAB/bin/<tool>
@@ -567,6 +571,19 @@ _doctor_one() {
   _drift=""
   if [ "$STATUS" = "planned" ]; then
     _drow "$NAME" "----" "planned -- described only, nothing built yet"
+    return 2
+  fi
+  # `external` is the fourth rung, and it is a TERMINUS rather than a stop on
+  # the way to `verified`. Some tools are not installed here because they are
+  # not installable here: funclib and pross are Weizmann web servers whose only
+  # local form is a Rosetta protocol nobody has written. Left at `planned` they
+  # read as a queue of pending builds and someone eventually asks when the
+  # image is coming; the answer is never, and the registry should say so in the
+  # status column rather than three paragraphs into a NOTE. There is nothing on
+  # any filesystem to check, so this returns 2 like `planned` and the row lands
+  # in "not checked".
+  if [ "$STATUS" = "external" ]; then
+    _drow "$NAME" "----" "external -- used off-cluster, nothing installed here by design"
     return 2
   fi
   # A tool whose location depends on something the CALLER has to supply cannot

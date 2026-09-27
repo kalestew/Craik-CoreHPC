@@ -70,14 +70,28 @@ class ToolReadmeTests(unittest.TestCase):
                                  f"{entry.name}/README.md header disagrees with tool.conf STATUS")
 
     def test_built_entries_say_how_to_run_them_and_planned_ones_do_not(self) -> None:
+        """Each status owes a different section, and `external` owes its own.
+
+        `external` is a terminus, not a rung (tools/README.md, Add a tool): the
+        tool is deliberately not installed here, so there is no `## Run it` to
+        write and promising one would be a lie. What it does owe is where the
+        thing actually runs and what a local install would take, so the next
+        person does not re-derive that -- hence `## Why there is nothing to
+        install`. It still owes `## Do not miss`, because an external tool has
+        traps like any other and they are the reason to read the page."""
         for entry in entries():
             readme = entry / "README.md"
             if not readme.exists():
                 continue
             text = readme.read_text()
-            with self.subTest(tool=entry.name):
-                if conf(entry)["STATUS"] == "planned":
+            status = conf(entry)["STATUS"]
+            with self.subTest(tool=entry.name, status=status):
+                if status == "planned":
                     self.assertIn("## Not built yet", text)
+                    self.assertNotIn("## Run it", text)
+                elif status == "external":
+                    self.assertIn("## Why there is nothing to install", text)
+                    self.assertIn("## Do not miss", text)
                     self.assertNotIn("## Run it", text)
                 else:
                     self.assertIn("## Run it", text)
