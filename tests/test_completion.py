@@ -23,6 +23,8 @@ FUNCTION = {
     "chpc-tool": "_chpc_tool_complete",
     "chpc-assets": "_chpc_assets_complete",
     "chpc-jobstats": "_chpc_jobstats_complete",
+    "chpc-globus.sh": "_chpc_globus_complete",
+    "chpc-submit.sh": "_chpc_submit_complete",
 }
 
 
@@ -93,6 +95,15 @@ class CompletionTests(unittest.TestCase):
 
     def test_jobstats_flags(self) -> None:
         self.assertEqual(complete(["chpc-jobstats", "--m"], 1), ["--mine"])
+
+    def test_globus_commands_and_transfer_options(self) -> None:
+        self.assertCountEqual(complete(["chpc-globus.sh", "p"], 1), ["push", "pull"])
+        self.assertEqual(complete(["chpc-globus.sh", "push", "--sync-level", "ch"], 3), ["checksum"])
+        self.assertEqual(complete(["chpc-globus.sh", "pull", "--type", "d"], 3), ["directory"])
+
+    def test_submit_offers_preview_and_cluster_checkout_options(self) -> None:
+        self.assertEqual(complete(["chpc-submit.sh", "--dry"], 1), ["--dry-run"])
+        self.assertEqual(complete(["chpc-submit.sh", "--co"], 1), ["--corehpc"])
 
 
 if __name__ == "__main__":

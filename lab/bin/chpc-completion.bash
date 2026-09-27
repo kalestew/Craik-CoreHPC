@@ -123,6 +123,44 @@ _chpc_jobstats_complete() {
   return 0
 }
 
+_chpc_globus_complete() {
+  local cur prev
+  COMPREPLY=()
+  cur=${COMP_WORDS[COMP_CWORD]}
+  prev=${COMP_WORDS[COMP_CWORD-1]}
+  if [ "$COMP_CWORD" -eq 1 ]; then
+    COMPREPLY=( $(compgen -W 'doctor env push pull' -- "$cur") )
+  else
+    case $prev in
+      --sync-level) COMPREPLY=( $(compgen -W 'exists size mtime checksum' -- "$cur") ) ;;
+      --type) COMPREPLY=( $(compgen -W 'file directory' -- "$cur") ) ;;
+      --wait|--label|--exclude|--exclude-dir) ;;
+      *) case $cur in
+           -*) COMPREPLY=( $(compgen -W '--dry-run --wait --label --exclude --exclude-dir --sync-level --type --help' -- "$cur") ) ;;
+           *) _chpc_files "$cur" ;;
+         esac ;;
+    esac
+  fi
+  return 0
+}
+
+_chpc_submit_complete() {
+  local cur prev
+  COMPREPLY=()
+  cur=${COMP_WORDS[COMP_CWORD]}
+  prev=${COMP_WORDS[COMP_CWORD-1]}
+  case $prev in
+    --wait|--corehpc) ;;
+    *) case $cur in
+         -*) COMPREPLY=( $(compgen -W '--dry-run --wait --corehpc --help --' -- "$cur") ) ;;
+         *) _chpc_files "$cur" ;;
+       esac ;;
+  esac
+  return 0
+}
+
 complete -F _chpc_tool_complete chpc-tool
 complete -F _chpc_assets_complete chpc-assets
 complete -F _chpc_jobstats_complete chpc-jobstats
+complete -F _chpc_globus_complete chpc-globus.sh
+complete -F _chpc_submit_complete chpc-submit.sh

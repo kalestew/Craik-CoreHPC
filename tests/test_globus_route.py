@@ -126,8 +126,8 @@ class Route(unittest.TestCase):
         self.assertLess(kinds.index("RUN"), kinds.index("SSH"), lines)
 
         remote = next(line for line in lines if line.startswith("SSH"))
-        self.assertIn("mkdir -p /mnt/fac/TEST_SHARE/proj", remote)
-        self.assertIn("cp -a /mnt/scratch/user/testuser/globus-staging/incoming", remote)
+        self.assertIn("mkdir -p /mnt/fac/TEST_SHARE/proj/incoming", remote)
+        self.assertRegex(remote, r"cp -a /mnt/scratch/user/testuser/globus-staging/transfer-\d+-\d+/incoming/\. /mnt/fac/TEST_SHARE/proj/incoming/")
         # Named by path under the share, because a plain `ssh host cmd` shell has
         # not sourced chpc.env and has no $CHPC_LAB/bin on PATH.
         self.assertIn("fix=/mnt/fac/TEST_SHARE/bin/chpc-fac-fixacl", remote)
@@ -146,7 +146,7 @@ class Route(unittest.TestCase):
         self.assertTrue(ordered[0].startswith("SSH"), ordered)
         self.assertIn("cp -a /mnt/fac/TEST_SHARE/runs/h8-abc", ordered[0])
         transfer = next(line for line in ordered if " transfer " in line)
-        self.assertIn(f"{SCRATCH_COLLECTION}:/globus-staging/h8-abc", transfer)
+        self.assertRegex(transfer, SCRATCH_COLLECTION + r":/globus-staging/transfer-\d+-\d+/h8-abc")
         self.assertLess(ordered.index(ordered[0]), ordered.index(transfer))
 
     def test_the_buffer_is_on_scratch_and_never_on_the_share(self) -> None:
@@ -157,7 +157,7 @@ class Route(unittest.TestCase):
         """
         lines = self.compose("push", str(self.source), "/mnt/fac/TEST_SHARE/proj/incoming")
         whole = "\n".join(lines)
-        self.assertIn("/mnt/scratch/user/testuser/globus-staging/incoming", whole)
+        self.assertRegex(whole, r"/mnt/scratch/user/testuser/globus-staging/transfer-\d+-\d+/incoming")
         # No buffer path anywhere sits on the share. Searched as a pattern
         # rather than per line, because the ssh leg legitimately names FAC --
         # it is copying INTO it -- and the question is where the buffer is.
@@ -239,8 +239,8 @@ class Route(unittest.TestCase):
         self.assertIn("not under the collection root", done.stderr)
         self.assertNotIn("globus transfer", done.stdout)
 
-    def test_an_undeclared_local_staging_directory_is_refused_before_anything_runs(self) -> None:
-        """No default, because a guessed one fails at the END of a transfer."""
+    def test_a_direct_transfer_needs_no_local_staging_directory(self) -> None:
+        """The selected project can be a GCP accessible folder directly."""
         env = dict(os.environ)
         env.pop("CHPC_GLOBUS_STAGING_LOCAL", None)
         env.update(
@@ -254,8 +254,9 @@ class Route(unittest.TestCase):
              "--dry-run"],
             capture_output=True, text=True, env=env, check=False,
         )
-        self.assertEqual(done.returncode, 1)
-        self.assertIn("CHPC_GLOBUS_STAGING_LOCAL", done.stderr)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertIn("globus transfer", done.stdout)
+        self.assertIn("access check skipped", done.stderr)
 
     def test_an_unknown_verb_is_refused_rather_than_defaulting_to_one(self) -> None:
         """A typo must not resolve to a transfer."""
