@@ -76,7 +76,7 @@ fi
 : "${CHPC_ON_CLUSTER:=0}"
 
 # --- loading an entry ---------------------------------------------------------
-_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC"
+_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC GPU_TESTED"
 
 # Helpers a tool.conf may call from tool_exports / tool_doctor.
 # Where an image would live, in each of the two places it can live.
@@ -310,6 +310,14 @@ cmd_show() {
         printf 'image       %s\n' "$(_image_path)"
         printf 'gpu (--nv)  %s\n' "$([ "$GPU" = 1 ] && echo yes || echo no)"
         [ -n "${GPU_MAX_CC:-}" ] && printf 'gpu max cc  %s  (ask for --gres=gpu:nvidia_l40s:1 or nvidia_h100_nvl:1, never a bare gpu:1)\n' "$GPU_MAX_CC"
+        # A ceiling is not a measurement. GPU_MAX_CC says what will not die of a
+        # missing kernel image; this says where anybody has actually run it. A
+        # request can satisfy the first and still be the first run on a class.
+        if [ -n "${GPU_TESTED:-}" ]; then
+          printf 'gpu tested  %s  (classes this entry has passed on; anything else is unevidenced)\n' "$GPU_TESTED"
+        elif [ "$GPU" = 1 ]; then
+          printf 'gpu tested  (none recorded -- no device class is written down as exercised)\n'
+        fi
         [ "${WRITABLE_TMPFS:-0}" = 1 ] && printf 'tmpfs       --writable-tmpfs\n'
         [ -n "${APPDIR:-}" ] && printf 'appdir      %s  (inside the image)\n' "$APPDIR" ;;
       module)
