@@ -442,8 +442,35 @@ cmd_exec() {
       # Compares as a decimal: 12.0 > 9.0. Silent when there is no GPU, no
       # nvidia-smi (the login node has none) or no GPU_MAX_CC, so it can
       # never block a tool that did not declare a limit.
+      #
+      # ASKING nvidia-smi IS NOT FREE OF CONSEQUENCES, twice over, and both
+      # bit on a CPU node (measured on ccpu1-01, 2026-09-26):
+      #
+      #  1. nvidia-smi EXITS 9 when it cannot reach the driver. With
+      #     `set -euo pipefail` at the top of this file, the bare assignment
+      #     that used to be here made a plain pipeline carry that 9 out, and
+      #     `set -e` killed chpc-tool on the spot -- no message, exit 9,
+      #     nothing run. `chpc-tool exec rfdiffusion3 -- python ...` on the
+      #     `community` partition therefore failed in a way that read as a
+      #     broken image, and rfdiffusion3's test.sh says "CPU is fine" and
+      #     could not pass on a CPU node. `|| _cc=""` puts the assignment in
+      #     a list, where `set -e` leaves it alone.
+      #
+      #  2. nvidia-smi prints that complaint on STDOUT, not stderr, so
+      #     2>/dev/null does not stop it and $_cc ends up holding
+      #     "NVIDIA-SMIhasfailedbecause..." -- prose, in a variable the next
+      #     line compares as a number. `a+0` makes prose 0, so the comparison
+      #     happened to be harmless; it is harmless BY ACCIDENT, and the die
+      #     message one line down would have printed the prose as a compute
+      #     capability. Keep only something shaped like one.
+      #
+      # The login node has no nvidia-smi at all, which is why neither of these
+      # ever showed up there.
       if [ "$GPU" = "1" ] && [ -n "${GPU_MAX_CC:-}" ] && command -v nvidia-smi >/dev/null 2>&1; then
-        _cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ')
+        _cc=$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader 2>/dev/null | head -1 | tr -d ' ') || _cc=""
+        case "$_cc" in
+          ''|*[!0-9.]*) _cc="" ;;
+        esac
         if [ -n "$_cc" ] && awk -v a="$_cc" -v b="$GPU_MAX_CC" 'BEGIN{exit !(a+0 > b+0)}'; then
           die "$NAME cannot run on this GPU.
   device compute capability : $_cc  ($(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1))
