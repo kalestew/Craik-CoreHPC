@@ -116,16 +116,44 @@ import torch
 assert torch.version.cuda is not None, "CPU-only torch: upstream's documented failure"
 print("torch", torch.__version__, "cuda", torch.version.cuda)
 
-# 2. Kernels for the GPUs we actually own. The gpu partition here is three
-#    architectures -- L40S sm_89, H100 NVL sm_90, RTX PRO 6000 sm_120 -- and an
-#    image built against an older toolkit dies on the newest with "no kernel
-#    image is available for execution on the device", intermittently, depending
-#    on what was free (doc 05).
-flags = torch._C._cuda_getArchFlags()
-print("arch flags", flags)
-for need in ("sm_89", "sm_90", "sm_120"):
-    assert need in flags, ("missing kernels for %s; set GPU_MAX_CC in tool.conf "
-                           "to the highest present" % need)
+# 2. Kernels for the three GPU models the gpu partition actually has -- L40S
+#    at cc 8.9, H100 NVL at 9.0, RTX PRO 6000 Blackwell at 12.0 -- because an
+#    image without them dies with "no kernel image is available for execution on
+#    the device", intermittently, depending on what was free (doc 05).
+#
+#    AND THE OBVIOUS FORM OF THIS CHECK IS WRONG. torch 2.14.0+cu132 reports
+#        sm_75 sm_80 sm_86 sm_90 sm_100 sm_120
+#    with NO sm_89 in it, so `"sm_89" in flags` fails -- and a first version of
+#    this recipe duly failed the build and told the reader to cap GPU_MAX_CC,
+#    which would have banned the L40S nodes for no reason at all.
+#
+#    A cubin is FORWARD-compatible within its major compute capability: code
+#    compiled for sm_86 runs on any sm_8x device with a minor version at or
+#    above 8.6, which includes the L40S at sm_89. It is not backward compatible
+#    and it never crosses a major version, which is the whole reason
+#    GPU_MAX_CC exists as a ceiling rather than a membership test.
+#
+#    So ask the question that matters: is each device covered by SOME cubin of
+#    its own major version?
+flags = torch._C._cuda_getArchFlags().split()
+print("arch flags", " ".join(flags))
+have = []
+for f in flags:
+    digits = f.split("_", 1)[1]
+    if digits.isdigit():
+        have.append((int(digits[:-1]), int(digits[-1])))
+
+def covered(major, minor):
+    # Same major version, and compiled for a minor version no higher than the
+    # device's. sm_86 covers 8.9; sm_90 covers 9.0; sm_120 covers 12.0.
+    return any(m == major and n <= minor for m, n in have)
+
+for name, cc in (("L40S", (8, 9)), ("H100 NVL", (9, 0)), ("RTX PRO 6000", (12, 0))):
+    assert covered(*cc), (
+        "no cubin covers %s (sm_%d%d); arch flags are %s. Set GPU_MAX_CC in "
+        "tool.conf to the highest MAJOR version covered, so exec refuses the "
+        "rest up front." % (name, cc[0], cc[1], " ".join(flags)))
+    print("ok %-13s sm_%d%d covered" % (name, cc[0], cc[1]))
 
 # 3. The import chain custom_inference.py actually walks, including the
 #    training module it needs for TransferModelPL and the wandb underneath it.
