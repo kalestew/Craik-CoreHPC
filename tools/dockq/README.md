@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| Status | planned — recipe and a four-case `test.sh` written, never executed |
-| Image to be | `dockq_2.sif` from [`dockq_2.def`](dockq_2.def); around 200 MB on a `python:3.12-slim` base (untested) |
+| Status | **verified** 2026-09-26 — built, published, and `test.sh`'s four cases passed on `ccpu1-01` (CPU, `community_short`) through the share's copy |
+| Image | `dockq_2.sif` from [`dockq_2.def`](dockq_2.def); 196 MB on a `python:3.12-slim` base |
 | GPU | none. CPU only, and that is a fact about the tool: no `--nv`, no `GPU_MAX_CC` |
 | Weights | none. DockQ is arithmetic over two structure files |
 | Licence | MIT |
-| Upstream | <https://github.com/bjornwallner/DockQ>, pip `DockQ`; the exact version is pinned at build time |
+| Upstream | <https://github.com/bjornwallner/DockQ>, pip `DockQ` **2.1.3**; python 3.12.14, numpy 1.26.4, biopython 1.88 |
 | Citation | Mirabello & Wallner, *Bioinformatics* **40**(10), 2024, [btae586](https://doi.org/10.1093/bioinformatics/btae586) |
 
 DockQ v2 scores a predicted complex against a reference: a single DockQ value
@@ -17,30 +17,28 @@ not a predictor, and that is why it is here.** Every other entry in the
 co-folding family produces structures; none of them can tell you whether those
 structures are right.
 
-## Not built yet
+## Run it
 
-Nothing to fetch: no weights, no databases, no GPU, nothing to stage on FAC.
-The image is the only missing piece and the recipe is written.
-
-```bash
-chpc-tool build dockq       # login node only; /usr/bin/apptainer 1.5.2,
-                            # --fakeroot UNAVAILABLE, no `module load apptainer`
-chpc-tool publish dockq
-chpc-tool test dockq        # CPU -- this is what `verified` means
-```
-
-The intended command, read from [`test.sh`](test.sh):123 and **untested**:
+Nothing to fetch: no weights, no databases, no GPU, nothing staged on FAC. The
+image is on the share and the wrapper is published.
 
 ```bash
-salloc -p cpu -c 8 --mem 16G -t 2:00:00     # or -p community_short --qos=cmnt_short for a 30 s job
-chpc-tool exec dockq -- DockQ model.pdb native.pdb --mapping MODELCHAINS:NATIVECHAINS --json dq.json   # (untested)
+salloc -p community_short --qos=cmnt_short -c 8 --mem 16G -t 0:30:00   # or -p cpu for a long batch
+chpc-tool exec dockq -- DockQ model.pdb native.pdb --mapping AB:AB --json dq.json
 ```
 
-Send it to the `cpu` partition, or to `community_short` — 1 h, and it
-**requires `--qos=cmnt_short`**. It has no business queueing behind the `gpu`
-partition's 8-GPU, 21-job per-user cap for a 30-second job.
+`--mapping MODELCHAINS:NATIVECHAINS` is not optional in a pipeline; see Traps.
+The published wrapper `dockq` is the same thing under a shorter name, so
+`dockq model.pdb native.pdb --mapping AB:AB` works on the login node too.
 
-Build and publish: [`../README.md`, Add a tool](../README.md#add-a-tool).
+Send it to `cpu`, or to `community_short` — 1 h, and it **requires
+`--qos=cmnt_short`**. It has no business queueing behind the `gpu` partition's
+8-GPU, 21-job per-user cap for a 30-second job.
+
+The score to read out of `--json` is the top-level `GlobalDockQ`; per-interface
+metrics are under `best_result[<chain pair>]`. The full schema is in Provenance.
+
+Rebuild and republish: [`../README.md`, Add a tool](../README.md#add-a-tool).
 
 ## Do not miss
 
@@ -66,22 +64,26 @@ Build and publish: [`../README.md`, Add a tool](../README.md#add-a-tool).
 
 ## Provenance
 
-**Never run.** `STATUS=planned`, there is no image, and `test.sh` has never
-executed. Everything below is what the test *will* prove once someone builds
-the entry.
+**Run 2026-09-26** on `ccpu1-01` (`community_short`, 8 CPU, 16 GB), against
+DockQ 2.1.3, through the share's published copy of the image as well as the
+scratch build. All four cases passed; the measured scores are in the table.
 
-### What `test.sh` will prove, and why a self-comparison is not enough
+### What `test.sh` proves, and why a self-comparison is not enough
 
 `DockQ x x` returns the perfect score from a tool that has silently mapped
 every chain to itself — the one case in which a broken chain mapping cannot
 show. So the test has four cases:
 
-| # | Input | Asserted |
-|---|---|---|
-| 1 | native vs itself | DockQ ≥ 0.99 — the perfect score |
-| 2 | chain B slid 12 Å along the interface | < 0.80, and **below** case 1 — the score responds |
-| 3 | chains renamed `M`/`N`, `--mapping MN:AB` | back to ≥ 0.99 — the flag is honoured |
-| 4 | same input, `--mapping NM:AB` | **exit 0**, and < 0.80 — the trap, demonstrated |
+| # | Input | Asserted | Measured 2026-09-26 |
+|---|---|---|---|
+| 1 | native vs itself | DockQ ≥ 0.99 — the perfect score | **1.000** High quality |
+| 2 | chain B slid 12 Å along the interface | < 0.80, and **below** case 1 — the score responds | **0.131** Incorrect |
+| 3 | chains renamed `M`/`N`, `--mapping MN:AB` | back to ≥ 0.99 — the flag is honoured | **1.000** High quality |
+| 4 | same input, `--mapping NM:AB` | **exit 0**, and < 0.80 — the trap, demonstrated | **0.144** Incorrect, **exit 0** |
+
+Case 4 is the one to keep in mind: the same file, scored against itself, read
+through a transposed mapping, returned 0.144 and exit status 0. Nothing in that
+output says anything is wrong.
 
 Case 2 is the half case 1 cannot supply: a scorer stuck at `1.000` passes a
 self-comparison perfectly. Case 4 is the one worth keeping. Its assertion is
@@ -127,23 +129,34 @@ Verified against upstream on 2026-09-24:
 - `pip install DockQ`;
 - the citation and DOI.
 
-**Not** verified, and marked as such in the files that depend on it:
+### Settled by the first build, 2026-09-26
 
-- **that the text report prints a CAPRI category per interface.** Upstream
-  documents the thresholds as a *legend*; the example report block does not
-  show a category line. `test.sh` therefore **derives** the category from the
-  score using those thresholds rather than parsing one. The brief this entry
-  was written from says DockQ "emits ... a CAPRI category"; that is the one
-  claim in it that could not be confirmed.
-- the JSON schema — specifically which key holds the overall score.
-  `test.sh`'s extractor prefers `GlobalDockQ`, falls back to a top-level
-  `DockQ`, and otherwise walks the document for the largest value under any
-  `DockQ` key, reporting the top-level keys if it finds none. Fix it to the
-  real key the first time this runs and delete the walk.
-- that DockQ accepts the generated fixture as an interface. If it reports no
-  interfaces, tighten the 7.0 Å offset — the contact count climbs steeply.
-- whether `DockQ` is pure Python in the pinned version — `%post` prints what
-  it finds.
+Four things were carried as explicitly unverified until the entry was built.
+All four are now measured, and the files that hedged against them have been
+updated rather than left with stale warnings.
+
+- **The JSON schema.** `--json` writes an object with top-level keys
+  `GlobalDockQ`, `best_dockq`, `best_mapping`, `best_mapping_str`,
+  `best_result`, `model`, `native`. `GlobalDockQ` holds the overall score — the
+  same number the text report calls "Total DockQ over N native interfaces".
+  Per-interface metrics live under `best_result["AB"]`: `DockQ`, `iRMSD`,
+  `LRMSD`, `fnat`, `fnonnat`, `F1`, `clashes`, `chain1`, `chain2`, `chain_map`,
+  `class1`, `class2`, `is_het`, `len1`. `test.sh`'s extractor now reads
+  `GlobalDockQ` and **fails loudly** if it is absent; the exploratory walk for
+  "the largest value under any DockQ key" is deleted, because a fallback like
+  that masks a schema change instead of reporting one.
+- **Whether the text report prints a CAPRI category. It does not.** The
+  thresholds appear exactly once, in the startup banner, as a legend. The
+  per-interface block prints the seven metrics and no category line. The brief
+  this entry was written from said DockQ "emits ... a CAPRI category" — that was
+  the one claim in it that could not be confirmed, and it is wrong. Deriving the
+  category from the score, which `test.sh` already did, is the only option.
+- **Whether the generated fixture makes a scorable interface. It does.** At
+  `dx=7.0` DockQ reports "Total DockQ over 1 native interfaces" and scores it.
+  The offset did not need tightening.
+- **Whether DockQ is pure Python. It is not.** It ships a Cython extension and
+  needs `gcc` to install. That is the build's one real surprise and it has its
+  own section under Build notes.
 
 ## Build notes
 
@@ -165,12 +178,47 @@ so nothing here is waiting on a measurement. **`GPU=0` is written out
 explicitly** even though it is the default, so that nobody adds `--nv` to match
 the neighbours.
 
-No C compiler either: DockQ has no GPU kernels and no JIT path that could be
-found — it is numpy and Biopython — so a toolchain would double the image for
-nothing. `%post` *reports* instead, printing whether `numba`, `cython` and
-`triton` are present, so that if a future DockQ grows a fast path the build log
-says so rather than a job finding out; `%environment` sets `NUMBA_CACHE_DIR`
-defensively for the same reason. The trap itself is documented once, in
+**A C compiler IS needed, and the first version of this entry argued at length
+that it was not.** That argument was about the wrong compiler. It reasoned
+about kernels compiled at first *use* — boltz's cuequivariance and Triton
+paths, DeepSpeed's op builder — and correctly concluded DockQ has none. DockQ
+needs `gcc` at *install* time, which is a different question, and nobody asked
+it: the package ships `src/DockQ/operations.pyx` with its generated
+`operations.c` and builds them as a Cython extension. On a `python:3.12-slim`
+base the build therefore died in `build_ext` with
+
+```
+error: [Errno 2] No such file or directory: 'gcc'
+```
+
+after several minutes of healthy-looking pip output (measured here
+2026-09-26). `build-essential` is in `%post` now, and the finished image keeps
+it: a few hundred MB against a 5 TB share, against a future DockQ growing a
+fast path and failing inside a read-only squashfs for reasons a job log will
+not explain. The measured image is 196 MB *with* the toolchain, which is where
+the original 200 MB estimate landed anyway.
+
+The generalisable lesson: **"does it need a compiler" has to be asked of the
+wheel, not only of the runtime**, and the cheap way to ask is to look for a
+`.pyx`, a `.c` or an `ext_modules` in the sdist before reasoning about it.
+
+**The fallback is what made this dangerous.** DockQ ships
+`operations_nocy.py`, a pure-Python implementation, and imports it when the
+extension is missing. A compiler-less image would have installed, imported,
+answered `--help` and scored *correctly* — just far slower, silently, on the
+one tool here expected to run thousands of times per campaign. So `%post` and
+`%test` both assert that the module which loaded is the compiled one:
+
+```python
+import DockQ.operations as ops
+assert not ops.__file__.endswith(".py")     # not the operations_nocy fallback
+```
+
+The built image loads
+`DockQ/operations.cpython-312-x86_64-linux-gnu.so`. `%environment` still sets
+`NUMBA_CACHE_DIR` defensively, and `%post` still reports whether `numba` and
+`triton` are present, so a future fast path shows up in a build log rather
+than in a job. The read-only-squashfs trap itself is documented once, in
 [`../../docs/07-containers-apptainer.md`](../../docs/07-containers-apptainer.md),
 "A kernel that compiles at first use".
 
