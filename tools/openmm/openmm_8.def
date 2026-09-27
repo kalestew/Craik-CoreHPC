@@ -1,0 +1,154 @@
+Bootstrap: docker
+From: condaforge/miniforge3:24.11.3-2
+
+# OpenMM 8 -- molecular dynamics, no licence to chase.
+#
+# A CONTAINER, THOUGH THE PACKAGE IS CONDA, for the same reason as anarci: a
+# conda environment under $CHPC_USER_SCRATCH/envs is per-user and lives on
+# scratch, which is purged at 30 days and wiped at quarterly maintenance. An MD
+# engine the lab is meant to reach for is built once onto FAC instead.
+#
+# THE CUDA PLATFORM CANNOT BE ASSERTED IN %post, AND THAT IS NOT AN OVERSIGHT.
+# OpenMM registers its CUDA platform by loading a plugin that links the NVIDIA
+# driver; the login node -- the only node with internet, so the only node that
+# can build -- has no driver and not even nvidia-smi. So %post asserts the
+# PAYLOAD (the plugin library is present, the CUDA 13 runtime pieces are the
+# ones that got solved) and test.sh, on a GPU node, asserts the BEHAVIOUR (the
+# platform registers, a Context builds, and the energy is right). Splitting it
+# that way is the only honest option; claiming CUDA works from a node that
+# cannot try is how an image gets published broken.
+#
+# Build:  chpc-tool build openmm        (login node)
+
+%labels
+    Tool         openmm
+    Version      8
+    Upstream     https://openmm.org/
+    UpstreamRef  conda-forge openmm 8.6.1, cuda-version 13
+    Licence      MIT (LGPL for some plugins)
+    Base         condaforge/miniforge3:24.11.3-2
+    Citation     Eastman et al., PLoS Comput Biol 2017, 10.1371/journal.pcbi.1005659
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+
+    # CONDA_OVERRIDE_CUDA IS LOAD-BEARING HERE, and it is upstream's own
+    # documented failure mode rather than a local quirk. conda decides which
+    # CUDA build to install by reading the `__cuda` virtual package, which is
+    # "the maximum version of CUDA supported by the display driver". A login
+    # node with no driver reports NO __cuda at all, so the solver is free to
+    # pick a build that does not match the compute nodes -- OpenMM's own FAQ
+    # says this is "especially common when installing on clusters that do not
+    # have GPUs (and hence do not have a CUDA driver) on the login nodes", and
+    # the symptom is CUDA_ERROR_UNSUPPORTED_PTX_VERSION at run time, in a job,
+    # long after the build said it succeeded.
+    #
+    # So the driver version the COMPUTE nodes have is asserted here, and
+    # cuda-version is pinned to match. conda-forge builds openmm against either
+    # CUDA 12.9-or-later or CUDA 13, and the two are not binary compatible.
+    export CONDA_OVERRIDE_CUDA=13.2
+
+    mamba create -y -p /opt/env -c conda-forge \
+        "python=3.12" "openmm=8.6.1" "cuda-version=13" numpy
+    mamba clean -afy
+
+    export PATH=/opt/env/bin:$PATH
+
+    # --- what got solved, recorded in the build log -------------------------
+    /opt/env/bin/python -c "import openmm; print('openmm', openmm.__version__)"
+    /opt/env/bin/conda list -p /opt/env | grep -Ei 'openmm|cuda|nvrtc|cufft' || true
+
+    # --- assert the CUDA PAYLOAD is there ------------------------------------
+    # Not that it loads -- it cannot, here. That the files a loading plugin
+    # needs were actually installed. The classic broken install is an openmm
+    # whose CUDA plugin is present but whose libcufft is missing: it imports
+    # fine and reports only Reference and CPU platforms at run time.
+    PLUG=$(/opt/env/bin/python -c 'import openmm, os; print(os.path.join(os.path.dirname(openmm.version.__file__), "..", "..", "..", "..", "lib", "plugins"))')
+    PLUG=$(cd "$PLUG" && pwd)
+    echo "plugin directory: $PLUG"
+    ls -1 "$PLUG"
+    test -s "$PLUG/libOpenMMCUDA.so" \
+        || { echo "FATAL: no libOpenMMCUDA.so -- this is a CPU-only openmm" >&2; exit 1; }
+    /opt/env/bin/python - <<'CHECK'
+import ctypes.util, glob, os, sys
+import openmm
+# libcufft and the nvrtc runtime are what the CUDA plugin dlopens. Missing
+# either is the documented way to get a silently CPU-only OpenMM.
+root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(openmm.__file__))))
+lib = os.path.join(root, "lib")
+for stem in ("libcufft", "libnvrtc"):
+    hits = glob.glob(os.path.join(lib, stem + "*.so*"))
+    assert hits, ("missing %s under %s -- the CUDA plugin cannot load without it"
+                  % (stem, lib))
+    print("%-10s %s" % (stem, os.path.basename(sorted(hits)[0])))
+# The Reference and CPU platforms need no driver, so they MUST be here even on
+# a driverless build node. If they are not, the install is broken in a way that
+# has nothing to do with CUDA.
+names = [openmm.Platform.getPlatform(i).getName()
+         for i in range(openmm.Platform.getNumPlatforms())]
+print("platforms visible at build time (no driver here):", names)
+assert "Reference" in names and "CPU" in names, names
+print("NOTE: CUDA is expected to be ABSENT in this list. A driverless node")
+print("      cannot register it. tools/openmm/test.sh asserts it on a GPU node.")
+CHECK
+
+    chmod -R a+rX /opt/env
+
+%environment
+    export PATH=/opt/env/bin:$PATH
+    export PYTHONNOUSERSITE=1
+    export LC_ALL=C.UTF-8
+    export OPENMM_DIR=/opt/env
+    # OpenMM compiles its kernels at first use and caches them. A .sif is a
+    # read-only squashfs, so the default cache location inside the image is not
+    # writable; /tmp is bound by apptainer, is local NVMe on a compute node, and
+    # is per-node so concurrent array tasks cannot collide over one cache file.
+    export OPENMM_CACHE_DIR="${OPENMM_CACHE_DIR:-/tmp/openmm-cache}"
+
+%test
+    set -eu
+    # On the finished squashfs, and WITHOUT asserting CUDA: %test runs wherever
+    # the build ran, which is the driverless login node. The CUDA assertions
+    # live in tools/openmm/test.sh, which runs on a GPU node.
+    /opt/env/bin/python -c "
+import openmm, openmm.unit as u
+print('openmm', openmm.__version__)
+names = [openmm.Platform.getPlatform(i).getName() for i in range(openmm.Platform.getNumPlatforms())]
+print('platforms', names)
+assert 'CPU' in names, names
+# A real energy on a platform that needs no driver, so the squashfs itself is
+# proven to support building a Context and running a kernel.
+s = openmm.System(); s.addParticle(1.0*u.amu); s.addParticle(1.0*u.amu)
+f = openmm.HarmonicBondForce()
+f.addBond(0, 1, 0.1*u.nanometer, 100.0*u.kilojoule_per_mole/u.nanometer**2)
+s.addForce(f)
+c = openmm.Context(s, openmm.VerletIntegrator(0.001*u.picoseconds), openmm.Platform.getPlatformByName('CPU'))
+c.setPositions([openmm.Vec3(0,0,0), openmm.Vec3(0.2,0,0)]*u.nanometer)
+e = c.getState(getEnergy=True).getPotentialEnergy().value_in_unit(u.kilojoule_per_mole)
+assert abs(e - 0.5) < 1e-5, e
+print('CPU platform computes 0.5 kJ/mol correctly')"
+    test -s /opt/env/lib/plugins/libOpenMMCUDA.so
+
+%runscript
+    exec python "$@"
+
+%help
+    OpenMM 8.6.1 from conda-forge, built against CUDA 13 to match the CoreHPC
+    driver (13.2). The unlicensed alternative to Amber.
+
+      chpc-tool exec openmm -- python -m openmm.testInstallation
+      chpc-tool exec openmm -- python my_simulation.py
+
+    ASK FOR A GPU AND SELECT THE PLATFORM EXPLICITLY. OpenMM falls back to the
+    CPU platform silently, and a CPU run of a system worth running on a GPU is
+    not a slower answer, it is no answer:
+
+      platform = openmm.Platform.getPlatformByName("CUDA")
+      simulation = app.Simulation(topology, system, integrator, platform)
+
+    An import proves nothing about CUDA. openmm/__init__.py loads its plugins
+    and never raises when one fails; the errors are only visible through
+    openmm.Platform.getPluginLoadFailures(), and the symptom of ignoring them
+    is `There is no registered Platform called "CUDA"` with only Reference and
+    CPU in the list.
