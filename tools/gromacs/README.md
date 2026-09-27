@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **built** 2026-09-27 — image compiled; every `test.sh` assertion passed on `ggpu1-06` (L40S) run directly against the SIF: 510 SPC waters minimised to -47.6 kJ/mol each, then 2000 MD steps with **mandatory** `-nb gpu -pme gpu` at 2652 ns/day. Not `verified` only because the FAC share is down, so the image is unpublished and `chpc-tool test` has not run |
+| Status | **verified** 2026-09-27 on `ggpu1-10` (NVIDIA L40S), job 2007172, 3.5 s — 510 SPC waters minimised to **-47.64 kJ/mol each**, then 2000 MD steps with **mandatory** `-nb gpu -pme gpu` at 3175 ns/day, with `md.log` confirming the GPU did both the short-ranged and the PME work |
 | Image to be | `gromacs_2026.3.sif` from [`gromacs_2026.3.def`](gromacs_2026.3.def), compiled from source on `nvidia/cuda:13.2.1-devel-ubuntu24.04` |
 | GPU | yes. Compiled for sm_89, sm_90 **and** sm_120, so every GPU model in the partition works; `GPU_MAX_CC` is empty |
 | Weights | none. Force fields and `spc216.gro` ship in `share/gromacs/top` |

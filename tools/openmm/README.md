@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | **built** — the CUDA platform is now PROVEN on an L40S (2026-09-27: platforms `['Reference','CPU','CUDA']`, harmonic bond 0.500000 kJ/mol, `testInstallation` clean). Still `built` because `test.sh` was edited the same day and has not run end to end; the FAC share went down before it could |
+| Status | **verified** 2026-09-27 on `ggpu1-10` (NVIDIA L40S), job 2007171, 7 s — the CUDA platform registers, a Context builds, the harmonic bond is 0.500000 kJ/mol, and `testInstallation` finds Reference, CPU and CUDA agreeing within tolerance |
 | Image | `openmm_8.sif` from [`openmm_8.def`](openmm_8.def); 575 MB on a `condaforge/miniforge3` base |
 | GPU | yes, and the point of the entry. `GPU_MAX_CC` is deliberately **empty** — see below |
 | Weights | none. An MD engine; the force field comes with your system |
