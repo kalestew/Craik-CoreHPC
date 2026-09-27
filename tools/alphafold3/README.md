@@ -97,8 +97,24 @@ parameters are ~1 GB and are carried in `assets.tsv`; the genetic databases are
 hundreds of GB and are deliberately *not* listed there. A manifest is a shopping
 list for files a person carries, and these are not that.
 
-Budget the share before starting: `/mnt/fac/CX500146_DS1` had 4.9 TB free at the
-time of writing, so the databases fit, but they are not a small decision.
+Budget the share before starting. Measured 2026-09-26: `/mnt/fac/CX500146_DS1`
+is 5.0 TB with **3.9 TB free** (1.2 TB used), so the databases fit with room to
+spare — but the figure has moved by a terabyte since this file was first written,
+so check it again rather than trusting either number.
+
+**The fetch is the whole remaining blocker, and it is a deliberate act rather
+than a step somebody can slip into an afternoon.** It is hundreds of GB over the
+campus proxy, it can only run on the login node because compute nodes have no
+internet at all (verified: not even through `chpc-proxy-vm1`), and it will run
+for hours. That means it wants a `screen` or `tmux` session on the login node and
+somebody willing to own it, and it wants deciding on rather than starting
+speculatively — the download is the cheap part of the commitment; the share space
+and the ongoing refreshes are the expensive part.
+
+Nothing else here is waiting on anything. The weights are staged and their
+sha256 is verified, the recipe is the only piece of work left, and `tool_doctor`
+already reports weights and databases separately so the half-provisioned state
+reads correctly rather than as breakage.
 
 Keep the weights and databases **outside** the image and on FAC — a weights
 refresh should not force a rebuild, and a hundreds-of-GB image is not a thing.
