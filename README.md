@@ -3,7 +3,7 @@
 How the Craik Lab uses the UCSF CoreHPC cluster. Four things live here:
 
 - A tool registry, `tools/`: one entry per piece of software the lab runs
-  (Boltz-2, ColabFold, RFdiffusion, Rosetta and 29 more) and the `chpc-tool`
+  (Boltz-2, ColabFold, RFdiffusion, Rosetta and 30 more) and the `chpc-tool`
   command that runs any of them from the lab's shared FAC storage, with the
   weights, bind mounts and GPU constraints already sorted out.
 - A complete worked example, `examples/p1b7/`: the inputs, checks and batch
