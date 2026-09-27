@@ -85,6 +85,8 @@ print("box %s" % [round(x, 2) for x in p.box])
 
 with open("atomcount.txt", "w") as fh:
     fh.write(str(len(p.atoms)))
+with open("watercount.txt", "w") as fh:
+    fh.write(str(len(waters)))
 PY
 then
     echo "parmed could not validate the topology:" >&2; tail -25 parmed.log >&2; exit 1
@@ -108,6 +110,7 @@ then
     echo "cpptraj failed to read the topology:" >&2; tail -25 cpptraj.log >&2; exit 1
 fi
 want=$(cat atomcount.txt)
+nsol_waters=$(cat watercount.txt 2>/dev/null || echo 0)
 # cpptraj prints e.g. "Topology ... contains 1234 atoms".
 got=$(grep -oE '[0-9]+ atoms' cpptraj.log | head -1 | awk '{print $1}')
 [ -n "$got" ] || { echo "cpptraj printed no atom count:"; tail -20 cpptraj.log; exit 1; }
@@ -135,29 +138,65 @@ then
 fi
 test -s min.rst || { echo "sander wrote no restart file:"; tail -25 min.out; exit 1; }
 
-if ! "$CHPC_TOOL" exec ambertools -- python - > energy.log 2>&1 <<'PY'
+if ! "$CHPC_TOOL" exec ambertools -- python - "$nsol_waters" > energy.log 2>&1 <<'PY'
 import re
 
-text = open("min.out").read()
-# Every printed step carries an ENERGY field; take the first and the last.
-energies = [float(m) for m in re.findall(r"^\s+ENERGY\s+=\s+(-?\d+\.\d+)",
-                                         text, re.MULTILINE)]
-if not energies:
-    energies = [float(m) for m in re.findall(r"ENERGY\s+=\s+(-?[\d.]+)", text)]
-assert len(energies) >= 2, ("sander printed fewer than two energies", energies[:5])
+# SANDER PRINTS A TABLE, NOT `ENERGY = value`. Measured against AmberTools 26:
+#
+#    NSTEP       ENERGY          RMS            GMAX         NAME    NUMBER
+#       1      -4.3173E+03     1.1462E+01     4.4278E+01     O        1432
+#
+# so the energy is the SECOND whitespace-separated field on the line after each
+# header, in scientific notation. A first version of this test looked for
+# `ENERGY =` and found nothing, then reported "sander printed fewer than two
+# energies" against a run that had printed five.
+#
+# Units are kcal/mol here, not kJ/mol. Amber is kcal throughout, and the
+# openmm and gromacs entries next door are kJ -- worth remembering before
+# comparing a number from one with a number from the other.
+lines = open("min.out").read().splitlines()
+energies = []
+for i, line in enumerate(lines):
+    if "NSTEP" in line and "ENERGY" in line:
+        for nxt in lines[i + 1:]:
+            if nxt.strip():
+                fields = nxt.split()
+                if len(fields) >= 2:
+                    try:
+                        energies.append(float(fields[1]))
+                    except ValueError:
+                        pass
+                break
+
+assert len(energies) >= 2, (
+    "fewer than two energies in min.out; sander prints a NSTEP/ENERGY table and "
+    "the parser above reads field 2 of the row beneath each header", energies[:5])
 first, last = energies[0], energies[-1]
 print("sander minimisation: %.4f -> %.4f kcal/mol over %d printed steps"
       % (first, last, len(energies)))
+
+# The property a broken parameter set cannot fake: steepest descent must go DOWN.
 assert last < first, ("minimisation did not lower the energy", first, last)
-# A solvated peptide's potential energy is large and negative; a value near zero
-# means the nonbonded terms never contributed.
+
+# And a solvated system's potential energy is large and negative. A box whose
+# nonbonded terms never contributed sits near zero.
 assert last < -100.0, ("energy implausibly high for a solvated system", last)
 print("energy decreased by %.4f kcal/mol" % (first - last))
+
+# Per-water sanity, which is the number with physical meaning. TIP3P water is
+# about -9.9 kcal/mol per molecule; a wide band because this is 50 steps of
+# minimisation on a freshly solvated box, not an equilibrated simulation.
+import sys
+n_water = int(sys.argv[1]) if len(sys.argv) > 1 else 0
+if n_water:
+    per = last / n_water
+    print("    %.2f kcal/mol per water over %d waters" % (per, n_water))
+    assert -20.0 < per < -3.0, ("energy per water is implausible: %.2f" % per)
 PY
 then
     echo "could not read energies out of sander's output:" >&2
     tail -25 energy.log >&2
-    grep -n "ENERGY" min.out | head -5 >&2
+    grep -n "NSTEP" min.out | head -3 >&2
     exit 1
 fi
 cat energy.log
