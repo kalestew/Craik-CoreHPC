@@ -81,18 +81,26 @@ else
     # are a DICT keyed by name, not an array. Nothing about that is guessable
     # from the AF3 format the README cites.
     #
-    # ALL THREE MSA FLAGS MUST BE FALSE, and each defaults to True. Setting
-    # use_msas alone is not enough: with use_paired_msas and use_main_msas still
-    # true, openfold3 goes to the network and dies on a compute node with
+    # THE MSA FLAGS IN THE QUERY DO NOT STOP THE NETWORK CALL. All three --
+    # use_msas, use_paired_msas, use_main_msas -- default to True and are set
+    # false here, and that is still not enough: the fetch is gated by a
+    # SEPARATE experiment setting, `use_msa_server`, which is a CLI flag on
+    # `run_openfold predict` and not a field of the query at all. With the query
+    # flags false and the CLI flag left alone, openfold3 still goes to the
+    # network and dies on a compute node with
     #   requests.exceptions.ProxyError: HTTPSConnectionPool(
     #     host='api.colabfold.com', port=443) ... Failed to establish a new
     #     connection: [Errno 113] No route to host
-    # after fifty seconds, having already loaded the weights. It calls the PUBLIC
-    # ColabFold MSA server by default -- worth knowing for its own sake, since
-    # compute nodes here have no internet at all (docs/02) and a production fold
-    # therefore needs its MSAs supplied through the per-chain
-    # main_msa_file_paths / paired_msa_file_paths fields rather than fetched.
-    # Phase 1 is asking whether the image folds at all, so it asks for none.
+    # after forty-five seconds, having already loaded 2.3 GB of weights. So
+    # `--use-msa-server=False` is passed below, and the query flags are kept
+    # false as well because they are what the MSA pipeline itself reads
+    # (msa_pipeline_configs.py:109).
+    #
+    # It calls the PUBLIC ColabFold MSA server by default, which matters well
+    # beyond this test: compute nodes here have no internet at all (docs/02), so
+    # a production fold must either pass --use-msa-server=False and supply its
+    # own MSAs through the per-chain main_msa_file_paths / paired_msa_file_paths
+    # fields, or not run on a compute node. Phase 1 asks for no MSAs at all.
     cat > plain.json <<'JSON'
 {
   "seeds": [1],
@@ -115,7 +123,8 @@ JSON
 fi
 
 if ! "$CHPC_TOOL" exec openfold3 -- run_openfold predict \
-        --query_json=plain.json --output_dir=out_plain > plain.log 2>&1
+        --query_json=plain.json --output_dir=out_plain \
+        --use-msa-server=False --use-templates=False > plain.log 2>&1
 then
     echo "run_openfold exited non-zero on phase 1."
     echo "triage, in the order these have bitten this registry:"
