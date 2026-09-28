@@ -2,12 +2,12 @@
 
 | | |
 |---|---|
-| Status | built 2026-09-25 (`%test` passed on the login node); `chpc-tool test openfold3` has not run and nothing has been folded with it |
+| Status | **verified** 2026-09-27 on `ggpu4-03` (H100 NVL) in 1 m 26 s — folds; `covalent_bonds` asserted still inert; and a covalent modification through `non_canonical_residues` built as a real bond in 5 of 5 draws. Phase 1 also folded on `ggpu4-04`, and the covalent geometry reproduced on an L40S to within 0.004 Å |
 | Image | `openfold3_3.sif`; recipe [`openfold3_3.def`](openfold3_3.def) |
 | Base | `nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04`; torch 2.14.0+cu130 |
 | GPU | `--gres=gpu:1`, any `gpu` node (`GPU_MAX_CC=12.0`: torch carries `sm_120`; the cuEquivariance and DeepSpeed kernels have not been exercised on a Blackwell node) |
 | Weights | Hugging Face `OpenFold/OpenFold3`, default set `OpenBind-0`, into `$OPENFOLD3_WEIGHTS` (`$CHPC_LAB/data/openfold3`, with `HF_HOME` inside it) by [`fetch-weights.sh`](fetch-weights.sh) on the login node; whether that has completed is not recorded in the entry, `chpc-tool doctor openfold3` says |
-| Covalent bonds | **apo folds only.** `covalent_bonds` is declared in the query schema and read by nothing; settled 2026-09-25 against the released wheel |
+| Covalent bonds | **yes — but not through `covalent_bonds`, which is inert.** Modifications go in as a CCD-named residue via `non_canonical_residues`; measured `SG–CD` 1.671–1.746 Å against a 1.81 Å ideal in 5/5 draws. The component must carry the amino-acid backbone, so this does not reach drug-sized adducts. See [Covalent support](#covalent-support) |
 | Licence | Apache-2.0, code and weights, academic **and commercial** use |
 | Upstream | <https://github.com/aqlaboratory/openfold-3> — **note the hyphen**; the wheel read is `openfold3` 0.5.0; `UPSTREAM_REF` is unset in tool.conf |
 | Training cutoff | `OpenBind-0`: the PDB through **June 2025** |
@@ -102,11 +102,27 @@ So a real fold either passes that flag and names its own MSA files in
 
 ## Do not miss
 
-- **Apo folds only.** `covalent_bonds` is declared on `Query` and consumed by
-  nothing in the wheel, and its bond endpoint is an integer atom index with no
-  name to check against. A covalent request produces a plausible, confident,
-  unbonded structure. Why that is the worst outcome and how to check a bond
-  elsewhere: [`../covalent-bonds.md`](../covalent-bonds.md).
+- **`covalent_bonds` IS INERT — use `non_canonical_residues` instead.** The
+  field named for bonds is declared on `Query`, validates, and is dropped before
+  the model sees anything: the AtomArray is byte-identical with and without it.
+  Its endpoint is an integer atom index with no name to check against, so it
+  could not be addressed safely even if it worked. What *does* work is a
+  modification named by CCD code in `non_canonical_residues` — measured as a
+  real bond in every draw. [Covalent support](#covalent-support).
+- **THE `seeds` FIELD IN YOUR QUERY JSON IS ALSO IGNORED.** `InferenceQuerySet`
+  declares `seeds`, and the runner reads `experiment_settings.seeds` instead —
+  default `[42]`. A query asking for `"seeds": [1, 2, 3]` folds seed 42, writes
+  its output under `seed_42/`, and says nothing. The count comes from
+  `--num-model-seeds` and the values from `--runner-yaml`. For a predictor whose
+  results you intend to compare, this is the most expensive silent default in
+  the entry.
+- **A modified residue must carry the amino-acid backbone.** `non_canonical_residues`
+  accepts any CCD code, including a ligand's. Give it one — `MOV`, sotorasib —
+  and it builds all 41 atoms, with **no backbone and no peptide bond on either
+  side**: the chain is silently cut in two at that position. The only warning
+  says "could cause issues with incorrect polymer linkage", which does not sound
+  like what it is. A typo'd code fails as
+  `AttributeError: 'NoneType' object has no attribute 'as_array'`.
 - **Not an AlphaFold 3 JSON.** `chains`, `ccd_codes`, `main_msa_file_paths`,
   `extra="forbid"`. An AF3-dialect input is rejected outright, which is the
   one piece of good news.
@@ -122,31 +138,145 @@ So a real fold either passes that flag and names its own MSA files in
 
 ---
 
+## Covalent support
+
+**Settled 2026-09-27 by measurement, and it reverses what this entry said
+before.** OpenFold3 folds covalent modifications correctly and in every draw.
+What it does not do is read the field named for them.
+
+### The field that looks right and is dead
+
+`Query.covalent_bonds` validates, and is then dropped before the model sees
+anything. The proof does not need a GPU, because the model's only bond input is
+the `token_bonds` feature and `create_token_bonds()` reads `atom_array.bonds` and
+nothing else — so the question is settled on the AtomArray:
+
+```
+apo query          : 126 atoms, 126 bonds, 0 crossing a chain boundary
+covalent_bonds set : 126 atoms, 126 bonds, 0 crossing a chain boundary
+```
+
+Byte-identical bond lists. `structure_with_ref_mols_from_query()` builds the
+structure chain by chain, concatenates the segments, calls
+`connect_via_residue_names()` — which bonds within and along residues, never
+between chains — and never looks at `query.covalent_bonds`.
+
+Two things make this a confident reading rather than an absence of evidence.
+First, the string `covalent_bonds` occurs **once** in the whole package: its own
+declaration. Second, its sibling field in the same model, `pocket_constraint`,
+has a complete consumer chain — config, featurisation, the diffusion module and
+its own tests — so the schema is not simply aspirational throughout. One field is
+wired and the other is not.
+
+And `Bond.atom1` is `Atom(chain_id: str, residue_id: int, atom_id: int)`. The
+endpoint is an **integer index**; there is no way to name `SG`. That breaks rule
+2 of [`../covalent-bonds.md`](../covalent-bonds.md) at the level of the type
+declaration, so this field should not be used even after it starts working.
+
+### The route that works
+
+Put the modification in as a **residue**, by CCD code, on the polymer chain:
+
+```json
+{"queries": {"mod": {"chains": [{
+  "molecule_type": 0, "chain_ids": ["A"],
+  "sequence": "MKTAYCAKQRQISFV",
+  "non_canonical_residues": {"6": "YCM"}
+}], "use_msas": false, "use_paired_msas": false, "use_main_msas": false}}}
+```
+
+`YCM` is S-(2-amino-2-oxoethyl)-L-cysteine, the iodoacetamide–cysteine adduct.
+The key is a **1-based residue id** as a string; `_cast_keys_to_int` converts it.
+
+This reaches the model as a genuine bond feature, and the mechanism is worth
+knowing because it explains the limits. A non-canonical residue is **atomized**
+exactly as AlphaFold 3 specifies — `YCM` occupies 10 tokens where a plain `CYS`
+occupies 1 — and its bonds therefore survive `filter_fully_atomized_bonds()` into
+`token_bonds`:
+
+```
+plain CYS at 6   122 atoms -> 15 tokens; residue 6 occupies  1 token;  0 token bonds
+YCM at 6         126 atoms -> 24 tokens; residue 6 occupies 10 tokens; 9 token bonds
+                 ... YCM6/CB -- YCM6/SG, YCM6/SG -- YCM6/CD, YCM6/CD -- YCM6/CE ...
+```
+
+Measured on `ggpu4-03` (H100 NVL), five diffusion samples:
+
+| draw | 1 | 2 | 3 | 4 | 5 |
+|---|---|---|---|---|---|
+| `SG–CD` (Å) | 1.746 | 1.732 | 1.674 | 1.728 | 1.671 |
+
+Against a CCD ideal of 1.81 Å, with the rest of the adduct built too
+(`CD–CE` 1.47–1.51, `CE–NZ2` 1.28–1.33). **Five of five**, and the same five
+distances came out within 0.004 Å on an L40S — so this is not one lucky draw on
+one device.
+
+### What this cannot do
+
+The CCD component must contain **the whole modified residue, backbone
+included**. That is a real bound, and it is where this route stops short of the
+other five entries:
+
+- a **modified amino acid** works: hundreds of PTMs and cysteine adducts have CCD
+  codes, and they are what this route is for;
+- a **drug-sized adduct does not**. Sotorasib on KRAS G12C is deposited as the
+  ligand `MOV` bonded to `CYS`, and there is no CCD component for "cysteine plus
+  sotorasib" as one residue. Passing `MOV` to `non_canonical_residues` builds its
+  41 atoms with no backbone and **cuts the chain in two** at that position;
+- a **custom component cannot be supplied.** `ccd_file_path` exists on the
+  inference config and is read — but only into the **template** pipeline.
+  `get_structure_with_ref_mols()` is a `@staticmethod` taking the query alone, so
+  it never receives it and resolves CCD codes through biotite's bundled
+  dictionary. Biotite's own `struc.info.set_ccd_path()` would do it, and no
+  openfold3 setting reaches that at inference.
+
+So: use this entry for post-translationally modified proteins, and use
+`intellifold`, `boltz`, `chai1` or `protenix` for a covalent ligand. The P1B7
+walkthrough's chemistry is the second kind.
+
 ## Provenance
 
 Built 2026-09-25 (tool.conf): the image exists and its `%test` passed on the
 login node. Builder and wall time are not recorded, and `UPSTREAM_REF` was
 never filled in.
 
-`chpc-tool test openfold3` has **not** run, and nothing has been folded with
-this image. What it will prove: phase 1 folds upstream's own example query,
-found inside the image, and asserts at least 20 CA atoms and a CA radius of
-gyration above 3 Å; phase 2 sends the AlphaFold 3 spelling, `bondedAtomPairs`
-with `[entity_id, residue_id, atom_name]` endpoints and a registered CCD
-ligand, and runs the geometry checker on the result. Both phases are hard
-failures, with deliberately **no** environment variable to skip the second: an
-escape hatch is a thing that gets used at 6pm and quoted back the next morning
-as a green test. Given the schema finding below, phase 2's expected outcome is
-(a), a schema error; it keeps its value as the check that says when upstream
-starts consuming the field.
+### Verified 2026-09-27: it folds, and it does covalent after all
 
-**`verified` for this entry means a bonded fold actually ran and the bond
-landed on the right atom.** Not that the container started. With
-`covalent_bonds` unread, it is entirely possible for this entry to stay `built`
-and legitimately never reach `verified`. That is a finding, not unfinished
-work. `tool_doctor` prints `COVALENT BONDS ARE REFUSED HERE` on every run,
-because that is the one thing a path check can never see and the one thing
-that decides whether this tool is usable for the work it was added for.
+`chpc-tool test openfold3` PASSED on `ggpu4-03`, an NVIDIA H100 NVL, in 1 m 26 s:
+
+```
+ok: 31 CA atoms, CA spread 12.86 A
+apo query          : 126 atoms, 126 bonds, 0 crossing a chain boundary
+covalent_bonds set : 126 atoms, 126 bonds, 0 crossing a chain boundary
+ok: covalent_bonds is declared, parsed, and dropped -- the AtomArray is
+    byte-identical with and without it
+  ycm_probe_seed_42_sample_1_model.cif   SG-CD 1.746 A
+  ycm_probe_seed_42_sample_2_model.cif   SG-CD 1.732 A
+  ycm_probe_seed_42_sample_3_model.cif   SG-CD 1.674 A
+  ycm_probe_seed_42_sample_4_model.cif   SG-CD 1.728 A
+  ycm_probe_seed_42_sample_5_model.cif   SG-CD 1.671 A
+5 draws, SG-CD 1.671-1.746 A against the CCD ideal 1.81 A
+ok: SG-CD is a real thioether in all 5 draws
+```
+
+**`verified` for this entry means a covalently modified fold actually ran and
+the bond landed in the right place.** Not that the container started. That was
+met — but through `non_canonical_residues`, not through the field the entry was
+built around, which phase 2a now asserts stays dead. The reasoning is in
+[Covalent support](#covalent-support); the short version is that this entry
+spent two days concluding "apo folds only" from a correct reading of
+`covalent_bonds`, and the error was in the *scope* of the conclusion rather than
+in the reading.
+
+Phase 2 previously sent the AlphaFold 3 spelling, `bondedAtomPairs`. That was
+never going to work: phase 1 had already established the schema is not AF3's and
+`Chain` is `extra="forbid"`. It was testing a key this tool has never had, which
+is why it failed as outcome (a) — and why its failure carried no information
+about covalent support at all.
+
+Both phases remain hard failures, with deliberately **no** environment variable
+to skip the second: an escape hatch is a thing that gets used at 6pm and quoted
+back the next morning as a green test.
 
 `GPU_MAX_CC=12.0`, measured 2026-09-25 inside the built image on the login
 node with `torch._C._cuda_getArchFlags()`: torch 2.14.0+cu130, arch flags
@@ -159,6 +289,12 @@ for its cuequivariance kernels, 2026-09-26); this one is not yet. How the
 measurement is taken: [`../README.md`](../README.md#add-a-tool).
 
 ### Settled 2026-09-25: it is not an AlphaFold 3 dialect, and the bond field is dead
+
+> **Read with the section above.** Everything here about the schema and about
+> `covalent_bonds` was confirmed on 2026-09-27 and still stands. What did not
+> stand is the conclusion drawn from it — "fold the apo system here and nothing
+> else" — because it assumed `covalent_bonds` was the only route to a bond.
+> `non_canonical_residues` is the other one, and it works.
 
 The entry was written from upstream's documentation, which says only that
 OpenFold3 "replicates AlphaFold 3's input features" and never mentions a bond.
@@ -186,22 +322,41 @@ confident structure in which the ligand is bonded to nothing. That is the
 HA-ADAPT contamination with a new spelling, and it is why this is a refusal
 rather than an open question.
 
-**What follows.** Fold the apo system here; refuse anything covalent. The
-consuming project has removed `openfold3` from its AF3-dialect builder for the
-same reason, so an input is never labelled for a tool that cannot read it.
-`test.sh` phase 2 keeps its value: it becomes the check that tells us when
-upstream starts consuming the field.
+**What followed, and what replaced it.** The conclusion drawn here was "fold
+the apo system; refuse anything covalent", and for a covalent *ligand* that is
+still right. It was too broad for a covalent *modification*, which
+`non_canonical_residues` builds correctly — see
+[Covalent support](#covalent-support). The consuming project's removal of
+`openfold3` from its AF3-dialect builder stands on its own footing: its chemistry
+is a peptide bonded to a hapten, which is the ligand case, and no CCD component
+contains that adduct as a residue.
 
-`test.sh` phase 2 tries the AlphaFold 3 spelling — `bondedAtomPairs` with
-`[entity_id, residue_id, atom_name]` endpoints and a registered CCD ligand —
-because it is the only documented candidate, not because there is a source for
-it. It distinguishes three outcomes, and they mean different things:
+`test.sh` phase 2a keeps the value this paragraph claimed for it, and states it
+as an assertion rather than a hope: it fails if `covalent_bonds` ever starts
+producing a bond, and says so in those words.
+
+`test.sh` phase 2 *used* to try the AlphaFold 3 spelling — `bondedAtomPairs`
+with `[entity_id, residue_id, atom_name]` endpoints and a registered CCD ligand
+— on the grounds that it was the only documented candidate. It was written to
+distinguish three outcomes:
 
 | Outcome | Looks like | Means |
 |---|---|---|
 | (a) rejected | schema error naming the key | wrong key. Find the real one in the installed package's schema, write it here |
 | (b) accepted, ignored | a run that succeeds, a plausible structure | **the dangerous one.** The checker catches it as a free ligand metres from the anchor |
 | (c) accepted, honoured | geometry check passes | qualified. Paste the working JSON into this file — upstream documents none |
+
+The framework was sound and the candidate was not. `bondedAtomPairs` is not a
+key this tool has ever had, so phase 2 was pinned at (a) by construction and its
+failure said nothing about covalent support. Worth keeping as a lesson: a test
+whose input cannot be right produces a red tick that *feels* like a finding, and
+this one was quoted as one.
+
+Phase 2 now runs the real keys and splits the same way. `covalent_bonds` is
+outcome **(b)** and phase 2a asserts it stays there. `non_canonical_residues` is
+outcome **(c)**, and per the instruction in this table's last row, the working
+JSON is pasted into [Covalent support](#covalent-support) — upstream documents
+none.
 
 Outcome (b) is why the check is geometric, and why no confidence score or
 exit status can stand in for it: [`../covalent-bonds.md`](../covalent-bonds.md).
@@ -249,9 +404,13 @@ use it for what it can actually do.
 ADR 0022 and as a declared refusal in both of its template sets
 (`Hap108or-data/templates/*.yaml`). Two independent reasons, each sufficient:
 
-- **The chemistry.** That project folds a peptide bonded to a hapten, and the
-  settled section above establishes that `covalent_bonds` is declared and never read on the
-  inference path. The best possible adapter could only fold the apo system.
+- **The chemistry.** That project folds a peptide bonded to a hapten — a
+  covalent *ligand*. `covalent_bonds` is declared and never read, and the route
+  that does work needs the whole adduct to exist as one CCD residue, backbone
+  included, which no hapten conjugate does. So the best possible adapter could
+  still only fold the apo system. This reason survives the 2026-09-27 reversal
+  intact; it is the ligand/modification distinction that does the work, not the
+  dead field alone.
 - **The templates.** `OpenBind-0` is trained on the PDB through June 2025, and
   both of that project's template sets are 2024 structures. They are already in
   these weights, so showing them adds no evidence — the first time that

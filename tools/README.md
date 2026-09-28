@@ -196,8 +196,11 @@ and the `--`.
 **`chpc-tool list`** — every entry, one line: name, version, kind, status,
 GPU, licence. `STATUS` is the thing to read: `verified` has passed its
 self-test on a compute node here; `built` exists on the share but has not;
-`planned` is a description and nothing else. On 2026-09-26 that was 15, 5 and
-13 of 33.
+`planned` is a description and nothing else. On 2026-09-27 that was **26
+verified, 0 built and 6 planned** of 34, with 2 `external` — so every image on
+the share has now passed its own test on a compute node, and what is left is
+either a description or somebody else's service. It was 15, 5 and 13 of 33 on
+2026-09-26.
 
 **`chpc-tool show <tool>`** — the entry, resolved: the image path actually in
 use, whether it takes a GPU and up to which compute capability, the default
@@ -295,7 +298,7 @@ As of 2026-09-25:
 | chai1, colabfold, intellifold, placer, protenix, rfdiffusion, rfdiffusion3 | 9.0 | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1`. Never a bare `gpu:1`. |
 | esm, ligandmpnn, proteinmpnn | none (the image carries `sm_120`) | `--gres=gpu:1`, any node |
 | boltz | none | `--gres=gpu:1`, any node, kernels on or off: the kernel path has run on an L40S (job 1997376) and on an RTX PRO 6000 Blackwell (job 1997377, 2026-09-26) |
-| openfold3 (built, not yet verified) | 12.0 | `--gres=gpu:1` |
+| openfold3 | 12.0 | `--gres=gpu:1`. Verified on an H100 NVL and an L40S; the Blackwell nodes the ceiling admits are still untried, and 12.0 is torch's arch flags rather than cuEquivariance's |
 
 `nvidia_l40s` and `nvidia_h100_nvl` are the two models our QoS can reach. The
 interactive form is
@@ -524,26 +527,35 @@ Scheduler values in particular never appear in this directory. They live in the
 
 ### An entry is not an image
 
-Seven of 34 entries are `STATUS=planned` (2026-09-26): the catalogue records a tool
+Six of 34 entries are `STATUS=planned` (2026-09-27): the catalogue records a tool
 the lab expects to want, with its licence, upstream and intended packaging, before
 anyone has built it. That is deliberate — an entry costs minutes, an image costs an
 afternoon and a few GB of the share.
 
-**What `planned` is hiding matters more than the count**, and the seven are not seven
+**What `planned` is hiding matters more than the count**, and the six are not six
 of the same thing:
 
 | Blocked on | Entries |
 |---|---|
 | a **licence or credential** somebody has to obtain | `amber` (paid site licence for `pmemd`), `netmhciipan` (two tarballs behind a DTU form), `pyrosetta` (credentials for a private conda channel), `bindcraft` (calls `pyrosetta.init()` at import scope, so it inherits that block) |
 | a **decision about scale** | `alphafold3` — weights staged and sha256-verified, but hundreds of GB of genetic databases are not, and fetching them is a commitment rather than a step |
-| **work, and nothing else** | `gromacs` (source build), `rfdiffusion2` |
+| **work, and nothing else** | `rfdiffusion2` |
 
-A further four are `built` rather than `verified` — `intellifold`, `openfold3`,
-`openmm`, `thermompnn`. Every one of them is published and waiting on the same
-thing: a GPU node. Their tests cannot run on the CPU partitions, and the 8-GPU
-per-user cap means a queued verification sits behind whatever else the lab is
-running. `built` is the honest status for an image nobody has yet proved on this
-hardware; it is not a synonym for "probably fine".
+**Nothing is `built` any more.** The four that were — `intellifold`, `openfold3`,
+`openmm`, `thermompnn` — all reached `verified` on 2026-09-27, so every image on
+the share has now passed its own test on a compute node. `built` remains the
+honest status for an image nobody has yet proved on this hardware, and it is not
+a synonym for "probably fine"; it is simply empty at the moment.
+
+Two of those four were held there by something more interesting than the GPU
+queue. `intellifold`'s test was failing on a tool that worked: it read one
+arbitrary draw of five and happened to read the bad one. `openfold3`'s was
+testing a bond field that its schema has never had, and the entry had concluded
+from the resulting failure that the tool could not do covalent chemistry at all —
+when in fact it does, through a differently named route. Both are written up in
+their entries, and the general lesson is in
+[`covalent-bonds.md`](covalent-bonds.md): a red test is not self-evidently a
+finding about the tool.
 
 Two entries are `external` rather than `planned`, because nothing will
 ever be built for them: see the status table under "Add a tool".

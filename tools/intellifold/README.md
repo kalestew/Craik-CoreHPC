@@ -2,13 +2,13 @@
 
 | | |
 |---|---|
-| Status | built 2026-09-25; a real 658-token covalent fold ran on an H100 NVL (cc 9.0), twice, and `chpc-tool test intellifold` has not run |
+| Status | **verified** 2026-09-27 on `ggpu1-06` (NVIDIA L40S) in 2 m 32 s — folds, honours `bondedAtomPairs`, and puts the bond on the declared atom: 5/5 draws on glycosylation at 1.410–1.450 Å, and the sotorasib warhead on `C25` in 5/5 draws with 3/5 closed, best 1.727 Å against 1.765 Å in deposited 8UDR |
 | Image | `intellifold_2.sif`; recipe [`intellifold_2.def`](intellifold_2.def) |
 | Base | `nvidia/cuda:12.8.1-cudnn-devel-ubuntu24.04`; a JAX/XLA image with no torch in it |
 | Engine | AlphaFold 3's JAX/XLA engine, vendored and **built from source** in `%post` |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`, an exercised lower bound; Blackwell untested and refused) |
+| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1`, both exercised (`GPU_MAX_CC=9.0`, an exercised lower bound; Blackwell untested and refused) |
 | Weights | `intellifold_v2.bin.zst` and `intellifold_v2_fourier.npz` at `$INTELLIFOLD_MODEL_DIR` (`$CHPC_LAB/data/intellifold/model_v2`), fetched by [`fetch-weights.sh`](fetch-weights.sh) on the login node |
-| Bonds | `userCCD` and `bondedAtomPairs` both honoured (measured 2026-09-25); a declared bond can still be built at 2.8 Å, so check the geometry |
+| Bonds | `userCCD` and `bondedAtomPairs` both honoured, and the bond is always on the declared atom — but **a declared bond is a proposal the sequence prior can veto outright** (0/25 vs 15/15 on one residue of context), and warhead bonds come out long in a third of draws. Measured over 95 folds: [Bonds](#bonds-what-95-folds-say) |
 | Licence | **Apache-2.0, code *and* model parameters, commercial use permitted** |
 | Upstream | <https://github.com/IntelliGen-AI/IntelliFold>; `UPSTREAM_REF` is unset in tool.conf, so the pip version in the image is not recorded |
 | Training cutoff | **none stated upstream**, re-checked 2026-09-25 against the preprint, README, model card and the staged weights (Traps) |
@@ -16,7 +16,7 @@
 ## Run it
 
 ```bash
-srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l   # the real folds ran on nvidia_h100_nvl; an L40S is permitted and untested
+srun -p gpu --gres=gpu:nvidia_l40s:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l   # both classes exercised: L40S (job 2008659, the full test) and H100 NVL (the 658-token folds)
 mkdir -p /mnt/scratch/user/$USER/intellifold/run1 && cd "$_"   # in.json here; the same path is valid inside the container
 eval "$(chpc-tool export intellifold)"                         # $INTELLIFOLD_MODEL_DIR in THIS shell, for the line below
 chpc-tool exec intellifold -- intellifold predict in.json --model-dir="$INTELLIFOLD_MODEL_DIR" --output-dir=out -- --norun_data_pipeline
@@ -58,14 +58,18 @@ top-level `userCCD` block referenced the same way for anything you only have as
 SMILES; a bond is a top-level `bondedAtomPairs`, `[["A", 6, "SG"], ["B", 1, "CH3"]]`:
 chain label, 1-based residue, atom name.
 
-Output lands under `--output-dir`, a `.cif` per sample (`find out -name '*.cif'`
-is how `test.sh` finds it); a declared bond appears in it as `_struct_conn`
-with `conn_type_id covale`. How the samples are named and whether the tool
-ranks them is not recorded in this entry (untested); the 2026-09-25 folds were
-compared on per-sample ipTM. Before trusting one: `_struct_conn` is a
-declaration, not a geometry. In two of five samples on each ligand route the
-file declared the covale and the two atoms sat 2.78-2.79 Å apart. Run the
-checker on every draw you keep.
+Output lands under `--output-dir`, laid out as
+`<name>/seed-<N>_sample-<M>/<name>_seed-<N>_sample-<M>_model.cif`, plus a
+top-level `<name>_model.cif` which is a **copy of the draw it ranked first** —
+count that one twice and you weight one sample double, which is why `test.sh`
+globs on `sample-` rather than on `*.cif`. Five diffusion samples per seed.
+
+A declared bond appears as `_struct_conn` with `conn_type_id covale` on the large
+complexes; the small self-test cases write **no `_struct_conn` at all**, in
+either direction. So the record is not even consistently present, let alone
+trustworthy: `_struct_conn` is a declaration, not a geometry. Run the checker on
+every draw you keep — and note that on the small cases there is *nothing* except
+the geometry to read.
 
 ## Do not miss
 
@@ -89,10 +93,24 @@ checker on every draw you keep.
 - **L40S or H100 NVL, never a bare `--gres=gpu:1`.** 9.0 rests on a real fold
   on an H100 NVL, not on an arch-flag list; Blackwell nodes are refused until
   something has run there.
-- **A declared bond is not a bond, and the address is AF3's, not Protenix's.**
-  `entity_id` is a chain label; a SMILES ligand cannot carry a bond, use a CCD
-  code or `userCCD`; two of five samples declared a covale at 2.8 Å. Assert
-  the geometry of every draw you keep: [`../covalent-bonds.md`](../covalent-bonds.md).
+- **A DECLARED BOND IS A PROPOSAL, AND THE SEQUENCE PRIOR CAN VETO IT.** This is
+  the most expensive thing on this page. Two runs differing by **one residue two
+  positions from the bond** — `N-A-T`, a glycosylation sequon, against `N-A-K`,
+  which is not — went **15/15 bonded at 1.34–1.48 Å** against **0/25, free
+  ligand at 6.7–10.9 Å**. Same JSON, same CCD code, same atom names, same seeds.
+  Nothing reports the veto: no log line, no `_struct_conn` either way, no
+  confidence score that moves. So "IntelliFold honours `bondedAtomPairs`" does
+  **not** license "this bond will be built" for a chemistry the model has not
+  seen in that context. [Bonds](#bonds-what-95-folds-say).
+- **The address is AF3's, not Protenix's.** `entity_id` is a chain **label**, not
+  a 1-based index into `sequences`. Neither convention errors on the other's
+  input. A SMILES ligand cannot carry a bond at all — use a registered CCD code
+  or a `userCCD` block.
+- **Warhead bonds come out long, so screen every draw.** Sotorasib on a cysteine
+  put the bond on the right carbon in 25 of 25 draws and *closed* it in 17 —
+  clustered at 2.0–2.1 Å against an ideal 1.81 Å, straddling the 2.1 Å gate.
+  Assert the geometry of every draw you keep:
+  [`../covalent-bonds.md`](../covalent-bonds.md).
 
 ---
 
@@ -106,46 +124,117 @@ checker on every draw you keep.
 Built 2026-09-25 (tool.conf): the image exists and its `%test` passes. Builder
 and wall time are not recorded, and `UPSTREAM_REF` was never filled in.
 
-`chpc-tool test intellifold` has **not** run, which is why the entry is
-`built` and not `verified`. What it will prove when it does: case 1 folds a
-31-mer with empty MSAs and asserts 31 CA atoms and a CA radius of gyration
-above 3 Å; case 2 folds a one-cysteine peptide bonded to the CCD ligand `ACT`
-at its `CH3` and asserts, on the coordinates, that exactly one ligand heavy
-atom is within 2.1 Å of `SG`, that it is a carbon, and that that carbon's only
-heavy neighbour inside the ligand is another carbon. Whether the engine accepts
-`ACT`/`CH3` at all is unconfirmed. If case 2 is rejected, that is the finding:
-record it here and leave `STATUS=built`.
+### Verified 2026-09-27, after the test was found to be wrong and the tool right
 
-### Bonds: the AF3 keys ARE honoured, and a bond it declares may not be one
+`chpc-tool test intellifold` PASSED on `ggpu1-06`, an NVIDIA L40S, in 2 m 32 s:
 
-**Measured 2026-09-25**, on a real covalent complex (a haptenated peptide-MHC
-with an antibody Fv, 658 tokens) on an H100 NVL, five diffusion samples on
-each of two ligand routes. Job ids were not recorded. This settles the first
-question and opens a sharper one.
+```
+ok: 31 CA atoms, CA spread 12.79 A
+  draw                                        C1   nearest which
+  bonded_probe_seed-1_sample-0_model.cif   1.450     1.450 C1
+  bonded_probe_seed-1_sample-1_model.cif   1.410     1.410 C1
+  bonded_probe_seed-1_sample-2_model.cif   1.416     1.416 C1
+  bonded_probe_seed-1_sample-3_model.cif   1.430     1.430 C1
+  bonded_probe_seed-1_sample-4_model.cif   1.449     1.449 C1
+5/5 draws carry the declared bond at 1.20-2.10 A
+  draw                                       C25   nearest which
+  warhead_probe_seed-1_sample-0_model.cif  1.986     1.986 C25
+  warhead_probe_seed-1_sample-1_model.cif  2.091     2.091 C25
+  warhead_probe_seed-1_sample-2_model.cif  2.632     2.632 C25
+  warhead_probe_seed-1_sample-3_model.cif  1.727     1.727 C25
+  warhead_probe_seed-1_sample-4_model.cif  2.129     2.129 C25
+3/5 draws close the bond; best 1.727 A against 1.765 A in deposited 8UDR
+```
 
-**`userCCD` and `bondedAtomPairs` both work.** A top-level `userCCD` block
-referenced as `ccdCodes: ["LIG-1"]` is read, the ligand is tokenised per
-atom (41 heavy atoms, matching the block), and the output carries
-`_struct_conn` with `conn_type_id covale` naming the peptide cysteine's `SG`
-and the ligand atom the input asked for. A registered code in `ccdCodes`
-works too, from the image's own component table.
+**The first run of this test failed, and the tool was not at fault.** Case 2 as
+originally written bonded a cysteine to the `CH3` of `ACT` — the acetate ion —
+and read the result with `find … | head -1`. That reads `seed-1/sample-0`, and
+`seed-1/sample-0` is the single worst draw of that seed's five, at 2.231 Å. Four
+of the other five were fine. The test asserted a property of one arbitrary
+sample, which is not a property of the tool, and it reported FAIL on a working
+capability.
 
-**But the declaration is not the geometry.** In two of five samples on each
-route, the file declares the covale and the two atoms are **2.78-2.79 A**
-apart -- outside any S-C covalent range. The bond is on the right atom (the
-decoy carbon is 12-15 A away in all ten) and it is not a bond. A gate built
-on `_struct_conn` alone would pass all ten.
+Two changes followed, both from the measurements below. Every draw is now
+checked, never one. And the deterministic gate is a **glycosylation** case rather
+than the cysteine one, because glycosylation is the configuration whose bond this
+model builds every time — 5/5 here, 15/15 over three seeds, spread 0.14 Å. The
+cysteine warhead moved to case 3, held to what it actually delivers.
 
-So `test.sh` case 2, which asserts on the coordinates, is still the right
-check and is now known to be necessary rather than merely prudent.
+Case 1 folds a 31-mer with empty MSAs and asserts 31 CA atoms and a CA radius of
+gyration above 3 Å.
 
-**The two routes are not interchangeable.** Same molecule, same atom names,
-same 41 heavy atoms -- and the structures differ systematically: the
-antibody lands 17-46 A from its crystal position on the shipped-block route
-and 52-53 A away on the registry route, with non-overlapping ranges over
-five samples at one seed. The registry route is the one the model is more
-confident about (ipTM 0.70-0.71 against 0.57-0.59). Whatever you fold with,
-record which.
+### Bonds: what 95 folds say
+
+Two rounds of measurement. **2026-09-25**, on a real covalent complex (a
+haptenated peptide-MHC with an antibody Fv, 658 tokens) on an H100 NVL, five
+diffusion samples on each of two ligand routes; job ids not recorded.
+**2026-09-27**, on ggpu1-06 (L40S), 95 folds across five configurations designed
+to isolate what actually decides whether a declared bond gets built.
+
+**Both keys are read.** A top-level `userCCD` block referenced as
+`ccdCodes: ["LIG-1"]` is honoured, the ligand is tokenised per atom (41 heavy
+atoms, matching the block), and a registered code from the image's own component
+table works too. Neither key appears anywhere in the `intellifold` package — both
+are read by the vendored AlphaFold 3 parser, which is why they work at all.
+
+#### The sequence prior can veto a correctly addressed bond
+
+| peptide | bond declared | draws at 1.2–2.1 Å | where the ligand sat |
+|---|---|---|---|
+| `MKTAY`**`N`**`AT`… | `ASN ND2` — `NAG C1` | **15/15** | 1.336–1.478 Å |
+| `MKTAY`**`N`**`AK`… | `ASN ND2` — `NAG C1` | **0/25** | free, 6.7–10.9 Å |
+| `MKTAY`**`N`**`AK`… reversed | `NAG C1` — `ASN ND2` | 0/15 | free, 8.4–13.0 Å |
+| `MKTAY`**`C`**`A`… | `CYS SG` — `MOV C25` | 17/25 | `C25` nearest in 24/25; never escapes |
+| `MKTAY`**`C`**`A`… | `CYS SG` — `ACT CH3` | 18/25 | `CH3` nearest in 23/25; two draws at 14–19 Å |
+
+Rows one and two differ by **one residue, two positions from the bond**. `N-A-T`
+is an N-glycosylation sequon; `N-A-K` is not. Everything else is identical — the
+JSON, the CCD code, the atom names, the seeds, the engine, the node. One is a
+textbook 1.44 Å N-glycosidic bond in every draw and the other is a free sugar
+9 Å away in every draw.
+
+Row three is the control that rules out the obvious alternative: reversing the
+endpoints changes nothing, so `bondedAtomPairs` is unordered as documented and
+the sequon is the whole variable.
+
+**Nothing reports the veto.** The logs of the bonded and unbonded runs are
+identical apart from JAX's dtype warning. No `_struct_conn` record appears in
+either — the small cases write none at all. No confidence score distinguishes
+them. A gate built on anything but the coordinates passes all 40.
+
+The consequence for this programme: `bondedAtomPairs` being honoured is a
+statement about the *parser*. Whether the model will act on it is a statement
+about the chemistry **in its sequence context**, and it has to be measured for
+the system you are folding, not inherited from a fixture that resembles it.
+
+#### The warhead bond is built long
+
+`MOV` is AMG 510 (bound form) — sotorasib, 41 heavy atoms, in the CCD baked into
+this image, and the same component the P1B7 walkthrough folds. Its `C25` is the
+acrylamide warhead carbon, which deposited 8UDR bonds to `CYS SG` at 1.765 Å.
+
+Over 25 draws the bond is on `C25` — the nearest ligand heavy atom in 24 of 25,
+and in the exception the neighbour `C24` at 2.767 Å with nothing in bonding range
+at all. So the atom is never wrong. The *length* is: 17 of 25 inside 1.2–2.1 Å,
+clustered at 2.0–2.1 Å, straddling the gate. Against the CCD's own geometry this
+is systematically long by roughly 0.25 Å.
+
+It is worth knowing why, because it is not a defect to be fixed by trying harder.
+`MOV`'s `C25` carries three hydrogens and one heavy neighbour, and the CCD flags
+**no leaving atom** — as a standalone component the bound form of the drug is
+drawn complete, with the sulfur it attaches to replaced by an H. So the
+declaration asks for a fourth heavy contact on a carbon the component says is
+saturated, and there is no field in this dialect that says "remove this
+hydrogen". `ACT`/`CH3` is topologically identical, and behaves the same way.
+`NAG` is the contrast: `O1` **is** flagged as a leaving atom, and the sequon case
+lands at 1.44 Å with a 0.14 Å spread.
+
+The two ligand routes also disagree with each other on the large complex. Same
+molecule, same atom names, same 41 heavy atoms — and the antibody lands 17–46 Å
+from its crystal position on the shipped-block route and 52–53 Å away on the
+registry route, non-overlapping over five samples at one seed. The registry route
+is the one the model is more confident about (ipTM 0.70–0.71 against 0.57–0.59).
+Whatever you fold with, record which.
 
 ### The rest of the record
 
@@ -179,14 +268,14 @@ Still unknown:
 - the pip version pinned in the image (`UPSTREAM_REF` is empty), and the image
   and weights sizes, which nothing in the entry records;
 - the job ids of the 2026-09-25 folds;
-- whether the image runs on an L40S (permitted at 8.9, never exercised) or on a
-  Blackwell node (refused);
-- whether an empty `unpairedMsa`/`pairedMsa` is accepted as single-sequence
-  mode by this engine: `test.sh` sends it and has not run;
+- whether the image runs on a Blackwell node (refused, and still untried);
 - a `v2-flash` checkpoint: the brief mentions one, upstream's README names
   only IntelliFold-v2, and this entry does not fetch it;
-- the CCD code `ACT` and its methyl atom name `CH3` used in `test.sh`'s bonded
-  case, and whether the engine will accept a bond to it at all.
+- whether the systematic 0.25 Å overshoot on a saturated warhead carbon is
+  specific to this engine. The leaving-atom reading above explains it and does
+  not prove it; the comparison that would is the same two ligands through
+  `boltz`, `chai1` and `protenix`, which take SMILES and so encode the valence
+  differently.
 
 ## Build notes
 
