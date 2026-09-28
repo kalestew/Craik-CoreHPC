@@ -2,7 +2,10 @@
 # OpenFold3 self-test, in two phases.
 # Run:  chpc-tool test openfold3          (GPU node)
 #
-# NEVER RUN. tools/openfold3 is STATUS=planned; there is no image.
+# Phase 1 first ran 2026-09-27 on ggpu4-04 (H100 NVL) and folded.
+# Phase 2 was rewritten 2026-09-27: it had carried AlphaFold 3's bond
+# spelling, which this tool's schema cannot accept at all, so it was
+# testing the wrong key. What it tests now is written at the block.
 #
 # Phase 1 asks whether the image folds. Phase 2 asks the question this entry
 # actually exists to answer: does OpenFold3 accept a covalent bond, and does it
@@ -13,12 +16,14 @@
 #
 # BOTH phases are hard failures, and that is the design. The registry's ladder
 # is planned -> built -> verified, and for this entry `verified` is defined as
-# "a BONDED fold ran and the bond is in the right place". There is deliberately
-# no environment variable that skips phase 2: an escape hatch is a thing that
-# gets used at 6pm and then quoted back as a green test. If phase 2 cannot
-# pass, the honest end state is STATUS=built forever, with the reason written
-# into README.md -- which is a perfectly good outcome and considerably more
-# useful than a green tick.
+# "a covalently modified fold ran and the modification is a real bond". There is
+# deliberately no environment variable that skips phase 2: an escape hatch is a
+# thing that gets used at 6pm and then quoted back as a green test.
+#
+# That definition was met on 2026-09-27, but NOT through the field this entry
+# was built to test. `covalent_bonds` is dead and phase 2a now asserts that it
+# stays dead; the capability lives in non_canonical_residues and phase 2b
+# asserts that. Read the block above phase 2 before editing either.
 set -eu
 
 : "${OPENFOLD3_WEIGHTS:?not set -- run through chpc-tool, which exports it}"
@@ -177,90 +182,213 @@ fi
 cat plain_check.log
 echo "phase 1 ok -- the image folds. This does NOT qualify it for this programme."
 
-# --- phase 2: the qualification ---------------------------------------------
-# Everything below is a HYPOTHESIS. Upstream says OpenFold3 "replicates the
-# input features described in the AlphaFold3 publication"; it does not say the
-# input FORMAT is AlphaFold 3's, and it never mentions bonds. So the AF3
-# spelling is tried because it is the only documented candidate, not because
-# there is any source for it.
+# --- phase 2: the covalent qualification ------------------------------------
+# SETTLED 2026-09-27 on this image, by measurement rather than by reading the
+# documentation -- which still mentions bonds nowhere. The conclusion REVERSES
+# this entry's earlier one, so read it before changing anything here.
 #
-# Read the failure carefully when it comes. There are three different outcomes
-# and they mean different things:
-#   a. schema error naming bondedAtomPairs   -> the key is wrong; find the
-#      right one in the installed package's schema and write it in README.md.
-#   b. schema accepted, bond silently ignored -> the checker below catches it
-#      as a free ligand metres away. This is the dangerous one.
-#   c. schema accepted, bond honoured        -> qualified. Record the exact
-#      JSON that worked in README.md, because it is not in any upstream doc.
+# OpenFold3 DOES fold covalent modifications, correctly, in every draw. What it
+# does not do is read the field named for them.
 #
-# The ligand is a registered CCD code rather than a SMILES because AlphaFold 3
-# cannot bond a SMILES ligand at all -- "there is no atom name that could be
-# used to define the bond" -- and a tool replicating AF3's features plausibly
-# inherits that. UNCONFIRMED, like everything else in this block.
+#   covalent_bonds          declared on Query and read by NOTHING. Its sibling
+#                           field pocket_constraint, in the same model, has a
+#                           full consumer chain (config -> featurization ->
+#                           diffusion_module -> its own tests). covalent_bonds
+#                           has one occurrence in the package: the declaration.
+#   non_canonical_residues  the route that works. A modified residue named by
+#                           CCD code goes into the polymer chain, biotite's
+#                           connect_via_residue_names() bonds it, and the bond
+#                           IS in atom_array.bonds -- which is the only thing
+#                           create_token_bonds() reads. So it reaches the model
+#                           as a real token_bonds feature.
 #
-# The peptide and the ligand are TEST FIXTURES, not this programme's chemistry.
-# The campaign's hapten lives in Hap108or-data/targets/<id>/ and never in a
-# tool registry: HA-ADAPT's sotorasib SMILES was a different molecule for
-# months precisely because it was checked into code, where nobody diffs it.
-cat > bonded.json <<'JSON'
+# The two halves below assert OPPOSITE things on purpose. 2a asserts the dead
+# field is still dead, as a tripwire: if upstream ever wires it up, this test
+# fails and the failure message says to go and use it. 2b asserts the live route
+# still works.
+#
+# The shared checker is NOT used here, and cannot be. It assumes one polymer
+# chain and one non-polymer ligand within bonding distance of an anchor; the
+# route that works on this tool has no ligand chain at all, because the
+# modification IS a residue. That is a real difference in kind from the other
+# five covalent entries, not a convenience -- see ../covalent-bonds.md.
+
+# --- 2a: covalent_bonds is inert, and this is the tripwire ------------------
+# No GPU, no weights, no fold. The model's only bond input is token_bonds and
+# create_token_bonds() reads atom_array.bonds and nothing else, so the question
+# is settled on the AtomArray: build one from a query that declares a bond,
+# build one from the same query without it, and compare.
+if ! "$CHPC_TOOL" exec openfold3 -- python - > cov_field.log 2>&1 <<'PY'
+import numpy as np
+from openfold3.projects.of3_all_atom.config.inference_query_format import Query
+from openfold3.core.data.primitives.structure.query import (
+    structure_with_ref_mols_from_query,
+)
+
+PEPTIDE = "MKTAYCAKQRQISFV"        # cysteine at 1-based position 6
+CHAINS = [
+    {"molecule_type": 0, "chain_ids": ["A"], "sequence": PEPTIDE},
+    {"molecule_type": 3, "chain_ids": ["B"], "ccd_codes": ["ACT"]},
+]
+
+apo, _ = structure_with_ref_mols_from_query(Query(chains=CHAINS))
+# atom_id is typed int on Bond.Atom, so there is no way to NAME SG here: an
+# index is the only address the schema offers. That is reason enough not to use
+# this field even if it worked.
+cov, _ = structure_with_ref_mols_from_query(Query(
+    chains=CHAINS, covalent_bonds=[(("A", 6, 5), ("B", 1, 3))]))
+
+
+def crossing(aa):
+    return [(i, j) for i, j in aa.bonds.as_array()[:, :2]
+            if aa.chain_id[i] != aa.chain_id[j]]
+
+
+n_apo, n_cov = len(crossing(apo)), len(crossing(cov))
+print("apo query          : %d atoms, %d bonds, %d crossing a chain boundary"
+      % (len(apo), len(apo.bonds.as_array()), n_apo))
+print("covalent_bonds set : %d atoms, %d bonds, %d crossing a chain boundary"
+      % (len(cov), len(cov.bonds.as_array()), n_cov))
+
+assert n_apo == 0, "the apo query already has an inter-chain bond -- read this test again"
+assert n_cov == 0, (
+    "covalent_bonds PRODUCED A BOND (%d of them). This is GOOD NEWS and this "
+    "test is now wrong: upstream has wired the field up since 2026-09-27. Go "
+    "and use it -- rewrite this block to assert the bond is on the declared "
+    "atom, and use ../_template/check_covalent_bond.sh, which now applies "
+    "because there is a ligand chain again." % n_cov)
+assert np.array_equal(apo.bonds.as_array(), cov.bonds.as_array()), (
+    "the bond lists differ although neither crosses a chain boundary -- "
+    "covalent_bonds is doing SOMETHING. Find out what before trusting either.")
+print("ok: covalent_bonds is declared, parsed, and dropped -- the AtomArray is "
+      "byte-identical with and without it")
+PY
+then
+    echo "phase 2a did not run:"
+    cat cov_field.log; exit 1
+fi
+cat cov_field.log
+
+# --- 2b: the modified-residue route, which is the capability ----------------
+# YCM is S-(2-amino-2-oxoethyl)-L-cysteine: the iodoacetamide-cysteine adduct,
+# a real covalent modification carried as ONE CCD residue inside the polymer.
+# The thioether SG-CD is the bond under test, ideal 1.81 A.
+#
+# non_canonical_residues is a dict keyed by 1-BASED RESIDUE ID -- JSON keys are
+# strings and _cast_keys_to_int converts them. The residue it replaces does not
+# have to be the same amino acid as the sequence letter; the letter is what the
+# MSA and the templates see and the CCD code is what is built, so keep them
+# consistent or the two disagree silently.
+#
+# NOTE what is NOT honoured here: "seeds" in the query JSON. InferenceQuerySet
+# declares it, the runner reads experiment_settings.seeds instead, and the
+# default is [42] -- so a query asking for seeds [1,2,3] folds seed 42 and says
+# nothing. Seed count comes from --num-model-seeds and the seeds themselves from
+# the runner yaml. This test does not pass either, so it gets seed 42 and five
+# diffusion samples; it asserts on ALL of them.
+cat > ycm.json <<'JSON'
 {
-  "name": "bonded_probe",
-  "sequences": [
-    {"protein": {"id": "A", "sequence": "MKTAYCAKQRQISFV"}},
-    {"ligand": {"id": "B", "ccdCodes": ["ACT"]}}
-  ],
-  "bondedAtomPairs": [
-    [["A", 6, "SG"], ["B", 1, "CH3"]]
-  ]
+  "queries": {
+    "ycm_probe": {
+      "chains": [
+        {
+          "molecule_type": 0,
+          "chain_ids": ["A"],
+          "sequence": "MKTAYCAKQRQISFV",
+          "non_canonical_residues": {"6": "YCM"}
+        }
+      ],
+      "use_msas": false,
+      "use_paired_msas": false,
+      "use_main_msas": false
+    }
+  }
 }
 JSON
 
 if ! "$CHPC_TOOL" exec openfold3 -- run_openfold predict \
-        --query_json=bonded.json --output_dir=out_bond > bond.log 2>&1
+        --query_json=ycm.json --output_dir=out_ycm \
+        --use-msa-server=False --use-templates=False > ycm.log 2>&1
 then
+    echo "phase 2b: the modified-residue fold exited non-zero while phase 1"
+    echo "passed, so the image and the weights are fine."
     echo
-    echo "PHASE 2 FAILED, and phase 1 passed -- so the image and the weights"
-    echo "are fine and the BOND SPECIFICATION is the problem."
-    echo
-    echo "This is the finding this entry was created to produce. Do the"
-    echo "following before anything else:"
-    echo "  1. read the error below and decide which of (a)/(b)/(c) it is"
-    echo "     (see the comment above this block);"
-    echo "  2. if the key is simply wrong, find the real one --"
-    echo "       chpc-tool exec openfold3 -- python -c \\"
-    echo "         \"import openfold3, pathlib; print(pathlib.Path(openfold3.__file__).parent)\""
-    echo "     then grep that tree for the query schema;"
-    echo "  3. write what you found into tools/openfold3/README.md under"
-    echo "     'Covalent support', replacing the unqualified paragraph;"
-    echo "  4. leave STATUS=built. Do not set verified."
-    echo
-    tail -40 bond.log; exit 1
+    echo "The likely cause is the CCD. YCM is resolved through biotite's"
+    echo "bundled component dictionary, not through anything this registry"
+    echo "stages, and get_structure_with_ref_mols() is a staticmethod that"
+    echo "never receives the ccd_file_path setting -- so a custom component"
+    echo "CANNOT be supplied here and a missing one cannot be worked around."
+    tail -40 ycm.log; exit 1
 fi
 
-bcif=$(find out_bond -type f \( -name '*.cif' -o -name '*.pdb' \) 2>/dev/null | head -1)
-[ -n "$bcif" ] || { echo "phase 2 wrote no structure"; tail -30 bond.log; exit 1; }
+n_ycm=$(find out_ycm -name '*.cif' 2>/dev/null | wc -l)
+[ "$n_ycm" -ge 1 ] || { echo "phase 2b wrote no structure"; tail -30 ycm.log; exit 1; }
 
-# Accepting the input is NOT the qualification. Outcome (b) above -- schema
-# accepted, bond quietly ignored -- produces a perfectly plausible structure
-# with the ligand docked somewhere nearby, and no score detects it: HA-ADAPT's
-# Chai-1 corpus (1,726 results, quarantined) is exactly that, and ipTM moved
-# 0.710 -> 0.698 between the wrong attachment and the right one.
-if ! "$CHPC_TOOL" exec openfold3 -- python check_bond.py "$bcif" \
-        --anchor SG --min 1.2 --max 2.1 > bond_check.log 2>&1
+# EVERY draw, not the first one. This registry has already been bitten by a test
+# that read `find | head -1` and so asserted a property of one arbitrary sample
+# rather than of the tool: intellifold's case 2 failed for two days on a draw
+# that was the one bad one in its seed. Five samples cost nothing to check.
+if ! "$CHPC_TOOL" exec openfold3 -- python - out_ycm > ycm_check.log 2>&1 <<'PY'
+import math, os, sys
+
+MIN, MAX, IDEAL = 1.2, 2.1, 1.81
+
+
+def atoms(path):
+    out, cols = [], {}
+    for line in open(path, errors="replace"):
+        s = line.strip()
+        if s == "loop_":
+            cols = {}
+            continue
+        if s.startswith("_atom_site."):
+            cols[s.split(".", 1)[1]] = len(cols)
+            continue
+        if cols and (s.startswith("ATOM ") or s.startswith("HETATM")):
+            f = s.split()
+            out.append((f[cols["label_comp_id"]], f[cols["label_atom_id"]],
+                        tuple(float(f[cols["Cartn_" + c]]) for c in "xyz")))
+    return out
+
+
+paths = []
+for root, _, files in os.walk(sys.argv[1]):
+    paths += [os.path.join(root, f) for f in files if f.endswith(".cif")]
+assert paths, "no cif under %s" % sys.argv[1]
+
+dists = []
+for path in sorted(paths):
+    aa = atoms(path)
+    ycm = {n: xyz for res, n, xyz in aa if res == "YCM"}
+    assert ycm, "%s has no YCM residue: the modification was not built" % path
+    for need in ("SG", "CD", "CE", "OZ1", "NZ2"):
+        assert need in ycm, "%s: YCM is missing %s" % (path, need)
+    d = math.dist(ycm["SG"], ycm["CD"])
+    dists.append((d, os.path.basename(path)))
+    print("  %-52s SG-CD %.3f A" % (os.path.basename(path)[-50:], d))
+
+bad = [(d, n) for d, n in dists if not (MIN <= d <= MAX)]
+lo, hi = min(d for d, _ in dists), max(d for d, _ in dists)
+print("%d draws, SG-CD %.3f-%.3f A against the CCD ideal %.2f A"
+      % (len(dists), lo, hi, IDEAL))
+assert not bad, (
+    "the covalent modification is NOT a bond in %d of %d draws: %s. The "
+    "modified residue was built but the thioether was not closed, which no "
+    "confidence score and no exit status reports."
+    % (len(bad), len(dists), ", ".join("%s %.3f A" % (n, d) for d, n in bad)))
+print("ok: SG-CD is a real thioether in all %d draws" % len(dists))
+PY
 then
+    echo "phase 2b: the modification did not come out as a bond:"
+    cat ycm_check.log
     echo
-    echo "PHASE 2: OpenFold3 ACCEPTED the bond specification and then did not"
-    echo "honour it. This is the worst of the three outcomes, because the run"
-    echo "succeeds and the structure looks fine:"
-    cat bond_check.log
-    echo
-    echo "Record it in README.md as 'accepts the key, ignores the bond' --"
-    echo "that sentence is worth more than this test. Leave STATUS=built."
+    echo "This is the finding, and it reverses the entry. Record it in"
+    echo "README.md under 'Covalent support' and leave STATUS=built."
     exit 1
 fi
-cat bond_check.log
+cat ycm_check.log
 
 echo
-echo "ok: openfold3 folds, accepts a covalent bond, and puts it where it was"
-echo "declared. Copy bonded.json into README.md -- it is the only record of a"
-echo "working bond input for this tool, since upstream documents none."
+echo "ok: openfold3 folds; covalent_bonds is still inert; and a covalent"
+echo "modification declared through non_canonical_residues is built as a real"
+echo "bond in every draw."
