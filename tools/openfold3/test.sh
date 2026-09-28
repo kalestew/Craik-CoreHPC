@@ -81,8 +81,18 @@ else
     # are a DICT keyed by name, not an array. Nothing about that is guessable
     # from the AF3 format the README cites.
     #
-    # use_msas=false because MSA generation wants genetic databases this entry
-    # does not stage, and phase 1 is asking whether the image folds at all.
+    # ALL THREE MSA FLAGS MUST BE FALSE, and each defaults to True. Setting
+    # use_msas alone is not enough: with use_paired_msas and use_main_msas still
+    # true, openfold3 goes to the network and dies on a compute node with
+    #   requests.exceptions.ProxyError: HTTPSConnectionPool(
+    #     host='api.colabfold.com', port=443) ... Failed to establish a new
+    #     connection: [Errno 113] No route to host
+    # after fifty seconds, having already loaded the weights. It calls the PUBLIC
+    # ColabFold MSA server by default -- worth knowing for its own sake, since
+    # compute nodes here have no internet at all (docs/02) and a production fold
+    # therefore needs its MSAs supplied through the per-chain
+    # main_msa_file_paths / paired_msa_file_paths fields rather than fetched.
+    # Phase 1 is asking whether the image folds at all, so it asks for none.
     cat > plain.json <<'JSON'
 {
   "seeds": [1],
@@ -95,7 +105,9 @@ else
           "sequence": "MKTAYIAKQRQISFVKSHFSRQLEERLGLIE"
         }
       ],
-      "use_msas": false
+      "use_msas": false,
+      "use_paired_msas": false,
+      "use_main_msas": false
     }
   }
 }
