@@ -84,6 +84,46 @@ def main():
         restraint, = list(csv.DictReader(handle))
     require([restraint[k] for k in ("chainA", "res_idxA", "chainB", "res_idxB", "connection_type")]
             == ["C", "C6@SG", "F", "@C1", "covalent"], "Chai restraint delimiter or endpoints changed")
+    # IntelliFold takes AlphaFold 3's dialect. entity_id is a chain LABEL; using
+    # protenix's 1-based index into the entity list instead would not error and
+    # would move the bond somewhere else.
+    af3 = json.loads((ROOT / "intellifold.json").read_text())
+    require(af3["dialect"] == "alphafold3" and af3["version"] == 1, "IntelliFold dialect/version changed")
+    require(len(af3["sequences"]) == 6, "IntelliFold must contain exactly six entities")
+    require([(e["protein"]["id"], e["protein"]["sequence"]) for e in af3["sequences"][:5]] == expected,
+            "IntelliFold protein order differs from reference")
+    require(all(e["protein"]["unpairedMsa"] == "" and e["protein"]["pairedMsa"] == ""
+                and e["protein"]["templates"] == [] for e in af3["sequences"][:5]),
+            "IntelliFold must stay in single-sequence mode with templates declared empty")
+    require(af3["sequences"][5] == {"ligand": {"id": "F", "ccdCodes": ["MOV"]}}, "IntelliFold ligand changed")
+    require(af3["bondedAtomPairs"] == [[["C", 6, "SG"], ["F", 1, "C25"]]], "IntelliFold bond changed")
+
+    # OpenFold3 has its own schema: chains (not sequences), chain_ids a LIST,
+    # molecule_type an INTEGER enum, queries a DICT keyed by name.
+    #
+    # covalent_bonds is declared here ON PURPOSE. The field validates and is
+    # dropped before the model, so this input reproduces the trap rather than
+    # avoiding it, and check_output.py --expect-unbonded asserts that outcome.
+    # Its endpoints are typed (chain_id, residue_id, atom_id: INT) with no way to
+    # name an atom, and nothing consumes the index, so no experiment can tell you
+    # the right value -- which is why the audit below pins the SHAPE and not the
+    # integers.
+    of3 = json.loads((ROOT / "openfold3.json").read_text())
+    query, = of3["queries"].values()
+    require(len(of3["queries"]) == 1 and manifest["name"] in of3["queries"], "OpenFold3 query name changed")
+    require(len(query["chains"]) == 6, "OpenFold3 must contain exactly six chains")
+    require([(c["chain_ids"], c.get("sequence")) for c in query["chains"][:5]]
+            == [([c], s) for c, s in expected], "OpenFold3 chain order differs from reference")
+    require(all(c["molecule_type"] == 0 for c in query["chains"][:5]), "OpenFold3 protein molecule_type must be 0")
+    require(query["chains"][5] == {"molecule_type": 3, "chain_ids": ["F"], "ccd_codes": ["MOV"]},
+            "OpenFold3 ligand changed")
+    require(not any(query[k] for k in ("use_msas", "use_paired_msas", "use_main_msas")),
+            "OpenFold3 MSA flags must stay false; the fetch also needs --use-msa-server=False")
+    require(len(query["covalent_bonds"]) == 1
+            and [e[:2] for e in query["covalent_bonds"][0]] == [["C", 6], ["F", 1]]
+            and all(isinstance(e[2], int) for e in query["covalent_bonds"][0]),
+            "OpenFold3 covalent_bonds shape changed -- it is inert, and the demonstration depends on it being declared")
+
     related = deposited_sequences(ROOT / "reference/8VRA.cif.gz")
     for query, template in (("D", "E"), ("E", "D")):
         records = fasta(ROOT / "templates" / ("protenix-" + query + ".a3m"))
@@ -95,6 +135,8 @@ def main():
     check("reference", ROOT / "reference/8UDR.cif.gz")
     print("PASS inputs: full deposited A/B/C/D/E = 275/99/10/226/213 residues; ligand F = MOV")
     print("PASS bond: peptide sequence Cys6 (KRAS author Cys12) SG -> MOV C25; Chai SMILES C1")
+    print("PASS dialects: boltz/protenix/chai1/intellifold declare the bond; openfold3")
+    print("     declares it too and will DROP it -- check with --expect-unbonded")
     print("PASS templates: 8UDR reference plus 8VRA antibody D<-E and E<-D; offline assets intact")
     print("This audit checks input identity and reference geometry, not GPU prediction accuracy.")
 

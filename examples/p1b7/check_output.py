@@ -1,8 +1,16 @@
 """Check this six-chain tutorial's bond: python3 check_output.py TOOL MODEL.
 
-TOOL is boltz, protenix, chai1, or reference. For a directory, every predicted
-sample is checked. This checks chain composition and local bond geometry;
-it does not establish that the antibody dock or the whole structure is right.
+TOOL is boltz, protenix, chai1, intellifold, openfold3, or reference. For a
+directory, every predicted sample is checked. This checks chain composition and
+local bond geometry; it does not establish that the antibody dock or the whole
+structure is right.
+
+`--expect-unbonded` INVERTS the bond test: it passes when no ligand heavy atom is
+within bonding distance of the anchor. That is not a way to excuse a failure. It
+is for openfold3, whose `covalent_bonds` field validates and is then dropped
+before the model sees it, so the apo outcome is the DOCUMENTED behaviour and
+worth asserting -- a tripwire that fires the day upstream wires the field up.
+See tools/openfold3/README.md, "Covalent support".
 """
 import argparse
 import json
@@ -15,7 +23,7 @@ AA = dict(zip("ALA ARG ASN ASP CYS GLN GLU GLY HIS ILE LEU LYS MET PHE PRO SER T
               "ARNDCQEGHILKMFPSTWYV"))
 
 
-def check(tool, path):
+def check(tool, path, expect_bond=True):
     records = atoms(path)
     if not records or any(not math.isfinite(v) for a in records for v in a["xyz"]):
         raise ValueError("missing atoms or nonfinite coordinates")
@@ -43,7 +51,9 @@ def check(tool, path):
     ligand = [a for a in records if a["chain"] == "F" and a["element"] not in ("H", "D")]
     if len(anchors) != 1 or len(ligand) != 41:
         raise ValueError("expected one C:Cys6:SG and 41 ligand heavy atoms; got %d and %d" % (len(anchors), len(ligand)))
-    # Chai appends an entity-copy suffix; the chemical atom name is C1.
+    # Chai appends an entity-copy suffix, and names a SMILES ligand's atoms by
+    # element plus per-element ordinal, so its warhead carbon is C1. Everything
+    # else here takes the CCD component, where it is C25.
     name = "C1" if tool == "chai1" else "C25"
     endpoints = [a for a in ligand if a["name"] in (name, name + "_1")]
     if len(endpoints) != 1:
@@ -52,9 +62,26 @@ def check(tool, path):
     if endpoint["element"] != "C":
         raise ValueError("attachment atom %s must be carbon, found %s" % (name, endpoint["element"]))
     separation = distance(anchor, endpoint)
+    close = [a for a in ligand if distance(anchor, a) <= 2.10]
+    nearest = min(ligand, key=lambda a: distance(anchor, a))
+
+    if not expect_bond:
+        # The inverted test. Anything in bonding range means the declaration was
+        # honoured after all, which is good news and makes this call wrong.
+        if close:
+            raise ValueError(
+                "expected NO bond and found %d ligand atom(s) within 2.10 A of SG "
+                "(nearest %s at %.3f A). If this is openfold3, covalent_bonds has "
+                "started working: drop --expect-unbonded here, in test.sh phase 2a "
+                "and in tools/openfold3/README.md."
+                % (len(close), nearest["name"], distance(anchor, nearest)))
+        print("PASS %s: 5 protein chains + 41 ligand atoms; bond DROPPED as documented "
+              "-- C:Cys6:SG-F:%s = %.3f A, nearest ligand atom %s at %.3f A"
+              % (path, name, separation, nearest["name"], distance(anchor, nearest)))
+        return
+
     if not 1.40 <= separation <= 2.10:
         raise ValueError("SG-%s %.3f A is outside the tutorial's 1.40-2.10 A screening range" % (name, separation))
-    close = [a for a in ligand if distance(anchor, a) <= 2.10]
     if len(close) != 1 or close[0] is not endpoint:
         raise ValueError("unexpected additional/wrong ligand contact within 2.10 A of SG")
     neighbors = [a for a in ligand if a is not endpoint and distance(a, endpoint) <= 1.85]
@@ -65,12 +92,22 @@ def check(tool, path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("tool", choices=("boltz", "protenix", "chai1", "reference"))
+    parser.add_argument("tool", choices=("boltz", "protenix", "chai1", "intellifold",
+                                        "openfold3", "reference"))
     parser.add_argument("path", type=Path)
     parser.add_argument("--expected-samples", type=int,
                         help="require this many output models (the runner requires all five)")
+    parser.add_argument("--expect-unbonded", action="store_true",
+                        help="pass when NO ligand atom is within bonding distance of the "
+                             "anchor. For openfold3, whose covalent_bonds field is inert; "
+                             "see the module docstring.")
     args = parser.parse_args()
-    patterns = {"boltz": "*_model_*.pdb", "protenix": "*_sample_*.cif", "chai1": "pred.model_idx_*.cif"}
+    patterns = {"boltz": "*_model_*.pdb", "protenix": "*_sample_*.cif",
+                "chai1": "pred.model_idx_*.cif",
+                # intellifold also writes a top-level copy of the draw it ranked
+                # first; "sample-" keeps that copy from being counted twice.
+                "intellifold": "*sample-*_model.cif",
+                "openfold3": "*_sample_*_model.cif"}
     files = sorted(args.path.rglob(patterns[args.tool])) if args.path.is_dir() and args.tool in patterns else [args.path]
     if not files:
         parser.exit(1, "FAIL: no predicted model files found\n")
@@ -79,7 +116,7 @@ def main():
     failed = 0
     for path in files:
         try:
-            check(args.tool, path)
+            check(args.tool, path, expect_bond=not args.expect_unbonded)
         except (KeyError, OSError, ValueError) as error:
             failed += 1
             print("FAIL %s: %s" % (path, error))
