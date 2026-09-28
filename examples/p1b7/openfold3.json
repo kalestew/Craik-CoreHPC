@@ -1,0 +1,69 @@
+{
+  "queries": {
+    "p1b7_8udr_full_fab": {
+      "chains": [
+        {
+          "molecule_type": 0,
+          "chain_ids": [
+            "A"
+          ],
+          "sequence": "GSHSMRYFFTSVSRPGRGEPRFIAVGYVDDTQFVRFDSDAASQRMEPRAPWIEQEGPEYWDQETRNVKAQSQTDRVDLGTLRGYYNQSEAGSHTIQIMYGCDVGSDGRFLRGYRQDAYDGKDYIALNEDLRSWTAADMAAQITKRKWEAAHEAEQLRAYLDGTCVEWLRRYLENGKETLQRTDPPKTHMTHHPISDHEATLRCWALGFYPAEITLTWQRDGEDQTQDTELVETRPAGDGTFQKWAAVVVPSGEEQRYTCHVQHEGLPKPLTLRWE"
+        },
+        {
+          "molecule_type": 0,
+          "chain_ids": [
+            "B"
+          ],
+          "sequence": "IQRTPKIQVYSRHPAENGKSNFLNCYVSGFHPSDIEVDLLKNGERIEKVEHSDLSFSKDWSFYLLYYTEFTPTEKDEYACRVNHVTLSQPKIVKWDRDM"
+        },
+        {
+          "molecule_type": 0,
+          "chain_ids": [
+            "C"
+          ],
+          "sequence": "VVVGACGVGK"
+        },
+        {
+          "molecule_type": 0,
+          "chain_ids": [
+            "D"
+          ],
+          "sequence": "VQLQQSGPGLVKPSQTLSLTCAISGDSVSSNSVAWNWIRQSPSRGLEWLGRTYYRSKWYSDYAVSVKSRITINPDTSKNQFSLQLTSMTPEDTAVYYCAREGVTMGPGAFDIWGQGTMVTVSSASTKGPSVFPLAPSSKSTSGGTAALGCLVKDYFPEPVTVSWNSGALTSGVHTFPAVLQSSGLYSLSSVVTVPSSSLGTQTYICNVNHKPSNTKVDKKVEPKSC"
+        },
+        {
+          "molecule_type": 0,
+          "chain_ids": [
+            "E"
+          ],
+          "sequence": "ALTQPPSVSGSPGQSVTISCTGSSSDVGHYNRVSWYQQSPGTAPKLMIYDVSNRPSGAFSRFSGSRSGNTASLTISGLQPEDEADYYCSSHRTGYTVEVFGTGTKVTVLGQPKAAPSVTLFPPSSEELQANKATLVCLISDFYPGAVTVAWKADSSPVKAGVETTTPSKQSNNKYAASSYLSLTPEQWKSHRSYSCQVTHEGSTVEKTVAPTE"
+        },
+        {
+          "molecule_type": 3,
+          "chain_ids": [
+            "F"
+          ],
+          "ccd_codes": [
+            "MOV"
+          ]
+        }
+      ],
+      "covalent_bonds": [
+        [
+          [
+            "C",
+            6,
+            0
+          ],
+          [
+            "F",
+            1,
+            0
+          ]
+        ]
+      ],
+      "use_msas": false,
+      "use_paired_msas": false,
+      "use_main_msas": false
+    }
+  }
+}
