@@ -341,7 +341,35 @@ each at seed 1 with single-sequence inputs, and checked with `check_output.py`:
 L40S (`ggpu1-06`) except intellifold, on an H100 NVL (`ggpu4-02`). Boltz, chai1
 and protenix ran through `run.sh`; the other two from their own tool pages.
 
-**`rf3` is absent from that table on purpose.** Its input was written on
+### Measured 2026-09-28: rf3, and a result that is about the cluster
+
+rf3 was run three times on this same input, same seed, same checkpoint, varying
+only the GPU model and whether the fused cuEquivariance kernels were used:
+
+| | draw 0 | 1 | 2 | 3 | 4 | in 1.40-2.10 A | wall |
+|---|---|---|---|---|---|---|---|
+| unfused, H100 NVL | 1.373 | 1.195 | 1.240 | **1.628** | 1.349 | 1/5 | 3 m 42 s |
+| fused, L40S | 2.114 | 1.382 | 2.271 | **1.478** | 1.089 | 1/5 | 2 m 05 s |
+| fused, H100 NVL | **1.829** | 1.013 | 0.859 | 1.347 | **1.913** | 2/5 | 2 m 05 s |
+
+The bond is on `C25`, the declared atom, in 15 of 15 draws. rf3 never puts it in
+the wrong place; it builds it at the wrong length.
+
+**No two of those rows agree on any draw, and the third row is the important
+one.** Holding the kernels fixed and changing only the GPU model moves draw 2
+from 2.271 A to 0.859 A. A device class is not a neutral placement decision for
+this model: the same declared computation on an L40S and on an H100 NVL is not
+the same structure. Anything that treats GPU model as interchangeable -- a
+scheduler preference, a cache key, a spill to whichever card is free -- is
+silently choosing chemistry.
+
+The kernels are not optional at this size either. Unfused routes attention
+through `_forward_vanilla`, which materialises the full triangle-attention
+tensor: it OOMs on a 44 GB L40S and needs a 94 GB H100. With the fused kernels
+the same fold fits on the L40S and runs 44% faster. That is why the entry needs
+a C compiler rather than the `DISABLE_CUEQUIVARIANCE=1` fallback.
+
+**`rf3` is absent from the previous table on purpose.** Its input was written on
 2026-09-27 from upstream's documented JSON API at `v0.2.0`, generated from
 `manifest.json` and audited by `check_inputs.py` against the deposited structure.
 That is input identity, not evidence: nothing has yet confirmed the installed

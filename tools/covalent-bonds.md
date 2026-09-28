@@ -98,10 +98,32 @@ validator.
 | chai1 | `--constraint-path` CSV, comma-delimited with a header (the m8 template table beside it is tab-delimited with none) | chain letter assigned positionally from the FASTA (entity 1 is `A`), 1-based residue, `A,C6@SG` | `@C1`: element plus 1-based per-element ordinal in RDKit atom order | a wrong delimiter yields a file chai parses into zero restraints, and it folds anyway |
 | protenix | `covalent_bonds` in the JSON | `entity1` is a 1-based INDEX into the `sequences` list, not a label; `position1` 1-based; `atom1` a name | `atom2` as a name (`C1`, `N2`: element plus 1-based per-element ordinal); an integer is resolved by RDKit atom-map number when the SMILES carries `[C:7]` maps and by 0-based index when it does not | reorder `sequences` and every bond silently points elsewhere; pass names, never integers |
 | intellifold | AlphaFold 3 schema `bondedAtomPairs` | `[entity_id, residue_id, atom_name]`, `entity_id` a label | atom name from a CCD code or a `userCCD` block; a SMILES ligand has no atom names to bond | measured over 95 folds: both keys honoured and the bond always on the declared atom, but built LONG and only in some draws — 15/15 on a glycosylation sequon, 17/25 on sotorasib, **0/25 on the same glycosylation without the sequon**. Screen every draw |
-| rf3 | `bonds` in the input JSON: a list of two-element `[polymer, ligand]` string pairs | `chain_id/res_name/res_id/atom_name` — the only dialect here that wants the residue NAME as well as its number; the chain letter is each component's own `chain_id`, so list order addresses nothing | the same four-field form; a CCD ligand is residue `1` of its chain, atom by CCD name | UNMEASURED HERE. Upstream's own warnings: a residue name that exists in the CCD makes the parser load that CCD and "will typically lead to processing errors" if atom names disagree; a custom CIF ligand can be 0-indexed where a CCD one is 1-indexed. It can also exit zero having written no structure at all, when early stopping fires — see `early_stopping_plddt_threshold` |
+| rf3 | `bonds` in the input JSON: a list of two-element `[polymer, ligand]` string pairs | `chain_id/res_name/res_id/atom_name` — the only dialect here that wants the residue NAME as well as its number; the chain letter is each component's own `chain_id`, so list order addresses nothing | the same four-field form; a CCD ligand is residue `1` of its chain, atom by CCD name | Measured 2026-09-28 on P1B7: the bond is on the declared atom in 15/15 draws and at the wrong LENGTH, 1/5 to 2/5 inside 1.40-2.10 A depending on GPU model and kernels (see [`../examples/p1b7/README.md`](../examples/p1b7/README.md)). Upstream's own warnings: a residue name that exists in the CCD makes the parser load that CCD and "will typically lead to processing errors" if atom names disagree; a custom CIF ligand can be 0-indexed where a CCD one is 1-indexed. It can also exit zero having written no structure at all, when early stopping fires — see `early_stopping_plddt_threshold` |
 | alphafold3 | `bondedAtomPairs` (not built here) | as intellifold | as intellifold; `userCCD` for anything you only have as SMILES | polymer-to-polymer bonds are unsupported outright |
 | openfold3 | **not `covalent_bonds`** — that field is inert. The route that works is `non_canonical_residues`, `{residue_id: CCD_code}` on the polymer chain | the residue you replace; it becomes the modification | none — there is no ligand chain, the modification IS the residue, so the shared checker above does not apply | `covalent_bonds` validates and is dropped before the model: the AtomArray is byte-identical with and without it, and `Bond.atom_id` is typed `int` so it cannot name an atom anyway. The live route needs a CCD component that already contains the whole adduct, and a custom one **cannot be supplied** — `ccd_file_path` reaches only the template pipeline. Measured: `YCM` at position 6 folds `SG–CD` at 1.670–1.745 Å in 5/5 draws |
 | rfdiffusion3 | **nowhere — there is no field.** `FlagAndReassignCovalentModifications` runs unconditionally and reads the parser's BondList | whichever residue the file says is bonded; the whole residue is reassigned into the ligand's PN unit and atomized | whichever ligand atom the file says, by the bond record | a structure missing its `_struct_conn` record becomes a FREE ligand near a cysteine. Nothing is declared, so nothing can be wrong, so nothing warns. Measured on 8UDR: the deposited C/CYS6/SG–F/MOV/C25 bond at 1.765 Å is picked up unaided, and survives a 120-residue de novo design at 1.770 Å |
+
+## Three tools compress this bond, and it is the component's fault
+
+boltz, intellifold and rf3 all build the sotorasib bond SHORT on P1B7, and the
+misses are lopsided: of boltz's two, both (1.295, 1.307); intellifold's worst is
+0.919; rf3 unfused was short in 5/5 draws and reached 0.859 fused. A bond length
+below about 1.4 A between sulfur and carbon is not a weak prediction, it is
+interpenetrating atoms.
+
+Three independent models failing the same way points at the input rather than at
+any of them. `MOV`'s `C25` carries three hydrogens and one heavy neighbour and
+the CCD flags **no leaving atom**, so every dialect here asks for a fourth heavy
+contact on a carbon its own component calls saturated, and none of them can say
+"remove that hydrogen". `NAG` is the control: its `O1` IS flagged leaving, and
+intellifold lands the sequon case at 1.44 A in 15/15.
+
+So a covalent declaration against a CCD component that does not declare its
+leaving atom is a request the model cannot satisfy cleanly, and the geometry it
+returns will be wrong in a way no confidence score reports. Upstream's RF3 docs
+say it directly: a leaving group "should be replaced with a `H` a priori or
+specified as a leaving atom in the CIF file". Doing that for MOV means a custom
+component, which is work none of these entries has done yet.
 
 ## Rules
 

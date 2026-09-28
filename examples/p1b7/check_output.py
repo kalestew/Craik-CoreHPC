@@ -108,11 +108,14 @@ def main():
                 # first; "sample-" keeps that copy from being counted twice.
                 "intellifold": "*sample-*_model.cif",
                 "openfold3": "*_sample_*_model.cif",
-                # rf3 writes gzipped mmCIF and needs one_model_per_file=true: its
-                # default packs every draw into one file as separate models, and
-                # structure_io reads model 1 only, so four of five would go
-                # unchecked while still reporting PASS.
-                "rf3": "*.cif.gz"}
+                # rf3 writes UNCOMPRESSED .cif per draw under seed-N_sample-M/,
+                # despite upstream's docs saying .cif.gz -- measured 2026-09-28,
+                # job on ggpu4. Like intellifold it also writes a top-level copy of
+                # the draw it ranked, which this pattern excludes by requiring
+                # "sample-". one_model_per_file=true is still needed: the default
+                # packs every draw into one file as separate models and
+                # structure_io reads model 1 only.
+                "rf3": "*sample-*_model.cif"}
     files = sorted(args.path.rglob(patterns[args.tool])) if args.path.is_dir() and args.tool in patterns else [args.path]
     if not files:
         parser.exit(1, "FAIL: no predicted model files found\n")
