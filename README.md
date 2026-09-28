@@ -139,7 +139,7 @@ cd Craik-CoreHPC
 
 If Git asks for credentials, use your GitLab login; if access is denied, ask
 the lab maintainer. Then follow
-[Globus setup](docs/02-storage-and-data.md#laptop-to-cluster) once: install
+[Globus setupB-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route) once: install
 Globus Connect Personal and its command-line tool, sign in, add your projects
 folder to its **Accessible Folders**, and write your campus username into
 `chpc.env.local`. Enable **Writable** on the folder if results should come
@@ -168,9 +168,9 @@ Open the **[P1B7 / 8UDR walkthrough](docs/11-p1b7-walkthrough.md)** next.
 It explains the five protein chains, covalent ligand, and templates, then
 walks through sending the supplied inputs from your laptop and running:
 
-- [Boltz-2](tools/boltz/README.md#run-it), the first suggested walkthrough.
-- [Chai-1](tools/chai1/README.md#run-it), with its separate bond-restraint file.
-- [Protenix](tools/protenix/README.md#run-it), with its own JSON input format.
+- [Boltz-2](tools/boltz/README.md#run-it-p1b7-bound-to-the-sotorasib-modified-peptidemhc), the first suggested walkthrough.
+- [Chai-1](tools/chai1/README.md#run-it-the-p1b78udr-complex), with its separate bond-restraint file.
+- [Protenix](tools/protenix/README.md#run-it-p1b7-peptidemhc-and-the-covalent-ligand), with its own JSON input format.
 
 The quick path, **on your laptop** after Globus setup, is:
 
@@ -195,7 +195,7 @@ The walkthrough also gives the manual cluster-shell route, monitoring,
 reconnection, and result retrieval. Scratch is temporary; keep final results
 on FAC and retrieve them with Globus. For your own work, supply a
 self-contained job folder containing its batch script, scripts, and inputs.
-Use [the transfer guide](docs/02-storage-and-data.md#laptop-to-cluster) when you
+Use [the transfer guideB-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route) when you
 only need to move files without submitting a job.
 
 ## Run a tool

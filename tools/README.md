@@ -17,14 +17,14 @@ For your first run, use **[the P1B7 / 8UDR walkthrough](../docs/11-p1b7-walkthro
 It explains the terminal, prepares the actual input files, and takes you
 through submission, logs, output checks, and saving your results. The
 per-tool guides continue with the same complex:
-[Boltz-2](boltz/README.md#run-it), [Chai-1](chai1/README.md#run-it), and
-[Protenix](protenix/README.md#run-it). The example bundle is checked into
+[Boltz-2](boltz/README.md#run-it-p1b7-bound-to-the-sotorasib-modified-peptidemhc), [Chai-1](chai1/README.md#run-it-the-p1b78udr-complex), and
+[Protenix](protenix/README.md#run-it-p1b7-peptidemhc-and-the-covalent-ligand). The example bundle is checked into
 [`examples/p1b7/`](../examples/p1b7/README.md); another project's checkout is
 not required.
 
 ### Send a tool job from your laptop
 
-Set up [direct project-folder access in Globus](../docs/02-storage-and-data.md#laptop-to-cluster)
+Set up [direct project-folder access in GlobusB-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route)
 first. From a local CoreHPC checkout, preview and then submit the P1B7 example:
 
 ```bash
@@ -100,7 +100,7 @@ bash run.sh boltz
 
 Read the command and output path printed by the runner. It uses the shared
 weights and local inputs, then checks the predicted covalent geometry.
-[The Boltz guide](boltz/README.md#run-it) explains the exact underlying
+[The Boltz guide](boltz/README.md#run-it-p1b7-bound-to-the-sotorasib-modified-peptidemhc) explains the exact underlying
 `chpc-tool exec` command, flags, output files, and optional reference template.
 When finished, `exit` releases the interactive allocation and returns to the
 login node. Follow the [save-results steps](../docs/11-p1b7-walkthrough.md#save-your-results)

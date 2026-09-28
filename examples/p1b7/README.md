@@ -90,6 +90,16 @@ tutorial's A–F order and sequence numbering from 1.
 - [protenix.json](protenix.json): six entities and `covalent_bonds`.
 - [chai1.fasta](chai1.fasta) and [chai1.restraints](chai1.restraints): proteins,
   bound-form ligand SMILES, and the separate comma-delimited bond restraint.
+- [intellifold.json](intellifold.json): AlphaFold 3's dialect — `bondedAtomPairs`
+  with `[["C", 6, "SG"], ["F", 1, "C25"]]`, where `entity_id` is a chain **label**
+  and not Protenix's 1-based index into the entity list. Neither convention errors
+  on the other's input.
+- [openfold3.json](openfold3.json): **the one that will not work, on purpose.** It
+  declares `covalent_bonds` for the same bond as everything else here, and
+  openfold3 validates the field and discards it, so the ligand comes out 18–47 Å
+  away. Checked with `check_output.py openfold3 … --expect-unbonded`, which passes
+  on the documented apo outcome and fails the day the field starts working. See
+  [tools/openfold3/README.md](../../tools/openfold3/README.md#covalent-support).
 - [rfd3.yaml](rfd3.yaml): the odd one out. Not a prediction — RFdiffusion3
   **designs** a new 120-residue protein around the sotorasib-modified cysteine,
   which is the job the P1B7 Fab does by other means. It declares no bond and has
@@ -120,6 +130,13 @@ bash run.sh boltz --dry-run
 bash run.sh protenix --dry-run
 bash run.sh chai1 --dry-run
 ```
+
+`check_inputs.py` audits all six declarations, `intellifold.json` and
+`openfold3.json` included. `run.sh` drives the first three; the other two are run
+from their own tool pages, which record what each measured:
+[intellifold](../../tools/intellifold/README.md#p1b7-the-full-covalent-complex)
+and
+[openfold3](../../tools/openfold3/README.md#p1b7-what-a-dropped-bond-actually-looks-like).
 
 `PASS inputs` means the sequences, chain order, ligand and bond addresses
 agree with the bundled deposited structure. `--dry-run` prints the exact

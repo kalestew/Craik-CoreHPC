@@ -17,19 +17,69 @@
 ```bash
 srun -p gpu --gres=gpu:1 -c 8 --mem 32G -t 2:00:00 --pty bash -l
 mkdir -p /mnt/scratch/user/$USER/openfold3/run1 && cd "$_"   # in.json here; the same path is valid inside the container
-chpc-tool exec openfold3 -- run_openfold predict --query_json=in.json --output_dir=out   # (untested)
+chpc-tool exec openfold3 -- run_openfold predict --query_json=in.json --output_dir=out \
+    --use-msa-server=False --use-templates=False
 ```
 
-(untested): that is the line `test.sh` and the recipe's `%help` give, and
-neither has run on a compute node; `--output_dir` in particular is a flag name
-nothing has confirmed. No tool variable appears on the line, so no `eval` is
-needed: `exec` exports `OPENFOLD3_WEIGHTS` and `HF_HOME` into the container.
-Any `gpu` node is allowed as far as torch's kernels go; nothing has yet run on
-any of them (Provenance).
+**The two flags are not optional on a compute node.** Without
+`--use-msa-server=False` this reaches the public ColabFold server and dies with a
+`ProxyError` after about forty-five seconds, having already loaded 2.3 GB of
+weights — and the three MSA flags inside the query do **not** prevent it
+(Traps). No tool variable appears on the line, so no `eval` is needed: `exec`
+exports `OPENFOLD_CACHE` and `HF_HOME` into the container. Any `gpu` node is
+allowed as far as torch's kernels go; an H100 NVL and an L40S have both run it,
+and the Blackwell nodes have not (Provenance).
 
 As a job: copy `templates/slurm/tool-gpu.sbatch` and set its four EDIT lines
 to the values above, `--gres=gpu:1` included. The method, the `eval` idiom and
 which GPU to ask for: [`../README.md`](../README.md#run-a-tool-on-your-inputs).
+
+### P1B7: what a dropped bond actually looks like
+
+The 823-residue sotorasib-modified pMHC–Fab complex from the shared
+[P1B7 walkthrough](../../docs/11-p1b7-walkthrough.md). **This tool cannot fold
+that chemistry**, and the committed input
+[`examples/p1b7/openfold3.json`](../../examples/p1b7/openfold3.json) exists to
+demonstrate the failure rather than to avoid it: it declares `covalent_bonds` for
+the same `C:Cys6:SG – F:MOV:C25` bond every other predictor in the bundle
+declares, and openfold3 drops it.
+
+Why this case cannot use the route that *does* work: the modification would have
+to exist as a single CCD component containing cysteine **and** sotorasib with the
+backbone, and none does. `MOV` is a ligand component — see
+[What this cannot do](#what-this-cannot-do).
+
+```bash
+cd "$WORK" && python3 check_inputs.py     # $WORK from the walkthrough's setup block
+chpc-tool exec openfold3 -- run_openfold predict --query_json=openfold3.json \
+    --output_dir=out_of3 --use-msa-server=False --use-templates=False
+python3 check_output.py openfold3 out_of3 --expect-unbonded
+```
+
+**Measured 2026-09-27 on `ggpu1-06` (L40S), 2 m 1 s**, five draws:
+
+| draw | `C:Cys6:SG – F:MOV:C25` | nearest ligand atom |
+|---|---|---|
+| sample-1 | 40.113 Å | `C18` at 38.098 Å |
+| sample-2 | 18.214 Å | `O2` at 17.159 Å |
+| sample-3 | 34.691 Å | `C25` at 34.691 Å |
+| sample-4 | 43.625 Å | `C28` at 30.600 Å |
+| sample-5 | 47.205 Å | `C25` at 47.205 Å |
+
+The run exits 0. All five models carry five correct protein chains and all 41
+ligand heavy atoms. The declaration validated. And the ligand is **18 to 47 Å
+from the atom it was declared bonded to** — not docked in the wrong orientation,
+simply somewhere else in the box.
+
+`--expect-unbonded` makes `check_output.py` **pass** on this, because the apo
+outcome is the documented behaviour of a field that is read and discarded. It is
+a tripwire, not an excuse: the day any ligand atom lands within 2.10 Å of that
+`SG`, the check fails and tells you `covalent_bonds` has started working.
+
+This is also the concrete reason the consuming project removed `openfold3` from
+its AF3-dialect builder. Fold P1B7 here only as a deliberate apo arm, the way
+[`../colabfold`](../colabfold/README.md#p1b7-protein-only-comparison) is used —
+and label it as one.
 
 ## Inputs and outputs
 

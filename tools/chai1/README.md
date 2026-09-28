@@ -13,7 +13,7 @@ coordinates. You do not need to assemble these files by hand.
 
 ### From your laptop: transfer and submit with Globus
 
-After [Globus setup](../../docs/02-storage-and-data.md#laptop-to-cluster),
+After [Globus setupB-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route),
 from your local CoreHPC checkout:
 
 ```bash
@@ -181,7 +181,7 @@ output directory, with that capitalization and compression.
 Template spans refer to residues with coordinates and must agree with
 Chai's kalign alignment. They are not simply the full lengths of the
 deposited chains. The example prepares these details for you. The
-[template notes below](#templates-fixed-in-chai1_2-and-the-hit-range-is-kaligns-to-decide)
+[template notes below](#templates-fixed-in-chai12-and-the-hit-range-is-kaligns-to-decide)
 explain them when you are ready to supply another structure.
 
 This run is a **reference-template reconstruction**: Chai has been shown

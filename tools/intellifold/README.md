@@ -33,6 +33,80 @@ As a job: copy `templates/slurm/tool-gpu.sbatch` and set its four EDIT lines
 to the values above. The method, the `eval` idiom and which GPU to ask for:
 [`../README.md`](../README.md#run-a-tool-on-your-inputs).
 
+Seeds are `modelSeeds` in the JSON, and each seed produces **five diffusion
+samples**. That matters here more than for most entries: the covalent bond is
+not built identically in every draw, so the sample count is part of the method
+rather than a detail. See [Bonds](#bonds-what-95-folds-say).
+
+### P1B7: the full covalent complex
+
+The 823-residue sotorasib-modified pMHC–Fab complex from the shared
+[P1B7 walkthrough](../../docs/11-p1b7-walkthrough.md). The input is committed as
+[`examples/p1b7/intellifold.json`](../../examples/p1b7/intellifold.json) —
+five protein chains, `MOV` as chain F, and the bond as
+`[["C", 6, "SG"], ["F", 1, "C25"]]`.
+
+**On the login node**, to set up a working copy:
+
+```bash
+export COREHPC="$HOME/corehpc" &&
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-intellifold-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$WORK" && cp -R "$COREHPC/examples/p1b7/." "$WORK/" && cd "$WORK" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+python3 check_inputs.py
+```
+
+Then in a GPU allocation:
+
+```bash
+srun -p gpu --gres=gpu:nvidia_h100_nvl:1 -c 16 --mem 96G -t 4:00:00 --pty bash -l
+cd "$WORK" && eval "$(chpc-tool export intellifold)"
+chpc-tool exec intellifold -- intellifold predict intellifold.json \
+    --model-dir="$INTELLIFOLD_MODEL_DIR" --output-dir=out_if -- --norun_data_pipeline
+python3 check_output.py intellifold out_if
+```
+
+**Measured 2026-09-27 on `ggpu4-02` (H100 NVL), 3 m 34 s**, one seed, five
+samples:
+
+| draw | `C:Cys6:SG – F:MOV:C25` | | `ranking_score` | rank |
+|---|---|---|---|---|
+| sample-0 | 2.608 Å | too long | 0.5385 | 2nd |
+| sample-1 | 0.919 Å | **too short** | 0.5361 | 3rd |
+| sample-2 | **1.755 Å** | against 1.765 Å deposited | 0.5330 | 4th |
+| sample-3 | 1.484 Å | | 0.5404 | **1st** |
+| sample-4 | 1.634 Å | | 0.5323 | 5th |
+
+`check_output.py` passes three of five, and the best draw is **within 0.010 Å of
+the deposited bond**. Three things to take from this, in increasing order of how
+much they cost.
+
+**The failures go in both directions.** A 0.919 Å sulfur–carbon contact is not a
+long bond or a missed one — it is shorter than any real S–C bond and physically
+impossible. A screen that only asks "is the ligand close enough to the anchor"
+passes it. `check_output.py` uses a *window*, 1.40–2.10 Å, for exactly this
+reason, and the lower bound is not decoration.
+
+**Nothing in the output distinguishes the five.** All five write
+`_struct_conn.conn_type_id covale` naming `C/CYS6/SG` and `F/MOV/C25`, including
+the 0.919 Å and 2.608 Å draws. All five report `iptm 0.53`, `ptm 0.53`,
+`fraction_disordered 0.01` — identical to two decimals — and all five report
+**`has_clash 0.0`**, so the clash detector does not flag a sub-bond-length
+sulfur–carbon contact either.
+
+**And the tool's own ranking is not a bond screen.** Total spread in
+`ranking_score` across the five is 0.008. The draw that reproduces the crystal
+bond to 0.010 Å is ranked **fourth of five**; the 2.608 Å draw is ranked second
+and the impossible 0.919 Å draw third. Taking the top-ranked model gives a real
+bond here (1.484 Å) — but taking the top *two*, as anybody comparing samples
+would, includes one that is not a bond at all.
+
+So: three of five is the normal case rather than a bad run — the same rate
+measured over 25 draws of the small fixture — and the selection cannot be
+delegated to the tool. **Fold several samples, screen every one on the geometry,
+and pick from what passes.**
+
 ## Inputs and outputs
 
 AlphaFold 3's input dialect, one job per file. The plain case `test.sh` sends:

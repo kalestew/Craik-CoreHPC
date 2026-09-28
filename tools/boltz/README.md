@@ -18,7 +18,7 @@ template run is **not an independent prediction of P1B7's binding pose**.
 
 ### From your laptop: transfer and submit with Globus
 
-After [Globus setup](../../docs/02-storage-and-data.md#laptop-to-cluster),
+After [Globus setupB-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route),
 from your local CoreHPC checkout:
 
 ```bash

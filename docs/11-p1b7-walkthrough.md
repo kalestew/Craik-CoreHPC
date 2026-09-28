@@ -55,7 +55,7 @@ is approximately 1.765 Å.
 ## Submit from your laptop with Globus
 
 This is the recommended route: it needs no checkout on the cluster. First
-complete [Globus setup](02-storage-and-data.md#laptop-to-cluster), which
+complete [Globus setupB-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route), which
 puts this repo in your projects folder and lets Globus Connect Personal see
 it. Keep the Mac awake and the app running until the transfers finish.
 
@@ -71,7 +71,7 @@ If CoreHPC is a submodule in your project, run `source corehpc/env.sh`
 instead, using that submodule's actual relative path. `CHPC_REPO` then points
 to it automatically. `doctor` checks that Globus can read these actual files.
 
-Read [the Boltz input explanation](../tools/boltz/README.md#run-it), then
+Read [the Boltz input explanation](../tools/boltz/README.md#run-it-p1b7-bound-to-the-sotorasib-modified-peptidemhc), then
 preview the complete transfer-and-submit sequence:
 
 ```bash
@@ -260,16 +260,34 @@ mode provides reliable antibody docking or a production-quality structure.
 
 ### 4. Choose one predictor
 
-Start with **[Boltz-2](../tools/boltz/README.md#run-it)**. That page gives
+Start with **[Boltz-2](../tools/boltz/README.md#run-it-p1b7-bound-to-the-sotorasib-modified-peptidemhc)**. That page gives
 the complete interactive commands and explains the input and output. Then
-repeat with **[Chai-1](../tools/chai1/README.md#run-it)** and
-**[Protenix](../tools/protenix/README.md#run-it)**. They use the same biological
+repeat with **[Chai-1](../tools/chai1/README.md#run-it-the-p1b78udr-complex)** and
+**[Protenix](../tools/protenix/README.md#run-it-p1b7-peptidemhc-and-the-covalent-ligand)**. They use the same biological
 complex but different file formats and atom-addressing rules.
+
+Two more predictors fold this complex from their own committed inputs, outside
+`run.sh`, and each teaches something the first three do not:
+
+- **[IntelliFold](../tools/intellifold/README.md#p1b7-the-full-covalent-complex)**
+  takes AlphaFold 3's dialect, so it is the one to read if you already have an AF3
+  input. It also shows most clearly why you must screen draws: three of its five
+  samples carry the bond, and the tool's own ranking puts the best one fourth.
+- **[OpenFold3](../tools/openfold3/README.md#p1b7-what-a-dropped-bond-actually-looks-like)**
+  is here as a **worked failure**. It accepts a `covalent_bonds` declaration,
+  discards it, and returns five confident models with the ligand 18–47 Å from the
+  cysteine. Read it before trusting any tool's bond field on the strength of the
+  field existing.
 
 An optional [ColabFold walkthrough](../tools/colabfold/README.md#p1b7-protein-only-comparison)
 uses the same five protein chains as a clearly labeled protein-only control.
 It cannot represent the sotorasib attachment. Check a method's capabilities
 before treating its output as the same biological experiment.
+
+All six declarations are audited offline by `check_inputs.py`, and the measured
+results are collected in
+[Covalent restraints, predictor by predictor](#covalent-restraints-predictor-by-predictor)
+below.
 
 Choose either the interactive route on a tool's page or the batch route
 below. They call the same `run.sh`. Do not submit both routes for the same
@@ -406,7 +424,7 @@ Protenix filters out near-identical self-template sequences. Its template
 example therefore uses a related antibody structure and templates only the
 eligible antibody chains. Its date filter and local structure cache also
 need explicit configuration. The
-[Protenix guide](../tools/protenix/README.md#run-it) explains this different
+[Protenix guide](../tools/protenix/README.md#run-it-p1b7-peptidemhc-and-the-covalent-ligand) explains this different
 experiment; it is not equivalent to giving the complete 8UDR complex.
 
 Read the chosen tool's template section, then **on the login node** preview
@@ -449,6 +467,74 @@ to edit the threshold until the model passes. Review every model you plan
 to use, including its chain identities, ligand, bond, and binding pose.
 The general [covalent-bond guide](../tools/covalent-bonds.md) explains why
 high confidence or a connectivity record alone cannot validate the chemistry.
+
+## Covalent restraints, predictor by predictor
+
+Five inputs in this bundle can express a bond, and all five ask for the **same
+one**: the KRAS peptide's cysteine to the sotorasib warhead carbon,
+`C:Cys6:SG – F:MOV:C25`, which deposited 8UDR builds at **1.765 Å**. Each is told
+about it in a different vocabulary, and this section records what each one then
+did, measured on the same 823-residue complex.
+
+Two inputs are deliberately not in that set and are not failures:
+`colabfold-protein-only.fasta` is a labelled protein-only control, and `rfd3.yaml`
+**designs** a new protein around the modified cysteine rather than predicting this
+one, reading the bond out of `reference/8UDR.cif.gz` because RFdiffusion3 has no
+field to be told about it.
+
+`PLACEHOLDER_TABLE`
+
+Read that table as a statement about method, not about which tool is best.
+
+**Declaring a bond correctly is not the same as getting one.** All five accept
+the declaration without complaint. The addresses are all different — an
+offset into a sequence string, a chain letter with a per-element ordinal, an index
+into an entity list, a chain label with an atom name, an integer with no name
+available — and
+[tools/covalent-bonds.md](../tools/covalent-bonds.md#how-each-tool-addresses-a-bond)
+is the map. Getting the address wrong does not raise an error anywhere; it moves
+the bond.
+
+**One of them discards the declaration entirely.** OpenFold3's `covalent_bonds`
+field validates and is dropped before the model sees it. The run exits 0, the
+models carry all five protein chains and all 41 ligand heavy atoms, the
+confidence scores look ordinary — and the ligand is tens of ångströms away. This
+is the failure the whole bundle exists to teach, and it is why
+`check_output.py … --expect-unbonded` asserts it rather than skipping it.
+
+**No score, ranking or connectivity record separates a good draw from a bad
+one.** IntelliFold's five samples are the clearest demonstration in the bundle.
+All five write `_struct_conn.conn_type_id covale` naming the right two atoms. All
+five report `iptm 0.53`, `ptm 0.53` and `has_clash 0.0` — identical to two
+decimals, and the clash flag stays at zero for a draw whose sulfur–carbon
+distance is **0.919 Å**, well inside any atom. The spread in `ranking_score`
+across the five is 0.008, and the draw that reproduces the crystal bond to within
+0.010 Å is ranked **fourth of five**.
+
+**So the bond window has two sides.** `check_output.py` accepts 1.40–2.10 Å. The
+lower bound is not decoration: a 0.919 Å contact is not a tight bond, it is an
+impossible one, and a screen that only asks "is the ligand near the anchor"
+passes it.
+
+### What to do with this
+
+```bash
+python3 check_output.py <tool> <output-dir>                     # every model in the directory
+python3 check_output.py openfold3 out_of3 --expect-unbonded     # the documented apo outcome
+```
+
+1. **Fold several samples.** One draw is not a result for a covalent system.
+2. **Screen every draw you intend to keep**, on the coordinates.
+3. **Select from what passes** — do not delegate the choice to `ranking_score`.
+4. **Keep a failed check with its log.** It is a result. Do not widen the window
+   until a model fits through it.
+
+The general argument, and the 1,726-structure corpus that was quarantined for
+getting this wrong, is in
+[tools/covalent-bonds.md](../tools/covalent-bonds.md). Note also that a declared
+bond can be vetoed outright by sequence context, with no warning at all: the
+measurement is under
+["A declared bond is a proposal, not a constraint"](../tools/covalent-bonds.md#a-declared-bond-is-a-proposal-not-a-constraint).
 
 ## Save your results
 

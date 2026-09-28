@@ -50,7 +50,7 @@ designs, which is what this entry's note has always said it is for.
 2. **Get the source onto the cluster.** It arrives as a tarball from a
    licensee download. It is a licensed payload, so it does not go into git: put
    it on your laptop, `chpc-globus.sh push` it to your scratch
-   ([doc 02](../../docs/02-storage-and-data.md#laptop-to-cluster)), and build
+   ([doc 02B-storage-and-data.md#laptop-to-cluster-globus-is-the-normal-transfer-route)), and build
    from there.
 3. **Build on a GPU node, not the login node.** `pmemd.cuda` must be compiled
    against the CUDA toolkit and will want to see a device. The login node has no
