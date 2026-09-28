@@ -55,29 +55,50 @@ prefer over a schema copied out of a README:
 MSAs are files you generate on the login node and name in
 `main_msa_file_paths`/`paired_msa_file_paths`.
 
-Output lands under `--output_dir` (untested); `test.sh` looks for a `.cif`
-with `find`. Whether and how it ranks samples is not recorded in this entry.
-Before trusting anything: nothing has been folded with this image, and a query
-that carries a `covalent_bonds` entry validates, runs, exits zero and writes a
-confident structure with no bond in it.
+Output lands under `--output_dir`; `test.sh` looks for a `.cif` with `find`.
+Whether and how it ranks samples is not recorded in this entry.
+**A fold has now happened** — phase 1 of `test.sh` produced a 31-residue chain,
+CA spread 12.87 Å, on `ggpu4-04` (H100 NVL) on 2026-09-27, so the sentence that
+stood here saying nothing had been folded with this image is retired. The
+covalent refusal is unchanged: a query carrying a `covalent_bonds` entry
+validates, runs, exits zero and writes a confident structure with no bond in
+it.
 
-**`molecule_type`'s vocabulary is still unread**, and that is the one
-outstanding fact on this page rather than an oversight. It is the first field a
-renderer has to get right and its accepted values are whatever that module's
-enum says; nothing here has read it, and guessing `"protein"` because it looks
-like AlphaFold 3 is exactly the reasoning the schema facts above disprove.
-One command on the login node settles it, and it needs no GPU:
+**`molecule_type`'s vocabulary, read 2026-09-27.** It is an **integer enum**,
+not a string:
 
-```bash
-/usr/bin/apptainer exec "$CHPC_CONTAINERS/openfold3_3.sif" python -c \
-  "from openfold3.projects.of3_all_atom.config import inference_query_format as q; \
-   print(q.Chain.model_json_schema())"
+```
+MoleculeType: PROTEIN=0  RNA=1  DNA=2  LIGAND=3
 ```
 
-Record the answer here when somebody runs it. It does not change the covalent
-refusal (Provenance) — a dead `covalent_bonds` field is not a naming problem — but it turns
-"unknown" into a measurement, which is the difference between declining to build
-something and not having looked.
+This page flagged it as its one outstanding fact and warned that guessing
+`"protein"` because it looks like AlphaFold 3 was exactly the wrong reasoning.
+It was: the value is `0`. A working minimal query, which folded on 2026-09-27:
+
+```json
+{"seeds": [1], "queries": {"plain_probe": {
+  "chains": [{"molecule_type": 0, "chain_ids": ["A"], "sequence": "MKTAY..."}],
+  "use_msas": false, "use_paired_msas": false, "use_main_msas": false}}}
+```
+
+**It calls the public ColabFold MSA server by default, and the query's MSA
+flags do not stop it.** `use_msas`, `use_paired_msas` and `use_main_msas` each
+default to `True`, and setting all three false still goes to the network: the
+fetch is gated by a *separate* experiment setting, `use_msa_server`, which
+exists only as a CLI flag on `run_openfold predict` and is not a field of the
+query schema at all. The query flags are what the MSA *pipeline* reads
+(`msa_pipeline_configs.py:109`); whether a fetch happens at all is decided
+before that. On a compute node, which has no internet here (docs/02), the
+symptom is a `ProxyError` against `api.colabfold.com` forty-five seconds in,
+after 2.3 GB of weights have already loaded:
+
+```bash
+run_openfold predict --query_json=q.json --output_dir=out \
+    --use-msa-server=False --use-templates=False
+```
+
+So a real fold either passes that flag and names its own MSA files in
+`main_msa_file_paths`/`paired_msa_file_paths`, or does not run.
 
 ## Do not miss
 
