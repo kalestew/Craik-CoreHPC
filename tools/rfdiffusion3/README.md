@@ -77,15 +77,22 @@ entries on purpose: RFdiffusion3 has no repository of its own, ships as the
 weights and a different licence lineage from v1. v1 stays because the round-0
 exosite track is written against its hydra config. foundry also provides `rf3`
 (structure prediction) and `mpnn`; this entry exposes `rfd3`, and the others
-would be separate entries with their own status and doctor check.
+would be separate entries with their own status and doctor check. `rf3` is the
+one being worked towards: its weights are already fetched by default here, its
+checkpoint is exported as `RF3_CKPT`, and a covalent input is prepared at
+[`../../examples/p1b7/rf3.json`](../../examples/p1b7/rf3.json). It has not been
+run, so it has no entry and no status.
 
 ## Covalent modifications
 
 RFdiffusion3 handles them, and the way it handles them is the most important
 thing on this page.
 
-**There is no way to declare a covalent bond.** No `covalent_bonds`, no
-`bondedAtomPairs`, nothing in upstream's `input.md`. The support is a transform,
+**There is no way to declare a covalent bond to RFdiffusion3.** No
+`covalent_bonds`, no `bondedAtomPairs`, nothing in upstream's `input.md`. This
+is a fact about `rfd3` and not about `rc-foundry`: the `rf3` predictor in this
+same image accepts a declared `bonds` list, so do not carry this paragraph
+across to it. See [`../covalent-bonds.md`](../covalent-bonds.md). The support is a transform,
 `FlagAndReassignCovalentModifications`, that runs unconditionally in the
 inference pipeline and works off **the bond list the parser produced from your
 input file**. For every bond with one end in a polymer and the other in a

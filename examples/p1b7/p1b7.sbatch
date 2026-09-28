@@ -2,6 +2,7 @@
 # Submit from your scratch copy of examples/p1b7, on the LOGIN node:
 #   mkdir -p logs
 #   sbatch p1b7.sbatch boltz
+#   sbatch p1b7.sbatch rf3
 #   sbatch p1b7.sbatch chai1 template
 #   sbatch p1b7.sbatch protenix template
 # See docs/11-p1b7-walkthrough.md. Each tool/mode needs a fresh output directory.
@@ -34,14 +35,18 @@ if [ ! -r run.sh ] || [ ! -r manifest.json ]; then
     exit 1
 fi
 if [ "$#" -eq 0 ]; then
-    echo "Choose a tool: sbatch p1b7.sbatch boltz|chai1|protenix [template]" >&2
+    echo "Choose a tool: sbatch p1b7.sbatch boltz|chai1|protenix|rf3 [template]" >&2
     exit 1
 fi
 
 date -Is
 hostname
 printf 'Job: %s\nWork directory: %s\n' "$SLURM_JOB_ID" "$PWD"
-chpc-tool show --env "$1"
+# rf3 has no registry entry of its own yet: it is a second program inside the
+# rfdiffusion3 image, so that is the entry whose placement and weights matter.
+entry="$1"
+if [ "$entry" = rf3 ]; then entry=rfdiffusion3; fi
+chpc-tool show --env "$entry"
 nvidia-smi --query-gpu=name,compute_cap --format=csv,noheader
 srun -u bash run.sh "$@"
 echo "Prediction and tutorial checks finished. Save this directory to FAC."

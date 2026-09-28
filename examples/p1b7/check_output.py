@@ -1,6 +1,6 @@
 """Check this six-chain tutorial's bond: python3 check_output.py TOOL MODEL.
 
-TOOL is boltz, protenix, chai1, intellifold, openfold3, or reference. For a
+TOOL is boltz, protenix, chai1, intellifold, openfold3, rf3, or reference. For a
 directory, every predicted sample is checked. This checks chain composition and
 local bond geometry; it does not establish that the antibody dock or the whole
 structure is right.
@@ -93,7 +93,7 @@ def check(tool, path, expect_bond=True):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tool", choices=("boltz", "protenix", "chai1", "intellifold",
-                                        "openfold3", "reference"))
+                                        "openfold3", "rf3", "reference"))
     parser.add_argument("path", type=Path)
     parser.add_argument("--expected-samples", type=int,
                         help="require this many output models (the runner requires all five)")
@@ -107,7 +107,12 @@ def main():
                 # intellifold also writes a top-level copy of the draw it ranked
                 # first; "sample-" keeps that copy from being counted twice.
                 "intellifold": "*sample-*_model.cif",
-                "openfold3": "*_sample_*_model.cif"}
+                "openfold3": "*_sample_*_model.cif",
+                # rf3 writes gzipped mmCIF and needs one_model_per_file=true: its
+                # default packs every draw into one file as separate models, and
+                # structure_io reads model 1 only, so four of five would go
+                # unchecked while still reporting PASS.
+                "rf3": "*.cif.gz"}
     files = sorted(args.path.rglob(patterns[args.tool])) if args.path.is_dir() and args.tool in patterns else [args.path]
     if not files:
         parser.exit(1, "FAIL: no predicted model files found\n")

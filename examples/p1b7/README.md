@@ -52,10 +52,12 @@ That is 823 protein residues plus the ligand. This is larger than the earlier
 measurements do not measure this full-Fab input. The tutorial allocations are
 starting requests, not guarantees of completion on every GPU.
 
-All three predictors receive the same chain order **A, B, C, D, E, F**.
+All six bonding inputs receive the same chain order **A, B, C, D, E, F**.
 Chai assigns these letters by position in the FASTA; Protenix bond entities
 are numbered **1 through 6** by position in its JSON list. Changing the order
-without changing the bond changes the molecule.
+without changing the bond changes the molecule. RF3 is the exception that
+proves the rule: every component carries an explicit `chain_id` and its bond
+names chains by that letter, so reordering its list moves nothing.
 
 ### The covalent attachment, exactly
 
@@ -66,7 +68,9 @@ it is **KRAS residue 12** in biological/author numbering. Its sulfur atom is
 1.765 Å. The offline checker confirms this against actual coordinates.
 
 Boltz uses `[C, 6, SG]` to `[F, 1, C25]`. Protenix uses entity 3,
-position 6, `SG` to entity 6, position 1, `C25`. Chai takes a SMILES string
+position 6, `SG` to entity 6, position 1, `C25`. RF3 uses PyMol-like strings,
+`C/CYS/6/SG` to `F/MOV/1/C25`, and is the only dialect here that wants the
+residue **name** as well as its number. Chai takes a SMILES string
 instead of the CCD component, so the same terminal carbon is named **`C1`**:
 its CSV says `C,C6@SG,F,@C1`. Copying `C25` into Chai's restraint would attach
 the ligand to a different atom.
@@ -100,6 +104,12 @@ tutorial's A–F order and sequence numbering from 1.
   away. Checked with `check_output.py openfold3 … --expect-unbonded`, which passes
   on the documented apo outcome and fails the day the field starts working. See
   [tools/openfold3/README.md](../../tools/openfold3/README.md#covalent-support).
+- [rf3.json](rf3.json): RoseTTAFold3, which ships in the same `rc-foundry`
+  image as `rfd3` below and, unlike it, **can** be told about a bond — a `bonds`
+  list of `chain_id/res_name/res_id/atom_name` pairs. Strict JSON with no
+  comments and no extra keys, because `rf3 fold` reads CIF/PDB/JSON and not YAML,
+  so there is nowhere in the file to explain itself. Prepared from upstream's
+  `v0.2.0` docs and **not yet run**; it has no registry entry.
 - [rfd3.yaml](rfd3.yaml): the odd one out. Not a prediction — RFdiffusion3
   **designs** a new 120-residue protein around the sotorasib-modified cysteine,
   which is the job the P1B7 Fab does by other means. It declares no bond and has
@@ -117,7 +127,7 @@ tutorial's A–F order and sequence numbering from 1.
 [colabfold-protein-only.fasta](colabfold-protein-only.fasta) is an optional
 five-chain **protein-only control** in ColabFold's colon-separated multimer
 syntax. ColabFold does not represent this ligand or its covalent attachment.
-That file cannot reproduce the haptenated target in the other three inputs.
+That file cannot reproduce the haptenated target in the other six inputs.
 
 ## Check the bundle without starting a job
 
@@ -129,11 +139,13 @@ python3 check_inputs.py
 bash run.sh boltz --dry-run
 bash run.sh protenix --dry-run
 bash run.sh chai1 --dry-run
+bash run.sh rf3 --dry-run
 ```
 
-`check_inputs.py` audits all six declarations, `intellifold.json` and
-`openfold3.json` included. `run.sh` drives the first three; the other two are run
-from their own tool pages, which record what each measured:
+`check_inputs.py` audits all seven declarations, `intellifold.json`,
+`openfold3.json` and `rf3.json` included. `run.sh` drives four of them;
+`intellifold` and `openfold3` are run from their own tool pages, which record
+what each measured:
 [intellifold](../../tools/intellifold/README.md#p1b7-the-full-covalent-complex)
 and
 [openfold3](../../tools/openfold3/README.md#p1b7-what-a-dropped-bond-actually-looks-like).
@@ -160,6 +172,10 @@ bash run.sh protenix
 bash run.sh chai1
 ```
 
+```bash
+bash run.sh rf3
+```
+
 Each starts five samples with seed 1 and uses single-sequence input. This
 keeps the first lesson independent of online MSA services. For scientific
 use, prepare appropriate MSAs before the prediction job: use the login node
@@ -167,7 +183,8 @@ for remote searches/downloads and an allocated CPU node for substantial local
 database searches. Follow the relevant tool README; single-sequence success
 is not a measure of docking accuracy.
 
-Results go into `out/boltz-none`, `out/protenix-none` or `out/chai1-none`.
+Results go into `out/boltz-none`, `out/protenix-none`, `out/chai1-none` or
+`out/rf3-none`.
 Logs go into `logs/TOOL-MODE-JOB.log`, where the words are replaced by your
 tool, mode and Slurm job number. The runner refuses an existing output folder;
 make a fresh scratch copy for a rerun so an earlier result is not reused.
@@ -180,6 +197,7 @@ yourself, type the matching command:
 python3 check_output.py boltz out/boltz-none
 python3 check_output.py protenix out/protenix-none
 python3 check_output.py chai1 out/chai1-none
+python3 check_output.py rf3 out/rf3-none
 ```
 
 Use just the line for the result you actually ran. You can replace the final
@@ -196,6 +214,34 @@ complex. Compare the predicted structure with the reference as a separate
 scientific assessment. Do not choose a sample solely because its filename
 ends in zero: Boltz ranks its outputs; Chai and Protenix sample indices are
 not ranks.
+
+## RF3 differs from the others in two ways that matter
+
+**RF3 can finish successfully having written no structure.** Its
+`early_stopping_plddt_threshold` defaults to `0.5`: if average all-atom pLDDT
+after the first recycle falls below it, the prediction exits early, writes only
+`metrics.csv` and a `.score` carrying `early_stopped=True`, and produces no
+`.cif.gz` at all. Upstream is explicit that a run *without an MSA* is the case
+that triggers this — which is exactly this tutorial. `run.sh` therefore passes
+`early_stopping_plddt_threshold=0.0` to disable it. If you invoke `rf3 fold` by
+hand without that and get no structures, that is the early exit working as
+designed and **not** a broken install. No other predictor here can succeed and
+write nothing.
+
+**RF3 writes gzipped mmCIF and by default puts every draw in one file.**
+`one_model_per_file` defaults to `False`, packing all five samples into a single
+`.cif.gz` as separate models; `structure_io` reads model 1 only, so four of five
+would pass unexamined while the job still reported `PASS`. `run.sh` passes
+`one_model_per_file=true`. `check_output.py rf3` globs `*.cif.gz`.
+
+RF3 has **no registry entry of its own**. It is a second program inside the
+`rfdiffusion3` image — `rc-foundry` ships `rfd3`, `rf3` and `mpnn` together — so
+`run.sh` invokes `chpc-tool exec rfdiffusion3 -- rf3 fold`, and
+`chpc-tool export rfdiffusion3` supplies `RF3_CKPT`. That must be passed as an
+absolute path: the image pins `FOUNDRY_CHECKPOINT_DIRS` in its own `.env` and
+python-dotenv overrides the environment, so a checkpoint *name* resolves inside
+the container instead of on the share. The image is capped at compute capability
+9.0, so ask for `nvidia_l40s` or `nvidia_h100_nvl`, never a bare `gpu:1`.
 
 ## Add templates as a second exercise
 
@@ -261,7 +307,9 @@ recorded retrieval date is 2026-09-24. `manifest.json` records their public
 RCSB sources and exact stored-byte checksums. Inputs use the pinned registry
 formats: [Boltz 2.2.1 YAML](https://github.com/jwohlwend/boltz/blob/v2.2.1/docs/prediction.md),
 [Protenix 1.1.0 JSON](https://github.com/bytedance/Protenix/blob/v1.1.0/docs/infer_json_format.md),
-and [Chai 0.6.1 template parser](https://github.com/chaidiscovery/chai-lab/blob/v0.6.1/chai_lab/data/parsing/templates/m8.py).
+[Chai 0.6.1 template parser](https://github.com/chaidiscovery/chai-lab/blob/v0.6.1/chai_lab/data/parsing/templates/m8.py),
+and [RF3 JSON from rc-foundry v0.2.0](https://github.com/RosettaCommons/foundry/blob/v0.2.0/models/rf3/README.md),
+the version the `rfdiffusion3` image is built from.
 
 The offline input audit and deposited-reference geometry check pass locally.
 On 2026-09-26, this bundle was transferred to CoreHPC scratch with Globus and
@@ -292,6 +340,15 @@ each at seed 1 with single-sequence inputs, and checked with `check_output.py`:
 
 L40S (`ggpu1-06`) except intellifold, on an H100 NVL (`ggpu4-02`). Boltz, chai1
 and protenix ran through `run.sh`; the other two from their own tool pages.
+
+**`rf3` is absent from that table on purpose.** Its input was written on
+2026-09-27 from upstream's documented JSON API at `v0.2.0`, generated from
+`manifest.json` and audited by `check_inputs.py` against the deposited structure.
+That is input identity, not evidence: nothing has yet confirmed the installed
+image parses the file, that the bond is accepted, or that the geometry puts the
+ligand on the peptide sulfur. Until a job log and a `check_output.py rf3` pass
+exist, RF3 here is prepared and unverified — which is also why it has no registry
+entry and no status.
 
 Read this as a demonstration of restraint handling, **not** a benchmark: five
 draws at one seed, no MSAs, and `check_output.py` examines the local bond and

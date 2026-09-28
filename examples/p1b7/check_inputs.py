@@ -124,6 +124,25 @@ def main():
             and all(isinstance(e[2], int) for e in query["covalent_bonds"][0]),
             "OpenFold3 covalent_bonds shape changed -- it is inert, and the demonstration depends on it being declared")
 
+    # RF3 (RoseTTAFold3), the structure predictor inside the same rc-foundry image
+    # the rfdiffusion3 entry builds. Unlike its sibling rfd3, which can only infer a
+    # bond from the input file, rf3 takes a declared one. Strict JSON with no extra
+    # keys: `rf3 fold` reads CIF/PDB/JSON and not YAML, so a comment cannot live in
+    # the file, and an unrecognised top-level key is a silent behaviour change.
+    rf3 = json.loads((ROOT / "rf3.json").read_text())
+    require(len(rf3) == 1, "RF3 input must hold exactly one prediction")
+    rf3, = rf3
+    require(set(rf3) == {"name", "components", "bonds"}, "RF3 input has unexpected top-level keys")
+    require(rf3["name"] == manifest["name"], "RF3 prediction name changed")
+    require(len(rf3["components"]) == 6, "RF3 must contain exactly six components")
+    require([(c["chain_id"], c["seq"]) for c in rf3["components"][:5]] == expected,
+            "RF3 component order differs from reference")
+    require(rf3["components"][5] == {"ccd_code": "MOV", "chain_id": "F"}, "RF3 ligand changed")
+    # chain_id/res_name/res_id/atom_name. The only dialect here that wants the
+    # residue NAME as well as its number, and the chain comes from each component's
+    # own chain_id, so list order addresses nothing.
+    require(rf3["bonds"] == [["C/CYS/6/SG", "F/MOV/1/C25"]], "RF3 bond changed")
+
     related = deposited_sequences(ROOT / "reference/8VRA.cif.gz")
     for query, template in (("D", "E"), ("E", "D")):
         records = fasta(ROOT / "templates" / ("protenix-" + query + ".a3m"))
@@ -135,7 +154,7 @@ def main():
     check("reference", ROOT / "reference/8UDR.cif.gz")
     print("PASS inputs: full deposited A/B/C/D/E = 275/99/10/226/213 residues; ligand F = MOV")
     print("PASS bond: peptide sequence Cys6 (KRAS author Cys12) SG -> MOV C25; Chai SMILES C1")
-    print("PASS dialects: boltz/protenix/chai1/intellifold declare the bond; openfold3")
+    print("PASS dialects: boltz/protenix/chai1/intellifold/rf3 declare the bond; openfold3")
     print("     declares it too and will DROP it -- check with --expect-unbonded")
     print("PASS templates: 8UDR reference plus 8VRA antibody D<-E and E<-D; offline assets intact")
     print("This audit checks input identity and reference geometry, not GPU prediction accuracy.")

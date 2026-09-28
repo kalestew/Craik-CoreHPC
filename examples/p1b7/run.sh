@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Run from a copied tutorial directory inside a GPU allocation.
-# bash run.sh boltz|protenix|chai1 [none|template] [--dry-run]
+# bash run.sh boltz|protenix|chai1|rf3 [none|template] [--dry-run]
 set -euo pipefail
 export PYTHONDONTWRITEBYTECODE=1
 
 usage() {
-  echo 'Usage: bash run.sh boltz|protenix|chai1 [none|template] [--dry-run]'
+  echo 'Usage: bash run.sh boltz|protenix|chai1|rf3 [none|template] [--dry-run]'
   echo 'Examples: bash run.sh boltz --dry-run; bash run.sh chai1 template'
 }
 if [[ $# -eq 0 ]]; then usage; exit 2; fi
@@ -20,7 +20,13 @@ for arg in "$@"; do
     *) usage >&2; exit 2 ;;
   esac
 done
-case "$tool" in boltz|protenix|chai1) ;; *) usage >&2; exit 2 ;; esac
+case "$tool" in boltz|protenix|chai1|rf3) ;; *) usage >&2; exit 2 ;; esac
+# RF3 does support templates, via template_selection with residue ranges, but
+# that is a different exercise from the other three and nothing here has run it.
+if [[ $tool == rf3 && $mode == template ]]; then
+  echo 'rf3 template mode is not part of this tutorial yet. Use: bash run.sh rf3' >&2
+  exit 2
+fi
 
 work=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 cd "$work"
@@ -39,6 +45,7 @@ fi
 # In a dry-run the cache variables remain literal placeholders. Nothing is
 # sourced and no files are prepared, so this also works on a student's laptop.
 boltz_cache='${BOLTZ_CACHE}'
+rf3_ckpt='${RF3_CKPT}'
 if [[ $dry_run == false ]]; then
   if [[ -n ${CHPC_REPO:-} && $work == "$CHPC_REPO/examples/p1b7" ]]; then
     echo 'This is the checked-in example folder. First copy it to your scratch working folder.' >&2
@@ -68,6 +75,15 @@ if [[ $dry_run == false ]]; then
     tool_exports=$(chpc-tool export boltz)
     eval "$tool_exports"
     boltz_cache=$BOLTZ_CACHE
+  fi
+  if [[ $tool == rf3 ]]; then
+    # RF3 ships inside the rfdiffusion3 image and has no entry of its own yet;
+    # that entry comes after this run passes. RF3_CKPT must be an absolute path:
+    # the image's own .env pins FOUNDRY_CHECKPOINT_DIRS and dotenv wins, so a
+    # checkpoint NAME resolves inside the container instead of on the share.
+    tool_exports=$(chpc-tool export rfdiffusion3)
+    eval "$tool_exports"
+    rf3_ckpt=$RF3_CKPT
   fi
   if [[ $mode == template && $tool == boltz ]]; then
     python3 "$work/prepare_templates.py" boltz
@@ -103,6 +119,20 @@ case "$tool" in
     command+=(protenix pred -i "$input" -o "$out" -n protenix_base_default_v1.0.0
               -s 1 -e 5 -c 10 -p 200 --use_msa false)
     [[ $mode == template ]] && command+=(--use_template true)
+    ;;
+  rf3)
+    # one_model_per_file: the default packs all five samples into one file as
+    #   separate models, and check_output.py reads model 1 only.
+    # early_stopping_plddt_threshold=0.0: DISABLES early stopping. At its default
+    #   of 0.5 a single-sequence input is exactly the case upstream says triggers
+    #   it, and an early exit writes NO structure -- only metrics.csv and .score
+    #   with early_stopped=True -- while exiting successfully. Left on, this
+    #   tutorial's no-MSA run would most likely produce nothing and read as a
+    #   broken install. The other three predictors have no equivalent behaviour.
+    command=(chpc-tool exec rfdiffusion3 -- rf3 fold
+             "inputs=$work/rf3.json" "out_dir=$out" "ckpt_path=$rf3_ckpt"
+             seed=1 diffusion_batch_size=5 num_steps=200
+             one_model_per_file=true early_stopping_plddt_threshold=0.0)
     ;;
   chai1)
     if [[ $mode == template ]]; then
