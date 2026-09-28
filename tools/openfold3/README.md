@@ -49,8 +49,22 @@ to exist as a single CCD component containing cysteine **and** sotorasib with th
 backbone, and none does. `MOV` is a ligand component — see
 [What this cannot do](#what-this-cannot-do).
 
+**On the login node**, to set up a working copy:
+
 ```bash
-cd "$WORK" && python3 check_inputs.py     # $WORK from the walkthrough's setup block
+export COREHPC="$HOME/corehpc" &&
+source "$COREHPC/env.sh" &&
+export WORK="$CHPC_USER_SCRATCH/tutorials/p1b7-openfold3-$(date +%Y%m%d-%H%M%S)" &&
+mkdir -p "$WORK" && cp -R "$COREHPC/examples/p1b7/." "$WORK/" && cd "$WORK" &&
+git -C "$COREHPC" rev-parse HEAD > corehpc-commit.txt &&
+python3 check_inputs.py
+```
+
+Then in a GPU allocation:
+
+```bash
+srun -p gpu --gres=gpu:1 -c 16 --mem 96G -t 4:00:00 --pty bash -l
+cd "$WORK"
 chpc-tool exec openfold3 -- run_openfold predict --query_json=openfold3.json \
     --output_dir=out_of3 --use-msa-server=False --use-templates=False
 python3 check_output.py openfold3 out_of3 --expect-unbonded
