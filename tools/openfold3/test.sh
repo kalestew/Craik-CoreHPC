@@ -59,14 +59,45 @@ if [ -n "$q" ]; then
     echo "phase 1 input: upstream's own $q"
     "$CHPC_TOOL" exec openfold3 -- cat "$q" > plain.json
 else
-    echo "phase 1 input: no upstream example inside the image, using a guess"
-    echo "  (if this is rejected, the schema is the finding -- write it down)"
+    echo "phase 1 input: no upstream example inside the image; schema read"
+    echo "  out of the installed package (see the comment below)"
+    # THE SCHEMA IS NO LONGER A GUESS. It was, and the guess was the AlphaFold 3
+    # spelling -- {"name", "sequences":[{"protein":{"id","sequence"}}]} -- which
+    # openfold3 rejects with
+    #   ValidationError: 1 validation error for InferenceQuerySet
+    #   queries  Field required
+    # Read off InferenceQuerySet and Query in
+    # openfold3/projects/of3_all_atom/config/inference_query_format.py, 2026-09-27:
+    #
+    #   InferenceQuerySet: seeds: list[int], queries: dict[str, Query]
+    #   Query: query_name, chains (REQUIRED), use_msas, use_paired_msas,
+    #          use_main_msas, covalent_bonds, pocket_constraint
+    #   Chain: molecule_type, chain_ids: list[str], sequence, smiles,
+    #          ccd_codes, cyclic, and the msa/template path fields
+    #   MoleculeType: PROTEIN=0  RNA=1  DNA=2  LIGAND=3
+    #
+    # Note what is NOT here: no per-chain "id", it is "chain_ids" and a LIST;
+    # molecule_type is an INTEGER ENUM rather than the key name; and the queries
+    # are a DICT keyed by name, not an array. Nothing about that is guessable
+    # from the AF3 format the README cites.
+    #
+    # use_msas=false because MSA generation wants genetic databases this entry
+    # does not stage, and phase 1 is asking whether the image folds at all.
     cat > plain.json <<'JSON'
 {
-  "name": "plain_probe",
-  "sequences": [
-    {"protein": {"id": "A", "sequence": "MKTAYIAKQRQISFVKSHFSRQLEERLGLIE"}}
-  ]
+  "seeds": [1],
+  "queries": {
+    "plain_probe": {
+      "chains": [
+        {
+          "molecule_type": 0,
+          "chain_ids": ["A"],
+          "sequence": "MKTAYIAKQRQISFVKSHFSRQLEERLGLIE"
+        }
+      ],
+      "use_msas": false
+    }
+  }
 }
 JSON
 fi
