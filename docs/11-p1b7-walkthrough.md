@@ -482,7 +482,27 @@ Two inputs are deliberately not in that set and are not failures:
 one, reading the bond out of `reference/8UDR.cif.gz` because RFdiffusion3 has no
 field to be told about it.
 
-`PLACEHOLDER_TABLE`
+Measured 2026-09-27, single-sequence inputs, seed 1, five samples each, all
+through `check_output.py` with its 1.40–2.10 Å window:
+
+| | ligand as | bond declared in | draws in window | range | closest draw |
+|---|---|---|---|---|---|
+| **deposited 8UDR** | — | — | — | — | **1.765 Å** |
+| [chai1](../tools/chai1/README.md#run-it-the-p1b78udr-complex) | SMILES | `--constraint-path` CSV | **5/5** | 1.651–1.741 Å | 1.741 Å |
+| [protenix](../tools/protenix/README.md#run-it-p1b7-peptidemhc-and-the-covalent-ligand) | `CCD_MOV` | `covalent_bonds` in JSON | **5/5** | 1.488–1.640 Å | 1.640 Å |
+| [boltz](../tools/boltz/README.md#run-it-p1b7-bound-to-the-sotorasib-modified-peptidemhc) | `ccd: MOV` | `constraints:` in YAML | 3/5 | 1.295–1.887 Å | 1.737 Å |
+| [intellifold](../tools/intellifold/README.md#p1b7-the-full-covalent-complex) | `ccdCodes: [MOV]` | `bondedAtomPairs` | 3/5 | 0.919–2.608 Å | **1.755 Å** |
+| [openfold3](../tools/openfold3/README.md#p1b7-what-a-dropped-bond-actually-looks-like) | `ccd_codes: [MOV]` | `covalent_bonds` — **discarded** | 0/5, by design | 18.2–47.2 Å | — |
+
+Wall time on one GPU: protenix 2 m 07 s, openfold3 2 m 02 s, intellifold 3 m 34 s,
+chai1 5 m 49 s, boltz 6 m 54 s. Everything except intellifold ran on an L40S
+(`ggpu1-06`); intellifold ran on an H100 NVL (`ggpu4-02`).
+
+**This is not a benchmark and the ordering is not a ranking.** Five draws at one
+seed, no MSAs, and only the local bond geometry is examined — the antibody dock,
+which is the hard part of this complex and the thing P1B7 is actually for, is not
+assessed at all. Treat it as a demonstration of how each tool handles the
+restraint.
 
 Read that table as a statement about method, not about which tool is best.
 
@@ -511,10 +531,14 @@ distance is **0.919 Å**, well inside any atom. The spread in `ranking_score`
 across the five is 0.008, and the draw that reproduces the crystal bond to within
 0.010 Å is ranked **fourth of five**.
 
-**So the bond window has two sides.** `check_output.py` accepts 1.40–2.10 Å. The
-lower bound is not decoration: a 0.919 Å contact is not a tight bond, it is an
-impossible one, and a screen that only asks "is the ligand near the anchor"
-passes it.
+**So the bond window has two sides, and the lower one does most of the work.**
+`check_output.py` accepts 1.40–2.10 Å. Of the four draws that missed the window
+across all four bonding tools, **three were too SHORT** — boltz at 1.295 Å and
+1.307 Å, intellifold at 0.919 Å — and only one was too long. A 0.919 Å
+sulfur–carbon distance is not a tight bond; it is shorter than any real S–C bond
+and the atoms are interpenetrating. A screen that asks only "is the ligand close
+enough to the anchor" passes **every one** of those three, and so does
+`has_clash`.
 
 ### What to do with this
 

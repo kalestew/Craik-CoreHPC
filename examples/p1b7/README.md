@@ -277,7 +277,31 @@ its template helpers were checked on the login node with the installed images:
 
 These were CPU template-input checks; they did not run GPU prediction.
 
+### Measured 2026-09-27: the first full-Fab GPU runs
+
+Every bonding input in this bundle has now been run on this complex, five samples
+each at seed 1 with single-sequence inputs, and checked with `check_output.py`:
+
+| | draws in 1.40–2.10 Å | range | closest to 1.765 Å | wall time |
+|---|---|---|---|---|
+| chai1 | 5/5 | 1.651–1.741 Å | 1.741 Å | 5 m 49 s |
+| protenix | 5/5 | 1.488–1.640 Å | 1.640 Å | 2 m 07 s |
+| boltz | 3/5 | 1.295–1.887 Å | 1.737 Å | 6 m 54 s |
+| intellifold | 3/5 | 0.919–2.608 Å | 1.755 Å | 3 m 34 s |
+| openfold3 | 0/5, by design | 18.2–47.2 Å | — | 2 m 02 s |
+
+L40S (`ggpu1-06`) except intellifold, on an H100 NVL (`ggpu4-02`). Boltz, chai1
+and protenix ran through `run.sh`; the other two from their own tool pages.
+
+Read this as a demonstration of restraint handling, **not** a benchmark: five
+draws at one seed, no MSAs, and `check_output.py` examines the local bond and
+chain composition only. The antibody dock — the hard part, and the reason P1B7
+exists — is not assessed by any of it.
+
+The discussion of what the numbers mean, including why three of the four missed
+draws were too SHORT rather than too long, is in the walkthrough's
+[Covalent restraints, predictor by predictor](../../docs/11-p1b7-walkthrough.md#covalent-restraints-predictor-by-predictor).
+
 The registered tools' own small GPU tests are described in their READMEs.
-Those tests, the CPU template checks and older Fv benchmarks do not constitute
-a measured full-Fab tutorial run. Preserve your job log and inspect the
-outputs from your run.
+Those tests and older Fv benchmarks remain separate evidence from the runs above.
+Preserve your job log and inspect the outputs from your run.
