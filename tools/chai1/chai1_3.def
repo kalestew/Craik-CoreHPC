@@ -1,0 +1,239 @@
+Bootstrap: docker
+From: python:3.12-slim
+
+# Chai-1 0.6.1 -- structure prediction, on a torch that has sm_120.
+#
+# REBUILD of chai1_2 for Blackwell, 2026-11-03. chai1_2.def and chai1_1.def are
+# kept beside this one because they are what every Chai-1 number this lab holds
+# was produced with, and a recipe you can no longer read is provenance you no
+# longer have.
+#
+# ── WHY, and what this deliberately breaks ────────────────────────────────
+#
+# chai_lab 0.6.1 declares `torch>=2.3.1,<2.7`. Inside that ceiling pip resolves
+# torch 2.6.x with cu124 wheels, and chai1_2's own test.sh records the
+# consequence as a measurement rather than an inference:
+#   torch._C._cuda_getArchFlags() -> sm_50 sm_60 sm_70 sm_75 sm_80 sm_86 sm_90
+# There is NO `compute_*` entry in that list, which is the part that decides
+# this. A build that ships PTX for a lower arch can be JIT-compiled forward onto
+# a newer device by the driver; this one ships none, so sm_120 is not a slow
+# path here, it is no path. ColabFold 1.5.5 fails the same way for the same
+# reason and the error is worth knowing because it is NOT "no kernel image":
+# jax enumerates the device, then dies with CUDA_ERROR_INVALID_IMAGE on the
+# first launch.
+#
+# 0.6.1 IS THE LAST RELEASE. Checked 2026-11-03: PyPI's latest is 0.6.1 and
+# chaidiscovery/chai-lab's newest tag is v0.6.1, so there is no newer chai_lab
+# whose pin admits a cu128 wheel. Waiting is not a strategy with a date on it.
+#
+# So this image installs chai_lab 0.6.1 and then REPLACES torch with
+# 2.7.0+cu128, which is one minor version past the declared ceiling and the
+# oldest build PyTorch publishes with sm_120 kernels. pip will say
+#   chai-lab 0.6.1 requires torch<2.7,>=2.3.1, but you have torch 2.7.0+cu128
+# and that warning is accurate and expected. This entry is a declared
+# exception to an upstream pin, which is a thing to do knowingly and to gate on
+# evidence, not a thing to do quietly.
+#
+# ── THE GATE. Do not treat a passing %test as permission to believe a fold. ──
+#
+# %test below proves the stack imports, the arch flags carry sm_120, the
+# downloads dir is writable and kalign really aligns. It does NOT prove the
+# chemistry survived a torch minor bump. Chai-1 is the one predictor in this
+# lab's history whose output was wrong in a way confidence scores did not
+# detect: ipTM moved 0.710 -> 0.698 between a hapten bonded to the warhead and
+# the same hapten bonded to an aromatic ring carbon 12 A away. The consuming
+# project therefore holds a regression over nine real folds of its own target
+# asserting the peptide cysteine bonds 1.636-1.770 A from the warhead sulfur
+# against 12.5-15.3 A for the decoy atom.
+#
+# A covalent fold from THIS image must land in that band before any result from
+# it is admitted to a scientific decision. If it does not, the right conclusion
+# is that torch 2.7 changed something chai_lab 0.6.1 relies on, and the entry
+# goes back to chai1_2 on an L40S.
+#
+# Build:  chpc-tool build chai1
+
+%labels
+    Tool         chai1
+    Version      0.6.1
+    Upstream     https://github.com/chaidiscovery/chai-lab
+    UpstreamRef  chai_lab==0.6.1 (PyPI), torch 2.7.0+cu128 forced over its pin
+    Licence      Apache-2.0, code and weights
+    Base         python:3.12-slim
+    GPUArch      includes sm_120 -- asserted at build time, see %post
+    Kalign       3.4.0 (Debian trixie) -- REQUIRED for templates
+    Rebuild      2026-11-03, torch 2.7.0+cu128 for sm_120
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    export DEBIAN_FRONTEND=noninteractive
+    apt-get update
+    apt-get install -y --no-install-recommends git ca-certificates kalign
+    rm -rf /var/lib/apt/lists/*
+
+    # chai_lab first, so its own resolution happens normally and we can see
+    # exactly what we are overriding.
+    pip install --no-cache-dir chai_lab==0.6.1
+    python -c "import torch; print('resolved by chai_lab:', torch.__version__)"
+
+    # Then the override. The cu128 index carries torch and its nvidia-* runtime
+    # wheels, so nothing else has to resolve from there.
+    pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cu128 \
+        "torch==2.7.0+cu128"
+
+    # torch's install can drag numpy forward; chai_lab wants 1.x.
+    pip install --no-cache-dir "numpy<2"
+
+    # ── pyarrow, and it is a BUG FIX rather than a convenience ─────────────
+    #
+    # chai_lab reads and writes MSAs as parquet (*.aligned.pqt) and does NOT
+    # declare a parquet engine, so a pip install of chai_lab alone produces an
+    # image that folds single-sequence and dies the moment an MSA is supplied:
+    #   ImportError: Unable to find a usable engine; tried using: 'pyarrow',
+    #   'fastparquet'
+    # raised out of pandas.DataFrame.to_parquet.
+    #
+    # MEASURED 2026-11-03, and the mechanism is worse than a missing package.
+    # pyarrow IS installed -- chai_lab's own dependency tree pulls
+    # pyarrow 26.0.1 -- and it is NOT IMPORTABLE:
+    #   ImportError: pyarrow requires NumPy 2.0 or newer, found 1.26.4
+    # chai_lab pins `numpy~=1.21`, so its own two dependencies are mutually
+    # unsatisfiable at import time. pandas then reports the engine as
+    # "Missing optional dependency 'pyarrow'", which sends you looking for an
+    # absent package rather than an unusable one, and `pip install pyarrow`
+    # answers "Requirement already satisfied" and changes nothing.
+    #
+    # So the fix is a DOWNGRADE, not an install. pyarrow 17.0.0 is the last
+    # release that declares numpy>=1.16.6; 18.0.0 onward declare no numpy pin
+    # and enforce numpy>=2 at import.
+    #
+    # --force-reinstall because 26.0.1 already satisfies a bare requirement and
+    # a plain install is a no-op. --no-deps WITH it, because pyarrow 17
+    # declares `numpy>=1.16.6` and a force-reinstall re-resolves that to the
+    # newest numpy: measured 2026-11-03, the first attempt here pulled numpy
+    # 2.5.4 and tripped the numpy assert below. Both flags are load-bearing and
+    # neither is sufficient alone.
+    #
+    # This gap is in the entry as the registry ships it, not something the
+    # torch override above introduced: chai1_2.sif fails the same import. It
+    # surfaced here only because this workstation produces real alignments
+    # through the ColabFold endpoint and hands them to the fold, and a
+    # single-sequence run never reaches the parquet path.
+    pip install --no-cache-dir --force-reinstall --no-deps "pyarrow==17.0.0"
+
+    # Assert PROPERTIES, not imports (tools/README.md).
+    #
+    # USE _cuda_getArchFlags(), NOT get_arch_list(). Measured 2026-11-03: with
+    # no CUDA device visible -- which is every %post, since a build gets no
+    # --nv -- torch.cuda.get_arch_list() returns an EMPTY LIST while
+    # torch._C._cuda_getArchFlags() reads the build metadata and answers
+    # correctly. An assert on the former passes vacuously or fails wrongly
+    # depending on which way you write it, and it fails wrongly here.
+    python - <<'PY'
+import sys
+
+import numpy
+import torch
+
+arch = torch._C._cuda_getArchFlags()
+print("python", sys.version.split()[0], "torch", torch.__version__, "numpy", numpy.__version__)
+print("arch flags:", arch)
+
+major, minor = (int(x) for x in torch.__version__.split(".")[:2])
+assert (major, minor) >= (2, 7), (
+    f"torch {torch.__version__} is inside chai_lab's <2.7 pin, which is the "
+    "version that has no sm_120. The override did not take."
+)
+assert "sm_120" in (arch or ""), (
+    f"no sm_120 in {arch!r}. This image exists ONLY to carry sm_120 kernels; "
+    "without them it is chai1_2 with a dependency conflict."
+)
+assert numpy.__version__.startswith("1."), f"chai_lab wants numpy 1.x, got {numpy.__version__}"
+
+# Assert the parquet ROUND TRIP, not `import pyarrow`. The failure this guards
+# is raised by pandas when it cannot find an engine, so the engine being
+# importable is not the claim -- pandas being able to use it is.
+import tempfile
+
+import pandas as pd
+
+with tempfile.TemporaryDirectory() as _d:
+    _f = _d + "/t.pqt"
+    pd.DataFrame({"sequence": ["ACDE"], "source_database": ["uniref90"]}).to_parquet(_f)
+    assert list(pd.read_parquet(_f)["sequence"]) == ["ACDE"]
+print("parquet round trip ok")
+PY
+
+    # chai_lab defaults CHAI_DOWNLOADS_DIR to <site-packages>/chai_lab/downloads,
+    # which is inside the image and therefore READ-ONLY at run time.
+    mkdir -p /tmp/chai-downloads
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    export CHAI_DOWNLOADS_DIR="${CHAI_DOWNLOADS_DIR:-/tmp/chai-downloads}"
+
+%test
+    set -eu
+    python -c "import chai_lab, torch; print('chai_lab ok, torch', torch.__version__)"
+    command -v chai-lab
+
+    # The whole point of this image, re-checked as an image rather than during %post.
+    python - <<'PY'
+import torch
+arch = torch._C._cuda_getArchFlags()
+assert "sm_120" in (arch or ""), f"no sm_120 in {arch!r}"
+print("arch ok:", arch)
+PY
+
+    test -n "${CHAI_DOWNLOADS_DIR:-}" || { echo "CHAI_DOWNLOADS_DIR unset"; exit 1; }
+    mkdir -p "$CHAI_DOWNLOADS_DIR"
+    touch "$CHAI_DOWNLOADS_DIR/.writable" && rm -f "$CHAI_DOWNLOADS_DIR/.writable" \
+        || { echo "CHAI_DOWNLOADS_DIR=$CHAI_DOWNLOADS_DIR is not writable"; exit 1; }
+    echo "downloads dir $CHAI_DOWNLOADS_DIR is writable"
+
+    # --- templates: the aligner, and that it actually ALIGNS -----------------
+    # A kalign that is present and wrong produces a fold that exits zero and
+    # silently used no templates, because chai_lab turns a non-zero kalign exit
+    # into `return None` and the template loader reads that as "no hit".
+    command -v kalign
+    kalign --version 2>&1 | head -1
+    python - <<'PY'
+from chai_lab.tools.kalign import kalign_query_to_reference
+
+ref = "MKTAYIAKQRQISFVKSHFSRQLEERLGLIEDSEATKG"
+query = "MKTAYIAKQRQISFVKSHFRQLEERLGLIE"
+
+aln = kalign_query_to_reference(ref=ref, query=query)
+assert aln is not None, (
+    "kalign_query_to_reference returned None: kalign ran and failed. This is the "
+    "silent path -- every template hit would be dropped and the fold would still "
+    "exit zero and write a structure."
+)
+assert len(aln.reference_aligned) == len(aln.query_aligned), (
+    f"ragged alignment: {len(aln.reference_aligned)} vs {len(aln.query_aligned)}"
+)
+assert aln.reference_aligned.replace("-", "") == ref, "kalign mangled the reference"
+assert aln.query_aligned.replace("-", "") == query, "kalign mangled the query"
+assert "-" in aln.query_aligned, "expected the shorter query to be gapped against ref"
+print("kalign alignment ok:", aln.query_aligned)
+PY
+
+%runscript
+    exec chai-lab "$@"
+
+%help
+    Chai-1 0.6.1 on torch 2.7.0+cu128, so it runs on sm_120 (Blackwell).
+
+      chpc-tool exec chai1 -- chai-lab fold input.fasta out/
+
+    This image installs torch ONE MINOR VERSION PAST chai_lab's declared
+    `<2.7` ceiling, deliberately, because 0.6.1 is the last release and the
+    versions inside that ceiling ship neither sm_120 kernels nor PTX to JIT
+    from. See the note at the top of the .def.
+
+    A passing test is not permission to believe a fold from this image. Chai-1
+    is the predictor whose wrong attachment moved ipTM by 0.012, so a covalent
+    fold must land in the 1.636-1.770 A warhead band before its results are
+    used.

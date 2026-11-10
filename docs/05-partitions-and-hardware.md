@@ -121,15 +121,95 @@ chpc-tool exec <tool> -- python -c \
 | `esm`, `proteinmpnn`, `ligandmpnn` | 2.14 / cu132 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` |
 | `boltz` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1`, kernels on or off: the cuequivariance Triton kernels compiled and ran on `ggpu1-16` (job 1997377, 2026-09-26) |
 | `openfold3` | 2.14 / cu130 | `sm_75 … sm_100 sm_120` | yes — bare `--gres=gpu:1` (built, not yet verified) |
-| `chai1` | 2.6 / cu124 | `sm_50 … sm_86 sm_90` | **no** |
-| `protenix` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
-| `rfdiffusion3` | 2.7.1 / cu126 | `sm_50 … sm_86 sm_90` | **no** |
-| `rfdiffusion`, `placer` | 2.3.1 / cu121 | `sm_50 … sm_86 sm_90` | **no** |
-| `colabfold` | jax / cu12.2 | — (upstream image, cuda 12.2 predates `sm_120`) | **no** |
-| `intellifold` | jax / cu12.8, no torch | — (9.0 rests on a real 658-token fold on an H100 NVL, 2026-09-25; Blackwell untested) | **no** |
+| `chai1` | 2.7.0 / cu128 | `sm_75 … sm_100 sm_120 compute_120` | yes † — `chai1_3`. `chai1_2` and earlier (2.6 / cu124, `sm_50 … sm_90`): **no** |
+| `protenix` | 2.7.1 / cu128 | `sm_75 … sm_100 sm_120 compute_120` | yes † — `protenix_3`. `protenix_2` and earlier (cu126, `sm_50 … sm_90`): **no** |
+| `rfdiffusion3` | 2.7.1 / cu128 | `sm_75 … sm_100 sm_120 compute_120` | yes † — `rfdiffusion3_0.2.0_cu128`. The cu126 recipe: **no** |
+| `colabfold` | jax / cu13 | — (upstream `1.6.2-cuda13`) | yes † — the `1.5.5` recipe (cuda 12.2, predates `sm_120`): **no**, it enumerates the device and dies with `CUDA_ERROR_INVALID_IMAGE` |
+| `intellifold` | jax / cu12.8, no torch | — | yes † — never a rebuild: the ceiling was 9.0 because nothing above it had been tried, not because a measurement said so |
+| `rfdiffusion`, `placer` | 2.3.1 / cu121 | `sm_50 … sm_86 sm_90` | **no**, and not rebuildable today — see below |
 
 `sm_120` present means the image is safe on every `gpu` node. Absent, it needs
 `--gres=gpu:nvidia_l40s:1` or `--exclude=ggpu1-[13-19]`.
+
+† **The sm_120 evidence for these five is a workstation, not this cluster**, and
+the distinction is the whole reason `GPU_TESTED` is a separate field from
+`GPU_MAX_CC`. Each was built and then passed its own `chpc-tool test` on an
+**RTX 5090** (cc 12.0, `sm_120`) on 2026-11-03, re-confirmed for `chai1` and
+`protenix` on 2026-11-09: a real fold, bond where it was declared, not merely an
+arch-flag read. That is what the column above asks — the rule is `sm_120`
+presence, and a 5090 and an RTX PRO 6000 are both `sm_120` / cc 12.0, so the
+kernels that run on one run on the other. But **no `ggpu1-[13-19]` job has
+exercised any of these five**, so their `GPU_TESTED` names
+`nvidia_geforce_rtx_5090` and not `nvidia_rtx_pro_6000`, and the first cluster
+Blackwell round is still the measurement that would close it. Note also that
+neither evidenced class is an H100 NVL (cc 9.0), which sits *between* the L40S
+and Blackwell: the ceiling admits it and nothing here has run on it.
+
+**`sm_120` in the arch flags is necessary and not sufficient, and the second
+requirement is a C compiler.** Triton JIT-compiles its `cuda_utils` module at
+the first kernel launch by shelling out to one. Its wheels carry prebuilt
+kernels for `sm_89`, so on an L40S an image with no compiler works fine; on
+`sm_120` there are none, the JIT path is the only path, and the job dies with
+`RuntimeError: Failed to find C compiler. Please specify via CC environment
+variable.` — which reads like a broken image rather than a placement problem,
+exactly like the missing-kernel error it replaces.
+
+Measured 2026-11-09 on an RTX 5090: `rfdiffusion3_0.2.0_cu128` passed its own
+entry test and then failed a real fold at 17 s this way. The entry test
+exercises the *design* path and the consuming project's adapter exercises
+*folding*; only folding reaches Triton. Fixed by installing `build-essential`
+in the def. **So when checking a torch image for Blackwell, ask two questions,
+not one:** does `_cuda_getArchFlags()` contain `sm_120`, and can python inside
+the image find a C compiler —
+
+```bash
+chpc-tool exec <tool> -- python -c \
+  "import os,shutil; print(os.environ.get('CC') or shutil.which('cc'))"
+```
+
+`None` there means any Triton kernel will fail on a Blackwell node and nowhere
+else. It costs nothing to check and it is invisible on every other device.
+
+**Every GPU image here was swept that way on 2026-11-09, and one answers
+`None`.** The question is a pair, so the table is:
+
+| image | C compiler | Triton | verdict |
+|---|---|---|---|
+| `boltz_2_gcc` | `/usr/bin/cc` | 3.9.0 | immune |
+| `protenix_3` | `/usr/bin/cc` | 3.3.1 | immune |
+| `rfdiffusion3_0.2.0_cu128` | `/usr/bin/cc` | 3.3.1 | immune, and this is the fix |
+| `openfold3_3` | `/usr/bin/cc` | 3.9.0 | immune |
+| `intellifold_2` | `/usr/bin/cc` | — | immune |
+| `colabfold_1.6.2` | **none** | — (jax 0.10.2) | no Triton to compile; XLA carries its own LLVM |
+| `chai1_3` | **none** | 3.3.0 | **latent**: see below |
+
+`chai1_3` carries Triton and no compiler, and it folds on `sm_120` anyway —
+eleven covalent folds of the real target on an RTX 5090 on 2026-11-09, plus its
+own registry test. So nothing on its fold path compiles a Triton kernel today,
+and the hazard is a dependency rather than a failure: a chai-lab release that
+starts using one, or a code path these folds do not take, would die at the first
+kernel launch with the error above and no other symptom.
+
+It is deliberately **not** fixed by a rebuild yet, because the cost is not the
+build. `container_digest` feeds `environment_fingerprint` and so `spec_id`, so a
+new chai1 image orphans every Chai-1 prediction banked against this one — the
+345 from the 2026-09 cluster round and today's. That is a decision for whoever
+owns the corpus, and it is cheap to defer: the measurement above is the warning,
+and `build-essential` is three lines in the def when the time comes. What is not
+acceptable is finding out from a job.
+
+Probing `colabfold` and `intellifold` needs the entry point's own interpreter
+rather than whatever `python` resolves to — `intellifold`'s is
+`/opt/venv/bin/python` (its own `#!` line says so) and `colabfold_batch`'s is
+`/usr/local/bin/python3.12`. A bare `python` answered for a different
+interpreter in both images, which is its own small lesson about one-line probes:
+read the entry's shebang, do not assume the PATH.
+
+`rfdiffusion` and `placer` are blocked upstream rather than unattempted. Both
+need DGL, whose newest published wheel targets torch 2.6 on cu124, while cu128
+support starts at torch 2.7.0 — there is no overlapping version to rebuild
+into, so these two keep `--gres=gpu:nvidia_l40s:1` until DGL ships a cu128
+build. Checked 2026-11-03.
 
 The `#SBATCH` line is the real fix, because it decides where the job lands.
 But it only protects jobs that go through a wrapper, and the failure it
@@ -152,6 +232,14 @@ Declared today (2026-09-25) at 9.0 by `chai1`, `colabfold`, `intellifold`,
 `placer`, `protenix`, `rfdiffusion` and `rfdiffusion3`, and at 12.0 by
 `openfold3`. It is a backstop for interactive use and copied commands, not
 a replacement for the header.
+
+That inventory is the 2026-09-25 state and is kept as written. **As of
+2026-11-03 only `placer` and `rfdiffusion` are still at 9.0**: `chai1`,
+`colabfold`, `intellifold`, `protenix` and `rfdiffusion3` are at 12.0, four of
+them on new recipes and `intellifold` on a measurement it had never been given.
+Read `GPU_MAX_CC` out of the entry rather than from this paragraph —
+`chpc-tool show <tool> --env` is the current answer, and a list in prose is
+exactly the thing that goes stale between a rebuild and the next reader.
 
 Verified on an L40S (`ggpu1-06`, compute capability 8.9), job 1899113, with
 three copies of one known-good image differing only in `GPU_MAX_CC`:

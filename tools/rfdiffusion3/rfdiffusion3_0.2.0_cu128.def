@@ -1,0 +1,195 @@
+Bootstrap: docker
+From: rosettacommons/foundry:0.2.0-slim
+
+# RFdiffusion3 0.2.0 -- on a cu128 torch, so it runs on sm_120.
+#
+# REBUILD of rfdiffusion3_0.2.0 for Blackwell, 2026-11-03. That file is kept
+# beside this one because it is what every RFdiffusion3 number this lab holds
+# was produced with.
+#
+# ── THE CHANGE IS THE CUDA BUILD, NOT THE VERSION ─────────────────────────
+#
+# Upstream's slim image ships torch 2.7.1+cu126, and cu126 predates Blackwell.
+# Measured in the base 2026-11-03, the arch list carries sm_50 through sm_90
+# with NO `compute_*` entry, so there is no PTX for the driver to JIT forward
+# and sm_120 is not a slow path, it is no path.
+#
+# PyTorch publishes 2.7.1 for cu128 as well, so this installs the SAME torch
+# version from a different CUDA index:
+#   torch==2.7.1+cu126  ->  torch==2.7.1+cu128
+# That is the whole diff. It is worth saying plainly because every other
+# sm_120 rebuild in this registry moves a version and therefore owes a
+# chemistry re-check: this one does not move the version at all, so the
+# python-level API foundry resolved against is byte-identical and the only
+# thing that changed is which GPU architectures the kernels were compiled for.
+#
+# WHAT STILL HAS TO BE CHECKED, and it is asserted below. foundry pins
+# cuequivariance CUDA-12 wheels alongside its torch. cu128 is still CUDA 12, so
+# those wheels should keep loading, but "should" is how this registry gets
+# surprised, so %post imports them and the console scripts rather than assuming.
+#
+# Still the `slim` variant, WITHOUT checkpoints: the 14.6 GB of weights belong
+# on the share, where refreshing them does not mean rebuilding an 18 GB image.
+#
+# Build:  chpc-tool build rfdiffusion3
+
+%labels
+    Tool         rfdiffusion3
+    Version      0.2.0
+    Upstream     https://github.com/RosettaCommons/foundry
+    UpstreamRef  rc-foundry==0.2.0, torch 2.7.1 moved from cu126 to cu128
+    Licence      BSD-3-Clause
+    Base         rosettacommons/foundry:0.2.0-slim
+    GPUArch      includes sm_120 -- asserted at build time, see %post
+    Rebuild      2026-11-03, torch 2.7.1+cu128 for sm_120
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+
+    # A C COMPILER, and it is not optional on Blackwell. Triton JIT-compiles
+    # its own `cuda_utils` module at RUNTIME, the first time a kernel launches,
+    # by shelling out to a C compiler -- and the foundry base ships none, nor
+    # does the cu126 image. On an L40S that never fired, because the Triton
+    # wheel carries prebuilt kernels for sm_89; on sm_120 it has none, so the
+    # JIT path is the only path and the fold dies with
+    #
+    #   RuntimeError: Failed to find C compiler. Please specify via CC
+    #   environment variable.
+    #
+    # MEASURED 2026-11-09: this killed a real rf3 fold on an RTX 5090 at 17 s,
+    # through the consuming project's own adapter, while `chpc-tool test
+    # rfdiffusion3` passed on the same device. The test exercises the DESIGN
+    # path and the adapter exercises FOLDING, and only the latter reaches
+    # Triton -- so the entry's own test cannot stand in for this.
+    #
+    # build-essential rather than gcc alone: Triton's build helper links
+    # against libpython and wants the usual headers, and the delta is small
+    # next to a 4.5 GB image.
+    apt-get update
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        build-essential
+    rm -rf /var/lib/apt/lists/*
+    cc --version | head -1
+
+    # What the base gave us, before we touch it. NOTE the call: this image
+    # answers torch.cuda.get_arch_list() with [] -- an empty list, despite
+    # torch.version.cuda being 12.6 -- while torch._C._cuda_getArchFlags()
+    # answers correctly with no device present. The registry's own measurement
+    # used the latter, and so does every assert below. Measured 2026-11-03.
+    python -c "import torch; print('base torch:', torch.__version__, torch.version.cuda, torch._C._cuda_getArchFlags())"
+
+    # THERE IS NO PIP IN THIS IMAGE, and no uv or conda either: foundry ships a
+    # uv-created venv at /app/foundry/.venv and does not install the installer.
+    # `pip install` in a %post here dies with `pip: not found`, exit 127.
+    # ensurepip is present (25.0.1), so bootstrap it into that same venv rather
+    # than reaching for a second python.
+    python -m ensurepip --upgrade
+    python -m pip --version
+
+    # Same version, cu128 build. Deps come from the cu128 index too, which is
+    # where the matching nvidia-*-cu12 runtime wheels live; taking torch alone
+    # with --no-deps would leave it against cu126 libraries.
+    python -m pip install --no-cache-dir \
+        --index-url https://download.pytorch.org/whl/cu128 \
+        "torch==2.7.1+cu128"
+
+    # Assert PROPERTIES, not imports (tools/README.md). get_arch_list() reads
+    # build metadata and needs no device, so this is checkable at build time.
+    python - <<'PY'
+import sys
+
+import torch
+
+arch = torch._C._cuda_getArchFlags()
+print("python", sys.version.split()[0], "torch", torch.__version__, "cuda", torch.version.cuda)
+print("arch flags:", arch)
+
+assert torch.__version__.startswith("2.7.1"), (
+    f"expected torch 2.7.1 so the API matches what foundry pinned, got {torch.__version__}"
+)
+assert "+cu128" in torch.__version__, (
+    f"expected the cu128 build, got {torch.__version__}. The override did not take."
+)
+assert "sm_120" in (arch or ""), (
+    f"no sm_120 in {arch!r}. This image exists ONLY to carry sm_120 kernels; "
+    "without them it is rfdiffusion3_0.2.0 with a reinstalled torch."
+)
+PY
+
+    # The thing a version-identical swap could still break: foundry's CUDA
+    # extension wheels were built against the cu126 torch.
+    python - <<'PY'
+import importlib
+
+for mod in ("cuequivariance", "cuequivariance_torch", "cuequivariance_ops_torch_cu12"):
+    try:
+        importlib.import_module(mod)
+        print("import ok:", mod)
+    except ImportError as exc:
+        print("absent (not fatal if foundry does not use it):", mod, exc)
+PY
+
+    # Triton's runtime JIT must be able to find a compiler, asserted through
+    # the EXACT lookup triton/runtime/build.py performs -- os.environ["CC"]
+    # first, then shutil.which over a candidate list. Asserting `cc --version`
+    # in the shell would pass on an image where triton still fails, because the
+    # shell's PATH and the python process's are not required to agree.
+    #
+    # It stops at compiler discovery on purpose. The next step, CudaUtils(),
+    # needs a live CUDA driver, which a login node or a build host does not
+    # have -- so this is the most that is honestly checkable at build time, and
+    # the fold itself is still what qualifies the image.
+    python - <<'PY'
+import os
+import shutil
+
+cc = os.environ.get("CC") or shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")
+assert cc, (
+    "no C compiler visible to python. Triton JIT-compiles cuda_utils at the "
+    "first kernel launch and dies with 'Failed to find C compiler'; on sm_120 "
+    "there are no prebuilt kernels, so that path is not optional."
+)
+print("triton will find a C compiler at:", cc)
+
+import triton
+print("triton", triton.__version__)
+PY
+
+    # And the console scripts, which is what a design job actually invokes.
+    for s in rfd3 rf3 mpnn foundry; do command -v "$s"; done
+    python -c "import sys; assert sys.version_info[:2] == (3, 12), sys.version"
+
+    { echo "base: rosettacommons/foundry:0.2.0-slim"; \
+      echo "torch: 2.7.1+cu128 (reinstalled over cu126 for sm_120)"; \
+      date -u +%Y-%m-%dT%H:%M:%SZ; } > /opt/.built-from
+
+%environment
+    export LC_ALL=C.UTF-8
+    export PYTHONNOUSERSITE=1
+    # FOUNDRY_CHECKPOINT_DIRS is deliberately NOT set here -- it names a
+    # location on this site's share, which the registry owns. foundry's own
+    # default is ~/.foundry/checkpoints, which would put 14.6 GB on a home quota.
+
+%test
+    set -eu
+    python - <<'PY'
+import torch
+arch = torch._C._cuda_getArchFlags()
+assert "sm_120" in (arch or ""), f"no sm_120 in {arch!r}"
+print("torch", torch.__version__, "arch ok:", arch)
+PY
+    rfd3 --help > /dev/null
+    foundry list-available > /dev/null
+
+%runscript
+    exec rfd3 "$@"
+
+%help
+    RFdiffusion3 0.2.0 on torch 2.7.1+cu128, so it runs on sm_120 (Blackwell).
+
+      chpc-tool exec rfdiffusion3 -- rfd3 --help
+
+    Identical to the rfdiffusion3_0.2.0 entry except that torch is the cu128
+    build of the SAME 2.7.1 version, so no python API moved. Checkpoints are
+    not in the image; point FOUNDRY_CHECKPOINT_DIRS at the share.

@@ -1,0 +1,77 @@
+Bootstrap: docker
+From: ghcr.io/sokrypton/colabfold:1.6.2-cuda13
+
+# ColabFold 1.6.2 -- AlphaFold2 with fast MMseqs2-based MSAs.
+#
+# REBUILD of colabfold_1.5.5 onto a CUDA 13 upstream tag, 2026-11-03, so the
+# entry runs on Blackwell. colabfold_1.5.5.def is kept beside this one because
+# it is what every ColabFold number this lab holds was produced with, and a
+# recipe you can no longer read is provenance you no longer have.
+#
+# WHY. 1.5.5's tag is cuda12.2, and that is not merely "old": MEASURED on an
+# RTX 5090 (sm_120, cc 12.0) 2026-11-03, jax 0.4.20 / jaxlib 0.4.14 inside
+# colabfold_1.5.5.sif enumerates the device fine --
+#   devices: [gpu(id=0)]
+# -- and then dies on the first kernel launch with
+#   XlaRuntimeError: INTERNAL: Failed to execute XLA Runtime executable:
+#   custom call 'xla.gpu.func.launch' failed: Failed to load PTX text as a
+#   module: CUDA_ERROR_INVALID_IMAGE: device kernel image is invalid
+# on a `jnp.ones((512,512)) @ itself`. So this is not a missing-kernel problem
+# that PTX forward-compatibility rescues: jaxlib 0.4.14's embedded PTX is
+# itself too old for the sm_120 driver to accept. Enumerating a device is not
+# the same as being able to run on it, which is the general lesson and the
+# reason GPU_MAX_CC is measured rather than inferred from a tag.
+#
+# A PULL, NOT A BUILD, exactly as 1.5.5 is: upstream publishes a working CUDA
+# image and there is nothing the lab needs to add. The recipe exists so the
+# image has provenance in git and survives a scratch purge, which a bare
+# `apptainer pull` in somebody's shell history does not.
+#
+# TWO THINGS THIS CHANGES BEYOND THE ARCH, and neither is cosmetic. It is a
+# tool VERSION bump, 1.5.5 -> 1.6.2, so any MSA recipe naming
+# `tool.version: 1.5.5` describes the other image and not this one; moving a
+# campaign between them is a recipe change with its own recipe_id, never a
+# fallback. And the image digest changes, so in Hap108or every spec_id folding
+# in container_digest is new work rather than a cache hit.
+#
+# Build:  chpc-tool build colabfold
+
+%labels
+    Tool         colabfold
+    Version      1.6.2
+    Upstream     https://github.com/sokrypton/ColabFold
+    UpstreamRef  ghcr.io/sokrypton/colabfold:1.6.2-cuda13
+    Licence      MIT (code); AlphaFold2 weights CC-BY-4.0
+    Base         ghcr.io/sokrypton/colabfold:1.6.2-cuda13
+    Rebuild      2026-11-03, CUDA 13 for sm_120
+    Maintainer   Craik Lab, UCSF
+
+%post
+    set -eux
+    # Assert the entry point is where we think it is. Nothing else to do.
+    command -v colabfold_batch
+
+%environment
+    export LC_ALL=C.UTF-8
+
+%test
+    set -eu
+    colabfold_batch --help > /dev/null
+
+%runscript
+    exec colabfold_batch "$@"
+
+%help
+    ColabFold 1.6.2 on CUDA 13.
+
+      chpc-tool exec colabfold -- colabfold_batch in.fasta out/
+
+    Runs on sm_120 unlike the 1.5.5 entry; see the note at the top of the .def
+    for what was measured and what the version bump costs.
+
+    --use_msa_server sends sequences to a PUBLIC remote MSA server. For
+    unpublished designs, fetch MSAs locally with the mmseqs2 entry instead.
+
+    Weights download on first use into the image's own cache path, which is
+    read-only here; pass --data "$COLABFOLD_DATA" and populate it once with
+    tools/colabfold/fetch-weights.sh.
