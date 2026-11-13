@@ -525,6 +525,33 @@ Scheduler values in particular never appear in this directory. They live in the
 `#SBATCH` headers of the submitting project's job scripts, which are the only things
 `sbatch` ever sees.
 
+### An entry records no image digest, and a consumer's cache needs one
+
+Measured 2026-11-13, in Hap108or. An entry pins `VERSION`, `UPSTREAM_REF` and
+`IMAGE` -- a filename -- and that is not enough for a consuming project to tell
+two builds apart. The convention that a rebuild gets a new numbered file
+(`chai1_1` -> `chai1_2` -> `chai1_3`) is a convention and nothing enforces it:
+`chai1_3.sif` and `protenix_3.sif` were both rebuilt **in place** from edited
+`.def` files on 2026-11-09, same filenames, same `VERSION`, different bytes.
+Nor are two hosts' copies of one filename known to be the same bytes -- those
+rebuilds happened on a workstation, and the share's copies are whatever was
+published last.
+
+The consequence lands in the consumer: Hap108or folds a target, banks the
+result under an identity that folds in what it knows about the tool, and reuses
+it. With only a version and a filename to go on, a rebuild is invisible to that
+cache -- its folds from before and after are indistinguishable. (Its own `h8
+plan` made this worse by defaulting the tool version to a constant; that half is
+fixed there. See its ADR 0027.)
+
+**What to add when somebody does this:** a `DIGEST=` line per container entry,
+written by `chpc-tool build` and `chpc-tool publish` -- at the point the image is
+produced or copied to the share, never recomputed later from whatever copy is
+lying around -- surfaced by `chpc-tool show --env` like every other field, and in
+git, so a rebuild is a diff somebody reviews. The one entry that documents a
+reason to rebuild and is deliberately not being rebuilt (`chai1`, for its Triton
+hazard) explains in its own `tool.conf` why it waits on this.
+
 ### An entry is not an image
 
 Six of 34 entries are `STATUS=planned` (2026-09-27): the catalogue records a tool

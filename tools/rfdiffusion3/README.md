@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Status | verified 2026-09-27 on `ggpu1-10` (NVIDIA L40S) in 1 m 50 s, and on `ccpu1-04` (CPU) in 8 m 42 s — `chpc-tool test rfdiffusion3` designs a 60-residue backbone and then a 120-residue de novo scaffold around the P1B7 sotorasib-modified cysteine, with the covalent bond intact on both |
-| Image | `rfdiffusion3_0.2.0.sif`, 3.65 GB, no weights inside; recipe [`rfdiffusion3_0.2.0.def`](rfdiffusion3_0.2.0.def) |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`). Never a bare `--gres=gpu:1`. **Runs on CPU too**, correctly; the same test takes 1 m 50 s on an L40S against 8 m 42 s on 16 CPU cores |
+| Image | `rfdiffusion3_0.2.0_cu128.sif`, no weights inside; recipe [`rfdiffusion3_0.2.0_cu128.def`](rfdiffusion3_0.2.0_cu128.def), rebuilt 2026-11-03 for torch on cu128 and `sm_120`, with `build-essential` added 2026-11-09 for the reason below. [`rfdiffusion3_0.2.0.def`](rfdiffusion3_0.2.0.def) is the cu126 recipe and its image is no longer the entry's |
+| GPU | `GPU_MAX_CC=12.0` as of the cu128 entry, measured in the built image, so a bare `--gres=gpu:1` is correct for it. Exercised on `nvidia_l40s` and `nvidia_geforce_rtx_5090`. **`sm_120` in the arch flags was necessary and not sufficient**: Triton JIT-compiles `cuda_utils` at the first kernel launch by shelling out to a C compiler, its wheels carry prebuilt kernels for `sm_89` and none for `sm_120`, so this image passed its own entry test on an RTX 5090 and died at 17 s on a real fold with `RuntimeError: Failed to find C compiler`. The cu126 recipe stops at `sm_90` with no `compute_*` entry, so Blackwell was no path there rather than a slow one. **Runs on CPU too**, correctly; the same test takes 1 m 50 s on an L40S against 8 m 42 s on 16 CPU cores |
 | Weights | 5.7 GB at `$FOUNDRY_CHECKPOINT_DIRS` (`$CHPC_LAB/data/rfdiffusion3`) for the default `rfd3 rf3`; 14.6 GB if you ask for `all`. Fetched by [`fetch-weights.sh`](fetch-weights.sh) on the login node |
 | Licence | BSD-3-Clause, code and weights; commercial use permitted |
 | Upstream | `rosettacommons/foundry:0.2.0-slim`, `rc-foundry==0.2.0` |

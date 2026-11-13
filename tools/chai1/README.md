@@ -213,8 +213,8 @@ reading logs, recovering from errors, and archiving to permanent storage.
 | | |
 |---|---|
 | Status | verified 2026-09-25 on an L40S (`chpc-tool test chai1`, job 1986672, `ggpu1-06`, 87 s, two cases) |
-| Image | `chai1_2.sif`, 3.48 GB, no weights; recipe [`chai1_2.def`](chai1_2.def), rebuilt 2026-09-24 to add kalign |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`, measured: no `sm_120`). Never a bare `--gres=gpu:1`. |
+| Image | `chai1_3.sif`; recipe [`chai1_3.def`](chai1_3.def), rebuilt 2026-11-03 for torch 2.7.0+cu128 and `sm_120`. [`chai1_2.def`](chai1_2.def) added kalign 2026-09-24 and [`chai1_1.def`](chai1_1.def) is the original; neither image is the entry's |
+| GPU | `GPU_MAX_CC=12.0`: measured `sm_75 sm_80 sm_86 sm_90 sm_100 sm_120 compute_120` inside `chai1_3.sif`, so Blackwell is admitted and a bare `--gres=gpu:1` is correct for it. Exercised on `nvidia_l40s` and `nvidia_geforce_rtx_5090`; the H100 still has not been. **`chai1_2.sif` did not run on Blackwell** — `sm_50..sm_90` with no `compute_*` entry at all, so neither kernels nor PTX, confirmed on an RTX 5090 2026-11-03 where a plain matmul fails with `no kernel image is available for execution on the device`. |
 | Weights | 6.2 GB at `$CHAI_DOWNLOADS_DIR` (`$CHPC_LAB/data/chai1`), fetched by [`fetch-weights.sh`](fetch-weights.sh); three parts, see Traps |
 | Licence | Apache-2.0, code **and** weights |
 | Upstream | `chai_lab==0.6.1` (PyPI) |

@@ -215,9 +215,9 @@ absolute `pairedMsaPath`/`unpairedMsaPath` entries instead of disabling MSAs.
 | | |
 |---|---|
 | Status | verified 2026-09-25 on an L40S (`chpc-tool test protenix`, job 1986816, `ggpu1-09`, 140 s, three cases) |
-| Image | `protenix_2.sif`; recipe [`protenix_2.def`](protenix_2.def). [`protenix_1.def`](protenix_1.def) is the pre-template recipe; its image is no longer the entry's |
+| Image | `protenix_3.sif`; recipe [`protenix_3.def`](protenix_3.def), rebuilt 2026-11-03 to carry `sm_120` in the fused LayerNorm. [`protenix_2.def`](protenix_2.def) added templates and [`protenix_1.def`](protenix_1.def) predates them; neither image is the entry's |
 | Base | `nvidia/cuda:12.6.3-cudnn-devel-ubuntu24.04`; protenix 1.1.0 in `/opt/venv`, torch 2.7.1+cu126, kalign 3.4.0 from source |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`, no `sm_120`). Never a bare `gpu:1` |
+| GPU | `GPU_MAX_CC=12.0` as of `protenix_3`, measured in the built image (`protenix_2` and earlier answer 9.0), so a bare `--gres=gpu:1` is correct for it. Exercised on `nvidia_l40s` and `nvidia_geforce_rtx_5090`. The arch flags were necessary and not sufficient: `torch_ext_compile.py` builds its own gencode list from a hardcoded `_wanted`, so the fused LayerNorm had to be patched to emit `sm_120.cubin` as well |
 | Weights | the `protenix_base_default_v1.0.0` checkpoint, the CCD and the template tables at `$PROTENIX_ROOT_DIR` (`$CHPC_LAB/data/protenix`), fetched by [`fetch-weights.sh`](fetch-weights.sh) on the login node, last run 2026-09-25 |
 | Licence | code Apache-2.0; **v1 parameters Apache-2.0, commercial use permitted**. v2 weights are proprietary and are refused by `fetch-weights.sh`, `tool_doctor` and `test.sh` |
 | Upstream | <https://github.com/bytedance/Protenix>, `protenix==1.1.0` on PyPI (2.0.0 is the v2 generation) |

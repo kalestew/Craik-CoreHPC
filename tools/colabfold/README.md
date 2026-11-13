@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | Status | verified 2026-09-26 on an L40S (`ggpu1-08`, job 2000973): `chpc-tool test colabfold`, a 31-mer at mean pLDDT 91.3, 39 s |
-| Image | `colabfold_1.5.5.sif`, 3.10 GB, no weights; recipe [`colabfold_1.5.5.def`](colabfold_1.5.5.def) |
-| GPU | `--gres=gpu:nvidia_l40s:1` or `--gres=gpu:nvidia_h100_nvl:1` (`GPU_MAX_CC=9.0`: cuda12.2 has no `sm_120`). Never a bare `gpu:1` |
+| Image | `colabfold_1.6.2.sif`, no weights; recipe [`colabfold_1.6.2.def`](colabfold_1.6.2.def), pulled 2026-11-03 for a CUDA 13 jaxlib that runs on Blackwell. [`colabfold_1.5.5.def`](colabfold_1.5.5.def) is kept beside it and its image is no longer the entry's |
+| GPU | `GPU_MAX_CC=12.0` as of the 1.6.2 entry, measured on an RTX 5090 2026-11-03, so a bare `--gres=gpu:1` is now correct for it. Exercised on `nvidia_geforce_rtx_5090` only — the L40S runs recorded above were the 1.5.5 image. **1.5.5 does not run on Blackwell**: its jaxlib enumerates the device and then dies with `CUDA_ERROR_INVALID_IMAGE` on the first launch |
 | Weights | 5.0 GB at `$COLABFOLD_DATA` (`$CHPC_LAB/data/colabfold`): `alphafold2_ptm` and `alphafold2_multimer_v3`, fetched on the login node by [`fetch-weights.sh`](fetch-weights.sh) |
 | Licence | MIT (code); AlphaFold2 parameters CC-BY-4.0 |
 | Upstream | `ghcr.io/sokrypton/colabfold:1.5.5-cuda12.2.2` |
