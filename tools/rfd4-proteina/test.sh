@@ -550,7 +550,21 @@ out, manifest = sys.argv[1], json.load(open(sys.argv[2]))
 lig, bond = manifest["ligand"], manifest["bond"]
 deposited = bond["reference_distance_angstrom"]
 
-aa = parse(out)["atom_array"]
+# atomworks.io.parse returns a DICT of assemblies/asym_unit/chain_info/..., and
+# `asym_unit` is an AtomArrayStack rather than an AtomArray -- so `["atom_array"]`
+# is a KeyError and a bare stack is an IndexError two calls later. Measured
+# 2026-11-17; the keys are
+# ['assemblies', 'asym_unit', 'chain_info', 'extra_info', 'ligand_info', 'metadata'].
+# Note this is also a DIFFERENT parse from the composition stage's
+# `load_condition_spec_inputs(as_annotated_cif=True)`: on the same file the
+# default preset gave 9698 atoms against 9497, because add_missing_atoms re-adds
+# what finding (1) is about. For a placement check that does not matter -- the
+# added atoms are hydrogens with no coordinates -- but do not compare the two
+# counts and conclude something moved.
+parsed = parse(out)
+aa = parsed["asym_unit"]
+if hasattr(aa, "stack_depth"):
+    aa = aa[0]
 print("chains in the output:", sorted(set(aa.chain_id.tolist())))
 
 # Whether the hapten's atoms come back AT ALL is the first open question: the
