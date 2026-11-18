@@ -7,7 +7,9 @@
 #   chpc-tool path <tool>                   the image or install path, for scripts
 #   chpc-tool export <tool>...              plain assignments for a project site.conf
 #   chpc-tool exec <tool> [--] <cmd>...     run a command through the right runtime
-#   chpc-tool doctor [<tool>...]            is it really there, and really working
+#   chpc-tool doctor [--deep] [<tool>...]   is it really there, and really working
+#                                           --deep also re-hashes every image
+#                                           that records a DIGEST (slow)
 #   chpc-tool test <tool>...                run the entry's test.sh (what STATUS=verified means)
 #
 # STATUS: planned -> built -> verified, plus `external` for a tool that is
@@ -76,7 +78,19 @@ fi
 : "${CHPC_ON_CLUSTER:=0}"
 
 # --- loading an entry ---------------------------------------------------------
-_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC GPU_TESTED"
+# DIGEST is the image's published content digest, `<algo>:<hex>`, recorded
+# where the image is BUILT or FETCHED and never computed here. sha256 over a
+# 4 GB .sif on NFS is minutes, and a registry command that is run casually
+# cannot afford it -- which is exactly the objection that left the consuming
+# project's identity gap open: a container rebuilt under an unchanged VERSION
+# is invisible to a cache key, and the coordinator has no way to tell.
+#
+# Only an entry whose upstream PUBLISHES a digest can fill this honestly.
+# rfd4-proteina is the first (a .sha256 sidecar beside the image), and an entry
+# built locally from a .def leaves it empty rather than hashing its own output,
+# because a digest of one host's copy says nothing about what anyone else runs.
+# Empty is therefore the ordinary value and is not a defect.
+_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE DIGEST GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC GPU_TESTED"
 
 # Helpers a tool.conf may call from tool_exports / tool_doctor.
 # Where an image would live, in each of the two places it can live.
@@ -308,6 +322,20 @@ cmd_show() {
     case "$KIND" in
       container)
         printf 'image       %s\n' "$(_image_path)"
+        # A published digest, when upstream publishes one. Printed next to the
+        # image because that is the pair a reader wants: which file, and which
+        # bytes it is supposed to be. Phrased rather than left as "-" so an
+        # empty value does not read as an omission to go and fill in.
+        #
+        # Built as a variable first on purpose: a `${DIGEST:-...}` default
+        # holding an apostrophe is parsed as an OPENING QUOTE by bash even
+        # inside double quotes, which swallowed the rest of this file and
+        # reported the syntax error 130 lines further down in cmd_exec.
+        if [ -n "${DIGEST:-}" ]; then
+          printf 'digest      %s\n' "$DIGEST"
+        else
+          printf 'digest      not published upstream; a local build would digest one host copy\n'
+        fi
         printf 'gpu (--nv)  %s\n' "$([ "$GPU" = 1 ] && echo yes || echo no)"
         [ -n "${GPU_MAX_CC:-}" ] && printf 'gpu max cc  %s  (ask for --gres=gpu:nvidia_l40s:1 or nvidia_h100_nvl:1, never a bare gpu:1)\n' "$GPU_MAX_CC"
         # A ceiling is not a measurement. GPU_MAX_CC says what will not die of a
@@ -630,6 +658,43 @@ _doctor_one() {
       if [ -n "$_dm" ] && [ "$_sif" != "$_dm" ]; then
         _drift=" [not in the scratch mirror -- run chpc-stage-containers]"
       fi
+      # DIGEST re-verification, only under --deep. sha256 over a 4 GB .sif on
+      # NFS is minutes and doctor is run casually across the whole registry, so
+      # a default-on check here would simply stop being run -- which is worse
+      # than no check. Under --deep it answers the one question a recorded
+      # digest exists to answer: are these the bytes upstream published, or did
+      # a rebuild, a partial transfer or a scratch purge-and-refetch put
+      # something else at this path under the same name?
+      if [ -n "${DIGEST:-}" ] && [ "${CHPC_DOCTOR_DEEP:-0}" = "1" ]; then
+        _dalg=${DIGEST%%:*}; _dwant=${DIGEST#*:}
+        case "$_dalg" in
+          sha256) _dcmd="sha256sum" ;;
+          sha512) _dcmd="sha512sum" ;;
+          *) _dcmd="" ;;
+        esac
+        if [ -z "$_dcmd" ]; then
+          _drow "$NAME" "FAIL" "DIGEST declares algorithm '$_dalg', which this script cannot compute"
+          return 1
+        fi
+        if ! command -v "$_dcmd" >/dev/null 2>&1; then
+          _drift="$_drift [--deep: no $_dcmd on this host, digest unverified]"
+        else
+          _dgot=$("$_dcmd" "$_sif" | cut -d' ' -f1)
+          if [ "$_dgot" != "$_dwant" ]; then
+            _drow "$NAME" "FAIL" "image does not match the recorded DIGEST
+                 at:       $_sif
+                 recorded: $_dalg:$_dwant
+                 measured: $_dalg:$_dgot
+               These are not the bytes this entry says it runs. Anything already
+               computed with this image is recorded under the recorded digest and
+               was NOT produced by this file. Re-fetch, or correct DIGEST if the
+               image was deliberately replaced -- and treat the earlier results as
+               having an unknown provenance either way."
+            return 1
+          fi
+          _drift="$_drift [digest verified]"
+        fi
+      fi
       _where="$_sif" ;;
     native)
       [ -n "${PREFIX:-}" ] || { _drow "$NAME" "FAIL" "KIND=native but PREFIX is unset"; return 1; }
@@ -691,9 +756,23 @@ _check_shared_env() {
 }
 
 cmd_doctor() {
+  # --deep adds the one check that costs real time: re-hashing every image that
+  # records a DIGEST. Exported rather than passed, because _doctor_one runs in a
+  # subshell per entry and reports through its exit status.
+  CHPC_DOCTOR_DEEP=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --deep) CHPC_DOCTOR_DEEP=1; shift ;;
+      --)     shift; break ;;
+      -*)     die "chpc-tool doctor: unknown option '$1'" ;;
+      *)      break ;;
+    esac
+  done
+  export CHPC_DOCTOR_DEEP
   if [ $# -eq 0 ]; then set -- $(_all_tools); fi
   _ok=0; _skip=0; _bad=0
   echo "tool registry: $TOOLS"
+  [ "$CHPC_DOCTOR_DEEP" = 1 ] && echo "--deep: re-hashing every image that records a DIGEST (minutes per GB on NFS)"
   _check_shared_env
   if [ "$CHPC_ON_CLUSTER" != "1" ]; then
     echo "not on a CoreHPC node: the paths below are where things WOULD be, and"
