@@ -5,9 +5,13 @@ structure, released 2026-10-19 under BSD-3-Clause. Antibody and TCR CDR redesign
 on a fixed framework against an optional fixed antigen, with ligands and
 covalent polymer-ligand bonds in the representation.
 
-Staged for the Hap108or haptenated-pMHC campaign. `STATUS=planned` — the cu13
-GPU image has not been fetched and nothing has been generated. What *has* been
-established is below, each item with its date and its method.
+Staged for the Hap108or haptenated-pMHC campaign. **`STATUS=verified`** as of
+2026-11-18: the cu13 image is fetched and digest-verified, the 1.7 GB bundle is
+staged with its sha256 sidecars, and all five stages of `test.sh` pass on an
+RTX 5090 — including a real 60-step generation from the local bundle with the
+network off, which brought the sotorasib adduct back on the peptide cysteine by
+its warhead atom at 1.591 Å against the deposited 1.765. Every item below
+carries its date and its method.
 
 ## Licence: BSD-3-Clause, weights included, not gated
 
@@ -205,22 +209,48 @@ Note where MOV's 73 atoms go: 41 heavy plus 32 hydrogens, which is where
 finding 1's "31 NaN hydrogens" come from. `add_missing_atoms` re-adds them off
 this template, one short because the covalent bond consumes it.
 
-## What is not established
+## Measured on the GPU, 2026-11-18
 
-- **`GPU_MAX_CC` and `GPU_TESTED` are empty.** Fill from
-  `torch._C._cuda_getArchFlags()` inside the built cu13 image, not from
-  `torch.cuda.get_arch_list()` — the `rfdiffusion3` entry records one image
-  answering the latter with an empty list while the former was correct.
-- **Peak GPU memory.** Upstream declines to state it. The campaign's full system
-  is ~656 tokens (615 residues + 41 ligand atoms) against 32 GB on an RTX 5090.
-- **Whether the model honours either condition.** This stage proves the two
-  compose in one *input*. Upstream says its conditions are soft — "not hard
-  output constraints, check adherence when exclusions matter" — so whether the
-  hapten comes back on the declared residue is a different question, answered
-  only by coordinates. `test.sh` stage 4 asks it.
-- **Whether the hapten's atoms appear in the output at all.** The generated
-  array merges atom37 for indexed tokens with preserved unindexed atoms; that an
-  atomized non-polymer survives is not established from reading the code.
+Everything in this section was open until the image ran. RTX 5090 (sm_120),
+driver 595.99.02, Apptainer 1.4.5, torch 2.14.1+cu130 against CUDA 13.0.
+
+- **`GPU_MAX_CC=12.0`**, from `torch._C._cuda_getArchFlags()` inside the image:
+  `sm_75 sm_80 sm_86 sm_90 sm_100 sm_120`. The cu13 wheel set does carry
+  sm_120. `GPU_TESTED=nvidia_geforce_rtx_5090`.
+- **Peak GPU memory ≈ 7.8 GB** for the campaign's full system — 10.5 GB
+  sampled at 2 Hz against a 2.8 GB desktop baseline on this host. Comfortable
+  against 32 GB, and upstream still states nothing.
+- **86–88 s per draw**, measured over five draws of the full ~656-token system
+  at 60 steps, `bf16-mixed`, eager (`compile_lengths=null`), start to published
+  structure. Consistent to under two seconds.
+- **The model honours both conditions.** The hapten came back on the declared
+  cysteine by its warhead atom in every draw: 1.591 Å on the test crop with
+  torch.compile buckets, and 1.182 / 1.168 / 1.213 Å on the campaign's own
+  input with compilation off. The warhead is the *closest* ligand atom to the
+  sulfur in each (next nearest 2.90 Å), and the decoy sits at 14.3 Å. Sequence
+  conditioning is honoured too: on a real design round every substitution fell
+  inside the two CDR3 spans the request opened, 21 of them, none anywhere else.
+- **The hapten's atoms do appear in the output**: 72 MOV atoms against 41 heavy
+  in the input, which is the 41 plus `add_missing_atoms`' 31 hydrogens.
+- **`compile_lengths` changes the numbers.** The same input at seed 1 gave a
+  1.591 Å bond with upstream's bucket list and 1.166 Å with compilation
+  disabled, each reproducible. Treat it as part of a run's identity, not as a
+  throughput knob.
+- **A resolved seed names a draw exactly.** Two runs at seed 1 produced
+  byte-identical output but for `_entry.time`; seed 2 produced different CDR3
+  sequences. That holds at the default `torch_deterministic: false`, and it is
+  worth knowing that two identical draws still *hash* differently, because the
+  tool stamps a wall-clock time into the CIF it writes.
+
+## What is still not established
+
+- **The bond length.** Every draw placed the adduct correctly and compressed
+  the S–C distance to ~1.17–1.21 Å, against 1.765 Å in the deposited entry and
+  a 1.45–2.30 Å band across the five covalent predictors this campaign drives.
+  Placement is honoured; geometry is not, and whatever reads these designs has
+  to treat the bond length as a flag rather than as a measurement of chemistry.
+- **Anything about a device other than this one.** `GPU_TESTED` names one class
+  and anything else is unevidenced.
 
 ## Staging
 

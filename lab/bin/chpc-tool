@@ -90,7 +90,15 @@ fi
 # built locally from a .def leaves it empty rather than hashing its own output,
 # because a digest of one host's copy says nothing about what anyone else runs.
 # Empty is therefore the ordinary value and is not a defect.
-_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE DIGEST GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC GPU_TESTED"
+# UPSTREAM_IMAGE is the artefact's name WHERE IT IS PUBLISHED, when an entry
+# fetches a prebuilt image rather than building one. IMAGE stays this registry's
+# own filename -- `<tool>_<version>[_variant].sif`, which every entry follows and
+# which is what `exec` and the SIF_* exports resolve -- and the two are not the
+# same string. Measured 2026-11-18: a fetch built from IMAGE requested
+# `runtime/rfd4_proteina_0.0.3_cu13.sif` and got a 404, because upstream
+# publishes `runtime/rfd4-proteina-cu13-amd64.sif`. Empty for every entry built
+# here from a .def, which is all but one of them.
+_FIELDS="NAME VERSION KIND STATUS LICENSE UPSTREAM UPSTREAM_REF IMAGE UPSTREAM_IMAGE DIGEST GPU APPDIR ENTRY PREFIX ENV_YML SUFFIX ENV_NAME MODULE NOTE WRITABLE_TMPFS GPU_MAX_CC GPU_TESTED"
 
 # Helpers a tool.conf may call from tool_exports / tool_doctor.
 # Where an image would live, in each of the two places it can live.

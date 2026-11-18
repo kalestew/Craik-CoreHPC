@@ -101,6 +101,15 @@ fetch_image() {
   [ -n "${DIGEST:-}" ] || { echo "this entry records no DIGEST -- refusing to fetch an unverifiable image" >&2; return 1; }
   command -v curl >/dev/null 2>&1 || { echo "no curl on this host" >&2; return 1; }
 
+  # UPSTREAM_IMAGE and not IMAGE. This asked for `runtime/$IMAGE` until
+  # 2026-11-18 and got a 404 on the first real fetch: IMAGE is this registry's
+  # own filename and upstream publishes its own. The entry declares the mapping;
+  # guessing it here would be guessing about somebody else's convention.
+  [ -n "${UPSTREAM_IMAGE:-}" ] || {
+    echo "this entry records no UPSTREAM_IMAGE, so there is no published name to fetch." >&2
+    echo "  IMAGE is the local filename and is not a path on the hub." >&2
+    return 1; }
+
   want=${DIGEST#sha256:}
   case "$DIGEST" in
     sha256:*) ;;
@@ -118,8 +127,8 @@ fetch_image() {
   if [ -s "$out" ]; then
     echo "image:    already at $out -- verifying rather than refetching"
   else
-    url="https://huggingface.co/$HF_REPO/resolve/$IMAGE_REV/runtime/$IMAGE"
-    echo "image:    fetching $IMAGE (4.04 GB, resumable)"
+    url="https://huggingface.co/$HF_REPO/resolve/$IMAGE_REV/runtime/$UPSTREAM_IMAGE"
+    echo "image:    fetching $UPSTREAM_IMAGE as $IMAGE (4.04 GB, resumable)"
     echo "          $url"
     curl -fL --retry 10 --retry-delay 5 --retry-all-errors -C - -o "$out.part" "$url"
     mv "$out.part" "$out"

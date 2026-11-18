@@ -472,17 +472,33 @@ fi
 # ============================================================================
 # 3. A real generation
 # ============================================================================
-# `inference_experiment=quickstart` is upstream's own first-run preset and is
-# the right shape here for a reason worth stating: it does NOT compose the
-# `metrics` group at all, so no refolding oracle and no metric dependency is
-# reachable. The consuming project rules out AlphaFold2/AlphaFold3/OpenFold3 as
-# a second scoring path outside its own objective versioning, and this is that
-# exclusion enforced by config rather than remembered.
+# CORRECTED 2026-11-18, on the first run that reached this stage.
+# `inference_experiment=quickstart` does not exist in this release and never
+# did: hydra refused with "Could not find 'inference_experiment/quickstart'"
+# and listed the seven that do -- TEMPLATE, inference_beam_example,
+# inference_beam_regression, inference_on_user_inputs, inference_on_val_set,
+# ppi_novelty_of3_search, sm_binder_hbond_search. The one that takes a path or
+# a directory of CIFs is `inference_on_user_inputs`, and it is already
+# inference.yaml's own default; it is named here anyway, because a default is
+# a fact about this release and the record should say what was asked for.
+#
+# IT COMPOSES `metrics: all_metrics`, AND `all_metrics` COMPOSES
+# `refolding_oracles: af3`. The claim this comment used to make -- that the
+# preset composes no metrics group, so no oracle is reachable -- was wrong in
+# both halves, and the mechanism it was relied on to enforce was the opposite
+# of what it does. `~metrics.refolding_oracles` is what removes it, measured:
+# with the override the composed config mentions af3, alphafold, openfold and
+# of3 zero times; without it the oracle is composed before a single design is
+# sampled. The non-oracle metrics stay, which is deliberate -- removing the
+# whole group also deletes every oracle-free reward metric and leaves beam
+# search with no reward model.
 #
 # `metrics_tags=[antibody]` would SILENTLY ENABLE ALPHAFOLD-3: the antibody tag
 # gates both inline_metrics/antibody_metrics.yaml's antibody_contacts and
-# refolding_oracles/af3.yaml's oracle_ppi. quickstart leaves metrics_tags empty
-# and this test never sets it.
+# refolding_oracles/af3.yaml's oracle_ppi. inference.yaml leaves metrics_tags
+# empty and this test never sets it -- which is the second guard, not the
+# first: the oracle is removed from the composition above, so the tag has
+# nothing to gate.
 #
 # skip_existing=false is NOT tidiness. It defaults TRUE, and generate.py:548
 # routes existing outputs to an eval-from-disk path -- so a re-run into a
@@ -491,7 +507,8 @@ fi
 # one covers a stale structure, the other a stale results CSV.
 rm -rf gen
 if ! "$CHPC_TOOL" exec rfd4-proteina -- rfd4-generate \
-        inference_experiment=quickstart \
+        inference_experiment=inference_on_user_inputs \
+        '~metrics.refolding_oracles' \
         inputs="$PWD/cropped.cif" \
         out_dir="$PWD/gen" \
         hf_ckpt_path="$RFD4_BUNDLE" \
@@ -505,14 +522,33 @@ then
     echo "generation failed:" >&2; tail -40 gen.log >&2; exit 1
 fi
 
-# `cfg.seed = base_seed + job_id` (generate.py:640) with job_id defaulting to 0,
-# so a declared seed of 1 must appear as 1. Asserted because this is the
-# property a reproducible draw rests on, and the consuming project plans one
-# draw per invocation precisely so that the resolved seed and the identity agree.
-grep -q "Seeding everything to seed 1" gen.log || {
-    echo "the resolved seed is not 1 -- base_seed + job_id did not behave as read:" >&2
-    grep -n "seed" gen.log | head -5 >&2; exit 1; }
-echo "    resolved seed: 1 (base 1 + job_id 0)"
+# `cfg.seed = base_seed + job_id` (generate.py:640) with job_id unset, so a
+# declared seed of 1 must come back as 1. Asserted because this is the property
+# a reproducible draw rests on, and the consuming project plans one draw per
+# invocation precisely so that the resolved seed and the identity agree.
+#
+# READ FROM THE TOOL'S OWN RECORD, not from the log. generate.py:641 does log
+# "Seeding everything to seed N", and on this release that line reaches
+# NOTHING: with `verbose: false` the only INFO line appearing in either the
+# captured output or hydra's own generate.log is "Generation complete". Measured
+# 2026-11-18, which is also how this assertion came to fail on a run whose
+# generation had succeeded. `inference_metrics/per_example_metrics.csv` carries
+# a `seed` column per example, which is the resolved value as the tool wrote it
+# down -- better evidence than a log string, because it is what the tool
+# believes it did rather than what it announced on the way in.
+_csv=gen/inference_metrics/per_example_metrics.csv
+[ -f "$_csv" ] || { echo "no $_csv -- the run produced no metrics record" >&2; exit 1; }
+_seed=$("$CHPC_TOOL" exec rfd4-proteina -- python - "$_csv" 2>/dev/null <<'SEED'
+import csv, sys
+with open(sys.argv[1]) as handle:
+    print(int(float(next(csv.DictReader(handle))["seed"])))
+SEED
+)
+[ "$_seed" = "1" ] || {
+    echo "the tool recorded seed $_seed and 1 was declared: base_seed + job_id did" >&2
+    echo "  not behave as read, so a resolved seed does not name this draw." >&2
+    exit 1; }
+echo "    resolved seed: 1, from the tool's own per_example_metrics.csv"
 
 OUT=$(find gen/inference_samples -name '*_generated.cif' | head -1)
 [ -n "$OUT" ] || {
