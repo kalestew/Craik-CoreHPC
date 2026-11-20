@@ -191,8 +191,13 @@ else
   fi
   cat >> "$HOME/.ssh/config" <<EOF
 
-Host chpc-bastion chpc-bastion2 chpc
+# UseKeychain (below) exists only in Apple's ssh. This block lets every other
+# ssh skip it, and it has to match ALL hosts, not only chpc: keep it above the
+# CoreHPC entries. Why is in Craik-CoreHPC ssh/config.example.
+Host *
   IgnoreUnknown UseKeychain
+
+Host chpc-bastion chpc-bastion2 chpc
   User $CHPC_LOGIN
   IdentityFile ~/.ssh/chpc
   AddKeysToAgent yes
@@ -226,7 +231,23 @@ ssh -G chpc | grep -E '^(hostname|user|identityfile|proxyjump) '
 Expect `hostname chpc-ucsf-login-vm1`, your campus username, the `chpc` key,
 and `proxyjump chpc-bastion`. If an earlier `Host *` entry sets a different
 username, move the CoreHPC blocks above that general entry using
-`nano ~/.ssh/config` (Control-O, Return to save; Control-X to close).
+`nano ~/.ssh/config` (Control-O, Return to save; Control-X to close), and move
+the two `Host *` / `IgnoreUnknown UseKeychain` lines with them, still on top.
+
+Then check that every *other* host still loads. ssh reads the whole file
+whichever host you name, so a mistake in the CoreHPC entries can break
+connections that have nothing to do with CoreHPC, `git push` included. The
+name here does not have to be a host you use, and nothing connects:
+
+```bash
+ssh -G github.com > /dev/null && echo 'other hosts still load'
+```
+
+If it prints `Bad configuration option: usekeychain` instead, the `Host *` and
+`IgnoreUnknown UseKeychain` lines are missing or sit below the CoreHPC entries.
+This is invisible on a Mac, whose ssh knows the option, and fatal on Linux.
+If your config already had an `IgnoreUnknown` line of its own, add
+`UseKeychain` to that line's comma-separated list: only the first one counts.
 
 ### 3. Install the public key on both hosts
 
@@ -244,6 +265,17 @@ cat "$HOME/.ssh/chpc.pub" | ssh chpc 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat
 
 Enter your password, key passphrase and/or Duo response when requested.
 If either command reports an error, stop and resolve it before continuing.
+
+**The fallback bastion is a third home directory.** `chpc-bastion2` shares
+nothing with `chpc-bastion`: a key installed by the two commands above is
+refused there (measured 2026-11-20, "Permission denied (publickey,…)"), so
+`ssh chpc-bastion2` asks for your password until the key is installed on it
+too. Do it now rather than on the day vm1 is down:
+
+```bash
+cat "$HOME/.ssh/chpc.pub" | ssh chpc-bastion2 'mkdir -p ~/.ssh && chmod 700 ~/.ssh && cat >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys'
+```
+
 Then test twice:
 
 ```bash

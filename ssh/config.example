@@ -1,6 +1,6 @@
 # ~/.ssh/config — UCSF CoreHPC
 # Replace <campus-username> with your short campus login. docs/01 appends
-# this same block for you, with the username filled in.
+# these same blocks for you, with the username filled in.
 #
 # Prime once per session (after VPN is up):   ssh chpc hostname   -> answer Duo
 # Then every ssh and VS Code connection to "chpc" reuses the master sockets
@@ -8,8 +8,24 @@
 # (scripts/chpc-globus.sh, docs/02).
 # Stale sockets after a VPN drop:  ssh -O exit chpc-bastion ; ssh -O exit chpc
 
-Host chpc-bastion chpc-bastion2 chpc
+# UseKeychain (below) exists only in Apple's ssh. This block makes every other
+# ssh skip it instead of refusing to start, and it MUST match every host -- so
+# it is its own `Host *` block, ahead of the first UseKeychain.
+#
+# Until 2026-11-20 the IgnoreUnknown line sat inside the chpc block. ssh reads
+# the whole file whichever host you name, but takes IgnoreUnknown only from a
+# block that matches that host. So on Linux the chpc aliases worked and every
+# OTHER host -- git remotes included -- died with
+#     Bad configuration option: usekeychain
+# Reproduced on OpenSSH 10.2 (Ubuntu); Apple's ssh knows the option and never
+# showed it. tests/test_ssh_config_example.py holds the rule.
+#
+# Only the FIRST IgnoreUnknown that applies to a host counts. If your config
+# already has one, add UseKeychain to its list instead of relying on this one.
+Host *
   IgnoreUnknown UseKeychain
+
+Host chpc-bastion chpc-bastion2 chpc
   User <campus-username>
   IdentityFile ~/.ssh/chpc
   AddKeysToAgent yes
@@ -24,7 +40,8 @@ Host chpc-bastion
   HostName chpc-ucsf-bastion-vm1.corehpc.ucsf.edu
 
 # Fallback if bastion vm1 is down: ssh chpc-bastion2, or point chpc's
-# ProxyJump here temporarily.
+# ProxyJump here temporarily. It is a THIRD home directory: until the public
+# key is installed there as well (docs/01, step 3) it asks for your password.
 Host chpc-bastion2
   HostName chpc-ucsf-bastion-vm2.corehpc.ucsf.edu
 
