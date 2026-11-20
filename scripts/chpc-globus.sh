@@ -253,6 +253,14 @@ CHPC_GLOBUS_STAGING_LOCAL=${CHPC_GLOBUS_STAGING_LOCAL:-<unset; optional>}
 EOF
 }
 
+# The command the globus CLI itself names when it refuses something: the first
+# non-blank line after its "Please run:". Prints nothing when it names none.
+# A here-string rather than a pipe, so awk leaving early cannot trip pipefail.
+globus_remedy() {
+  awk 'seen && NF { sub(/^[[:space:]]+/, ""); sub(/[[:space:]]+$/, ""); print; exit }
+       /^Please run:/ { seen = 1 }' <<<"$1"
+}
+
 # Every question this script's failure modes turn on, asked in the order that
 # costs least, and each one answered from an observation rather than a setting.
 cmd_doctor() {
@@ -304,11 +312,34 @@ cmd_doctor() {
     say local_staging info "unset; direct project transfers do not need a staging folder"
   fi
 
-  if "$GLOBUS" ls "$CHPC_GLOBUS_SCRATCH_COLLECTION:/" >/dev/null 2>&1; then
+  # Keep the CLI's own words here too, as check_local_access does. Two different
+  # things stop this listing and they need different commands:
+  #   a data_access consent    every new CLI install grants it once
+  #                            (globus session consent '...data_access]')
+  #   an aged-out session      the collection wants a recent UCSF sign-in
+  #                            (globus session update ucsf.edu)
+  # The CLI names the one it wants under "Please run:", so that is what is
+  # relayed, and its whole message goes to stderr so nothing is lost.
+  #
+  # Until 2026-11-20 this line printed `globus login --gcs <collection>` for
+  # every failure. That is the remedy for neither: given a collection id it
+  # requests manage_collections on that id (read off the authorize URL it
+  # builds, CLI 3.41.0) -- not the data_access a transfer needs -- and it does
+  # nothing for a session. Both real refusals were met that day: the consent
+  # on a fresh install, the session on a machine last used a month earlier.
+  local scratch_message scratch_remedy
+  if scratch_message=$("$GLOBUS" ls "$CHPC_GLOBUS_SCRATCH_COLLECTION:/" 2>&1); then
     say cluster_collection ok "User Scratch lists; '/' there is $CHPC_GLOBUS_SCRATCH_ROOT"
   else
-    say cluster_collection fail "cannot list $CHPC_GLOBUS_SCRATCH_COLLECTION. Consent once:
-                       globus login --gcs $CHPC_GLOBUS_SCRATCH_COLLECTION"
+    printf '%s\n' "$scratch_message" >&2
+    scratch_remedy=$(globus_remedy "$scratch_message")
+    if [ -n "$scratch_remedy" ]; then
+      say cluster_collection fail "cannot list $CHPC_GLOBUS_SCRATCH_COLLECTION. The globus CLI asks for:
+                       $scratch_remedy"
+    else
+      say cluster_collection fail "cannot list $CHPC_GLOBUS_SCRATCH_COLLECTION, and the globus CLI named
+                       no command to fix it. Its error is printed above."
+    fi
   fi
 
   # Only meaningful off-cluster, and only for the FAC leg.

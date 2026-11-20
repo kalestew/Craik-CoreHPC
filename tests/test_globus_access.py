@@ -18,6 +18,42 @@ REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts/chpc-globus.sh"
 LOCAL = "00000000-0000-0000-0000-000000000000"
 SCRATCH = "/mnt/scratch/user/testuser"
+SCRATCH_ID = "11111111-1111-1111-1111-111111111111"
+
+# What the globus CLI printed for the two refusals a User Scratch listing met on
+# 2026-11-20, word for word apart from the collection id: 3.44.0 on a fresh
+# install that had never consented, 3.41.0 on a machine whose session had aged
+# out. They need different commands, and the CLI names each under "Please run:".
+CONSENT_COMMAND = (
+    "globus session consent 'urn:globus:auth:scope:transfer.api.globus.org:all"
+    f"[*https://auth.globus.org/scopes/{SCRATCH_ID}/data_access]'"
+)
+CONSENT_REFUSAL = (
+    "The collection you are trying to access data on requires you to grant consent"
+    " for the Globus CLI to access it.\n"
+    "\n"
+    "Please run:\n"
+    "\n"
+    f"  {CONSENT_COMMAND}\n"
+    "\n"
+    "to login with the required scopes."
+)
+SESSION_REFUSAL = (
+    "The resource you are trying to access requires you to re-authenticate.\n"
+    "message: Session reauthentication required (Globus Transfer)\n"
+    "\n"
+    "Please run:\n"
+    "\n"
+    "    globus session update ucsf.edu\n"
+    "\n"
+    "to re-authenticate with the required identities."
+)
+# Not a capture: any failure in which the CLI names no command to run.
+UNNAMED_REFUSAL = (
+    "Globus CLI Error: A Transfer API Error Occurred.\n"
+    "HTTP status:      502\n"
+    "code:             ExternalError.DirListingFailed.GCDisconnected"
+)
 
 
 class LocalAccess(unittest.TestCase):
@@ -40,6 +76,10 @@ with open(os.environ["CALL_LOG"], "a") as log:
 if args[0] == "ls":
     if os.environ.get("DENY_PATH") == args[1]:
         print("ExternalError: Path not allowed: local accessible folders reject this path", file=sys.stderr)
+        sys.exit(1)
+    refusal = os.environ.get("SCRATCH_REFUSAL")
+    if refusal and args[1].startswith(os.environ["CHPC_GLOBUS_SCRATCH_COLLECTION"] + ":"):
+        print(refusal, file=sys.stderr)
         sys.exit(1)
 elif args[0] == "stat": print(os.environ.get("SOURCE_TYPE", "dir"))
 elif args[0] == "whoami": print("lab-user@example.edu")
@@ -157,6 +197,39 @@ sys.exit(0)
         self.assertEqual(done.returncode, 1)
         self.assertIn("Path not allowed", done.stderr)
         self.assertRegex(done.stdout, r"local_project\s+fail")
+
+    def scratch_refusal(self, text: str) -> subprocess.CompletedProcess[str]:
+        return self.invoke("doctor", CHPC_GLOBUS_SCRATCH_COLLECTION=SCRATCH_ID, SCRATCH_REFUSAL=text)
+
+    def test_doctor_relays_the_consent_command_the_cli_names(self) -> None:
+        done = self.scratch_refusal(CONSENT_REFUSAL)
+        self.assertEqual(done.returncode, 1)
+        self.assertRegex(done.stdout, r"cluster_collection\s+fail")
+        self.assertIn(CONSENT_COMMAND, done.stdout)
+        self.assertIn("requires you to grant consent", done.stderr)
+        # `globus login --gcs <collection>` requests manage_collections on the
+        # collection id, which is not the data_access a transfer needs.
+        self.assertNotIn("login --gcs", done.stdout + done.stderr)
+
+    def test_doctor_relays_session_update_for_an_aged_out_session(self) -> None:
+        done = self.scratch_refusal(SESSION_REFUSAL)
+        self.assertEqual(done.returncode, 1)
+        self.assertRegex(done.stdout, r"cluster_collection\s+fail")
+        self.assertIn("globus session update ucsf.edu", done.stdout)
+        self.assertIn("Session reauthentication required", done.stderr)
+        # An aged-out session is not a missing consent; it must not be told to consent.
+        self.assertNotIn("session consent", done.stdout)
+        self.assertNotIn("login --gcs", done.stdout + done.stderr)
+
+    def test_doctor_keeps_a_scratch_error_that_names_no_command(self) -> None:
+        done = self.scratch_refusal(UNNAMED_REFUSAL)
+        self.assertEqual(done.returncode, 1)
+        self.assertRegex(done.stdout, r"cluster_collection\s+fail")
+        self.assertIn("named", done.stdout)
+        self.assertIn("GCDisconnected", done.stderr)
+        self.assertNotIn("login --gcs", done.stdout + done.stderr)
+        # One failed line does not end the report: the SSH line still prints.
+        self.assertRegex(done.stdout, r"ssh_session\s+ok")
 
     def test_dry_run_makes_no_service_or_ssh_calls(self) -> None:
         done = self.invoke("push", str(self.project), f"{SCRATCH}/project", "--dry-run", "--wait", "0")

@@ -236,13 +236,34 @@ Globus transfer to/from user scratch needs no SSH session. A successful
 listing confirms read access, **not** Globus write permission; the destination
 must also be marked Writable before pulling results.
 
-If User Scratch requests consent, paste this, follow its browser prompts, and
-repeat the check:
+If the `cluster_collection` line fails, it prints the command the Globus CLI
+itself asked for. Paste **that** command, follow its browser prompts, and repeat
+the check. It will be one of two, and they fix different things:
 
 ```bash
-globus login --gcs "$CHPC_GLOBUS_SCRATCH_COLLECTION"
+# A CLI install that has never used User Scratch: grant it data access, once.
+globus session consent "urn:globus:auth:scope:transfer.api.globus.org:all[*https://auth.globus.org/scopes/$CHPC_GLOBUS_SCRATCH_COLLECTION/data_access]"
+```
+
+```bash
+# A sign-in that has aged out: the collection wants a recent UCSF login.
+globus session update ucsf.edu
+```
+
+Then:
+
+```bash
 chpc-globus.sh doctor "$CHPC_PROJECT"
 ```
+
+A new machine usually needs the first; a machine that has not transferred for
+a while needs the second. Each machine has its own CLI login, so consenting on
+your laptop does nothing for a workstation.
+
+`globus login --gcs "$CHPC_GLOBUS_SCRATCH_COLLECTION"`, which this page and
+`doctor` recommended until 2026-11-20, is neither. Given a collection id it
+asks for permission to *manage* that collection, which a transfer never uses,
+and it leaves both problems above in place.
 
 **Access permissions and path mapping are different.** For normal Mac GCP, a
 folder such as `/Users/yourname/projects/Craik-CoreHPC` has that same absolute
@@ -425,9 +446,13 @@ pipelines that ask for it; setting it copies nothing and grants no access.
   around symlinks could select a different file.
 - **Push works, pull fails:** enable Writable for the local destination and
   check your macOS user can write there too. Listing alone cannot prove this.
-- **Scratch consent error:** run the `globus login --gcs` command in step 3.
-  Do not use `--gcs` with your personal collection; its authentication model
-  differs from the cluster's mapped collection.
+- **User Scratch cannot be listed:** `doctor` relays the command the Globus CLI
+  named; run exactly that. `globus session consent '…data_access…'` is the
+  one-time grant for a new CLI install, and `globus session update ucsf.edu`
+  renews a sign-in that has aged out (step 3 shows both in full). Neither is
+  `globus login --gcs`, and none of the three applies to your personal
+  collection, whose authentication model differs from the cluster's mapped
+  collection.
 - **FAC copy needs SSH:** run `chpc-prime.sh` in your laptop terminal. See
   [access and SSH setup](01-access-and-ssh.md) if the alias is not configured.
 - **A transfer is still active:** use `globus task show TASK_ID`. A disconnected
